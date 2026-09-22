@@ -3,6 +3,7 @@ import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
 
 export const useCatalog = () => {
   const supabase = useSupabaseClient<Database>() as any
+  const { locale } = useI18n()
 
   const publicImageUrl = (storagePath: string) => {
     if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath
@@ -10,12 +11,12 @@ export const useCatalog = () => {
   }
 
   const mapProduct = (product: any): CatalogProduct => {
-    const translation = product.product_translations?.find((item: any) => item.locale === 'en') || product.product_translations?.[0]
+    const translation = product.product_translations?.find((item: any) => item.locale === locale.value) || product.product_translations?.find((item: any) => item.locale === 'en') || product.product_translations?.[0]
     const category = product.categories
     return {
       id: product.id,
       categoryId: product.category_id,
-      categoryName: category?.category_translations?.find((item: any) => item.locale === 'en')?.name || category?.slug || 'Uncategorized',
+      categoryName: category?.category_translations?.find((item: any) => item.locale === locale.value)?.name || category?.category_translations?.find((item: any) => item.locale === 'en')?.name || category?.slug || 'Uncategorized',
       slug: product.slug,
       sku: product.sku,
       price: Number(product.price),
@@ -47,7 +48,7 @@ export const useCatalog = () => {
   const fetchCategories = async (): Promise<CatalogCategory[]> => {
     const { data, error } = await supabase.from('categories').select('id, slug, category_translations(id, locale, name)').eq('is_active', true).order('sort_order')
     if (error) throw error
-    return (data || []).map((category: any) => ({ id: category.id, name: category.category_translations?.find((item: any) => item.locale === 'en')?.name || category.slug }))
+    return (data || []).map((category: any) => ({ id: category.id, name: category.category_translations?.find((item: any) => item.locale === locale.value)?.name || category.category_translations?.find((item: any) => item.locale === 'en')?.name || category.slug }))
   }
 
   return { fetchProducts, fetchProduct, fetchCategories }

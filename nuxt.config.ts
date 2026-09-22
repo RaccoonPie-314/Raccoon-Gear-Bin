@@ -41,7 +41,7 @@ export default defineNuxtConfig({
     ],
     defaultLocale: 'en',
     strategy: 'prefix_except_default',
-    vueI18n: '~/i18n.config.ts',
+    vueI18n: '../i18n.config.ts',
     detectBrowserLanguage: {
       useCookie: true,
       cookieKey: 'raccoon-gear-bin-locale',
