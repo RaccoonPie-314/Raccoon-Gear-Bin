@@ -2,7 +2,21 @@
 @import "@nuxt/ui";
 
 @theme static {
-  --font-sans: 'Public Sans', sans-serif;
+  --font-sans: 'Public Sans', 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Public Sans', 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
 }
 
 body {
@@ -16,4 +30,15 @@ body {
 
 .dark body {
   background: #09090b;
+}
+
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
