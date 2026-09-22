@@ -4,15 +4,29 @@ export const useAdminAuth = () => {
   const supabase = useSupabaseClient<Database>()
   const user = useSupabaseUser()
 
+  const getCurrentUser = async () => {
+    if (user.value) {
+      return user.value
+    }
+
+    const { data, error } = await supabase.auth.getUser()
+    if (error) {
+      return null
+    }
+
+    return data.user
+  }
+
   const isAdmin = async () => {
-    if (!user.value) {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) {
       return false
     }
 
     const { data, error } = await supabase
       .from('admin_users')
       .select('role')
-      .eq('user_id', user.value.id)
+      .eq('user_id', currentUser.id)
       .maybeSingle()
 
     if (error) {
@@ -24,14 +38,15 @@ export const useAdminAuth = () => {
   }
 
   const isSuperAdmin = async () => {
-    if (!user.value) {
+    const currentUser = await getCurrentUser()
+    if (!currentUser) {
       return false
     }
 
     const { data, error } = await supabase
       .from('admin_users')
       .select('role')
-      .eq('user_id', user.value.id)
+      .eq('user_id', currentUser.id)
       .maybeSingle()
 
     if (error) {
