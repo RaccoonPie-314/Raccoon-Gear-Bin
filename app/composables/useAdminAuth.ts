@@ -5,16 +5,12 @@ export const useAdminAuth = () => {
   const user = useSupabaseUser()
 
   const getCurrentUser = async () => {
-    if (user.value) {
-      return user.value
-    }
-
     const { data, error } = await supabase.auth.getUser()
-    if (error) {
-      return null
+    if (!error && data.user?.id) {
+      return data.user
     }
 
-    return data.user
+    return user.value?.id ? user.value : null
   }
 
   const isAdmin = async () => {
