@@ -57,12 +57,12 @@ useHead({ title: pageTitle })
 </script>
 
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-slate-100 px-6 py-12 dark:bg-slate-950">
-    <UCard class="w-full max-w-md border-0 shadow-2xl ring-1 ring-slate-200 dark:ring-slate-800">
+  <main class="flex min-h-screen items-center justify-center bg-zinc-100 px-6 py-12 dark:bg-zinc-950">
+    <UCard class="w-full max-w-md border-0 shadow-lg ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
       <template #header>
         <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.26em] text-cyan-600 dark:text-cyan-400">Admin access</p>
-          <h1 class="text-2xl font-black text-slate-900 dark:text-white">Sign in</h1>
+          <p class="text-xs font-semibold uppercase tracking-[0.26em] text-zinc-500">Admin access</p>
+          <h1 class="text-2xl font-black text-zinc-950 dark:text-white">Sign in</h1>
         </div>
       </template>
 
