@@ -61,6 +61,7 @@ useHead({ title: pageTitle })
     <UCard class="w-full max-w-md border-0 shadow-lg ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
       <template #header>
         <div class="space-y-2">
+          <BrandLogo />
           <p class="text-xs font-semibold uppercase tracking-[0.26em] text-zinc-500">Admin access</p>
           <h1 class="text-2xl font-black text-zinc-950 dark:text-white">Sign in</h1>
         </div>

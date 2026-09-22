@@ -23,7 +23,7 @@ useHead(() => ({ title: product.value ? `${product.value.name} | Raccoon Gear Bi
 
 <template>
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-    <header class="border-b border-zinc-200 dark:border-zinc-800"><UContainer class="flex min-h-20 items-center justify-between"><NuxtLink to="/" class="text-sm font-black uppercase tracking-[0.28em]">Raccoon Gear Bin</NuxtLink><NuxtLink to="/products" class="text-sm text-zinc-500">Back to products</NuxtLink></UContainer></header>
+    <header class="border-b border-zinc-200 dark:border-zinc-800"><UContainer class="flex min-h-20 items-center justify-between"><NuxtLink to="/" aria-label="Raccoon Gear Bin home"><BrandLogo compact /></NuxtLink><NuxtLink to="/products" class="text-sm text-zinc-500">Back to products</NuxtLink></UContainer></header>
     <UContainer class="py-12 sm:py-16">
       <div v-if="isLoading" class="grid gap-10 lg:grid-cols-2"><div class="aspect-square animate-pulse bg-zinc-100 dark:bg-zinc-900" /><div class="space-y-5"><div class="h-10 animate-pulse bg-zinc-100 dark:bg-zinc-900" /><div class="h-24 animate-pulse bg-zinc-100 dark:bg-zinc-900" /></div></div>
       <UAlert v-else-if="loadError" color="error" variant="soft" :title="loadError" />
