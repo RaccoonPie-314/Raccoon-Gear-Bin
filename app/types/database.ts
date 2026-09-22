@@ -73,3 +73,50 @@ export interface AdminUserRow {
   created_at: string
   updated_at: string
 }
+
+export interface Database {
+  public: {
+    Tables: {
+      categories: {
+        Row: CategoryRow
+        Insert: Partial<Omit<CategoryRow, 'id' | 'created_at' | 'updated_at'>> & Pick<CategoryRow, 'slug'>
+        Update: Partial<Omit<CategoryRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      category_translations: {
+        Row: CategoryTranslationRow
+        Insert: Partial<Omit<CategoryTranslationRow, 'id' | 'created_at' | 'updated_at'>> & Pick<CategoryTranslationRow, 'category_id' | 'locale' | 'name'>
+        Update: Partial<Omit<CategoryTranslationRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      products: {
+        Row: ProductRow
+        Insert: Partial<Omit<ProductRow, 'id' | 'created_at' | 'updated_at'>> & Pick<ProductRow, 'category_id' | 'slug' | 'sku' | 'price'>
+        Update: Partial<Omit<ProductRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      product_translations: {
+        Row: ProductTranslationRow
+        Insert: Partial<Omit<ProductTranslationRow, 'id' | 'created_at' | 'updated_at'>> & Pick<ProductTranslationRow, 'product_id' | 'locale' | 'name' | 'short_description' | 'description'>
+        Update: Partial<Omit<ProductTranslationRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      product_images: {
+        Row: ProductImageRow
+        Insert: Partial<Omit<ProductImageRow, 'id' | 'created_at' | 'updated_at'>> & Pick<ProductImageRow, 'product_id' | 'storage_path'>
+        Update: Partial<Omit<ProductImageRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      admin_users: {
+        Row: AdminUserRow
+        Insert: Partial<Omit<AdminUserRow, 'id' | 'created_at' | 'updated_at'>> & Pick<AdminUserRow, 'user_id'>
+        Update: Partial<Omit<AdminUserRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+    }
+    Views: Record<string, never>
+    Functions: Record<string, never>
+    Enums: Record<string, never>
+    CompositeTypes: Record<string, never>
+  }
+}

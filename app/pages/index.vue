@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Json } from '~/types/database'
+import type { Database, Json } from '~/types/database'
 
 type CatalogProduct = {
   id: string
@@ -33,7 +33,7 @@ type EditorForm = {
   imagePaths: string
 }
 
-const supabase = useSupabaseClient()
+const supabase = useSupabaseClient<Database>() as any
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
 
@@ -73,7 +73,7 @@ const publicImageUrl = (storagePath: string) => {
 const parseSpecifications = (value: string): Json => {
   if (!value.trim()) return []
   try { return JSON.parse(value) } catch {
-    return value.split('\n').filter(Boolean).map((line) => { const [label, ...rest] = line.split(':'); return { label: label.trim(), value: rest.join(':').trim() } })
+    return value.split('\n').filter(Boolean).map((line) => { const [label = '', ...rest] = line.split(':'); return { label: label.trim(), value: rest.join(':').trim() } })
   }
 }
 
@@ -147,6 +147,7 @@ const saveProduct = async () => {
       const { error: translationError } = await supabase.from('product_translations').insert({ product_id: productId, locale: 'en', name: editorForm.value.name.trim(), short_description: editorForm.value.shortDescription.trim(), description: editorForm.value.description.trim(), specifications: parseSpecifications(editorForm.value.specifications) })
       if (translationError) throw translationError
     }
+    if (!productId) throw new Error('The product could not be identified after saving.')
     const imagePaths = editorForm.value.imagePaths.split('\n').map((path) => path.trim()).filter(Boolean)
     for (const file of imageFiles.value) {
       const storagePath = `products/${productId}/${crypto.randomUUID()}-${file.name}`
