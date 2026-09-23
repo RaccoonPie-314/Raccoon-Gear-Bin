@@ -93,11 +93,20 @@ const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
 // ==========================================
 // Mobile: Drag-to-Select
 // ==========================================
+const isTouchDragging = ref(false)
+const dragHighlightIndex = ref<number | null>(null)
 let isTouchDown = false
-let isTouchDragging = false
 let touchStartX = 0
 let touchStartY = 0
+let grabOffsetX = 0
 let dragJustFinished = false
+
+const isVisualActive = (item: ReturnType<typeof computedItems.value>[number], index: number) => {
+  if (isTouchDragging.value && dragHighlightIndex.value !== null) {
+    return index === dragHighlightIndex.value
+  }
+  return isItemActive(item)
+}
 
 const findMobileItemIndex = (clientX: number) => {
   if (!mobileItemRefs.value.length) return -1
@@ -132,6 +141,29 @@ const findMobileItemIndex = (clientX: number) => {
   return -1
 }
 
+const updateMobileDragPosition = (clientX: number) => {
+  if (!isTouchDragging.value || !mobileNavRef.value) return
+  const navEl = mobileNavRef.value
+  const navRect = navEl.getBoundingClientRect()
+  const rawLeft = clientX - navRect.left + navEl.scrollLeft - grabOffsetX
+  const minLeft = mobileItemRefs.value[0]?.offsetLeft ?? 0
+  const lastIndex = mobileItemRefs.value.length - 1
+  const maxLeft = mobileItemRefs.value[lastIndex]?.offsetLeft ?? 0
+  const clampedLeft = Math.max(minLeft, Math.min(maxLeft, rawLeft))
+
+  mobileIndicatorStyle.value.left = clampedLeft
+
+  const index = findMobileItemIndex(clientX)
+  if (index !== -1) {
+    dragHighlightIndex.value = index
+    const el = mobileItemRefs.value[index]
+    if (el) {
+      mobileIndicatorStyle.value.width = el.offsetWidth
+      mobileIndicatorStyle.value.height = el.offsetHeight
+    }
+  }
+}
+
 const handleTouchStart = (event: TouchEvent) => {
   if (event.touches.length !== 1) return
   const touch = event.touches[0]
@@ -139,7 +171,7 @@ const handleTouchStart = (event: TouchEvent) => {
   touchStartX = touch.clientX
   touchStartY = touch.clientY
   isTouchDown = true
-  isTouchDragging = false
+  isTouchDragging.value = false
 }
 
 const handleTouchMove = (event: TouchEvent) => {
@@ -150,39 +182,55 @@ const handleTouchMove = (event: TouchEvent) => {
   const dx = touch.clientX - touchStartX
   const dy = touch.clientY - touchStartY
 
-  if (!isTouchDragging) {
+  if (!isTouchDragging.value) {
     if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
-      isTouchDragging = true
+      isTouchDragging.value = true
+      const initialIndex = findMobileItemIndex(touchStartX)
+      if (initialIndex === activeIndex.value && mobileNavRef.value) {
+        const navRect = mobileNavRef.value.getBoundingClientRect()
+        grabOffsetX = touchStartX - navRect.left + mobileNavRef.value.scrollLeft - mobileIndicatorStyle.value.left
+      } else {
+        grabOffsetX = mobileIndicatorStyle.value.width / 2
+      }
     } else if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
       isTouchDown = false
       return
     }
   }
 
-  if (isTouchDragging) {
+  if (isTouchDragging.value) {
     if (event.cancelable) {
       event.preventDefault()
     }
-
-    const index = findMobileItemIndex(touch.clientX)
-    if (index !== -1 && index !== activeIndex.value) {
-      const targetItem = computedItems.value[index]
-      if (targetItem) {
-        emit('update:modelValue', targetItem.value)
-      }
-    }
+    updateMobileDragPosition(touch.clientX)
   }
 }
 
 const handleTouchEnd = () => {
-  if (isTouchDragging) {
+  if (isTouchDragging.value) {
     dragJustFinished = true
     setTimeout(() => {
       dragJustFinished = false
     }, 80)
+
+    const targetIndex = dragHighlightIndex.value !== null ? dragHighlightIndex.value : activeIndex.value
+    isTouchDragging.value = false
+    dragHighlightIndex.value = null
+
+    if (targetIndex !== -1) {
+      const targetItem = computedItems.value[targetIndex]
+      if (targetItem) {
+        emit('update:modelValue', targetItem.value)
+      }
+    }
+
+    nextTick(() => {
+      updateMobileIndicator()
+      scrollActiveMobileItemIntoView()
+    })
   }
   isTouchDown = false
-  isTouchDragging = false
+  isTouchDragging.value = false
 }
 
 // ==========================================
@@ -355,7 +403,9 @@ watch(computedItems, () => {
               width: `${mobileIndicatorStyle.width}px`,
               height: `${mobileIndicatorStyle.height}px`,
               opacity: mobileIndicatorStyle.opacity,
-              transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease'
+              transition: isTouchDragging
+                ? 'none'
+                : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease'
             }"
           />
 
@@ -369,7 +419,7 @@ watch(computedItems, () => {
             :aria-selected="isItemActive(item)"
             class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-xl transition-colors duration-200 select-none cursor-pointer z-10 bg-transparent shrink-0 focus-visible:outline-none"
             :class="[
-              isItemActive(item)
+              isVisualActive(item, index)
                 ? 'text-white dark:text-zinc-950 font-bold'
                 : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
             ]"

@@ -97,10 +97,20 @@ const desktopNavRef = ref<HTMLElement | null>(null)
 const desktopItemRefs = ref<(HTMLElement | null)[]>([])
 const mousePos = ref<{ x: number; y: number } | null>(null)
 
+const isDragging = ref(false)
+const dragHighlightIndex = ref<number | null>(null)
 let isMouseDown = false
-let isDragging = false
 let dragStartY = 0
+let grabOffsetY = 0
 let dragJustFinished = false
+let dragRafId: number | null = null
+
+const isVisualActive = (item: ReturnType<typeof computedItems.value>[number], index: number) => {
+  if (isDragging.value && dragHighlightIndex.value !== null) {
+    return index === dragHighlightIndex.value
+  }
+  return isItemActive(item)
+}
 
 const findDesktopItemIndex = (clientY: number) => {
   if (!desktopItemRefs.value.length) return -1
@@ -135,10 +145,32 @@ const findDesktopItemIndex = (clientY: number) => {
   return -1
 }
 
+const updateDragPosition = (clientY: number) => {
+  if (!isDragging.value || !desktopNavRef.value) return
+  const navRect = desktopNavRef.value.getBoundingClientRect()
+  const rawTop = clientY - navRect.top - grabOffsetY
+  const minTop = desktopItemRefs.value[0]?.offsetTop ?? 0
+  const lastIndex = desktopItemRefs.value.length - 1
+  const maxTop = desktopItemRefs.value[lastIndex]?.offsetTop ?? 0
+  const clampedTop = Math.max(minTop, Math.min(maxTop, rawTop))
+
+  desktopIndicatorStyle.value.top = clampedTop
+
+  const index = findDesktopItemIndex(clientY)
+  if (index !== -1) {
+    dragHighlightIndex.value = index
+    const el = desktopItemRefs.value[index]
+    if (el) {
+      desktopIndicatorStyle.value.width = el.offsetWidth
+      desktopIndicatorStyle.value.height = el.offsetHeight
+    }
+  }
+}
+
 const handleMouseDown = (event: MouseEvent) => {
   if (event.button !== 0) return
   isMouseDown = true
-  isDragging = false
+  isDragging.value = false
   dragStartY = event.clientY
 
   window.addEventListener('mousemove', handleWindowMouseMove)
@@ -150,27 +182,26 @@ const handleWindowMouseMove = (event: MouseEvent) => {
 
   if (!isMouseDown) return
 
-  if (!isDragging) {
+  if (!isDragging.value) {
     if (Math.abs(event.clientY - dragStartY) > 4) {
-      isDragging = true
+      isDragging.value = true
+      const initialItemIndex = findDesktopItemIndex(dragStartY)
+      if (initialItemIndex === activeIndex.value && desktopNavRef.value) {
+        const navRect = desktopNavRef.value.getBoundingClientRect()
+        grabOffsetY = dragStartY - navRect.top - desktopIndicatorStyle.value.top
+      } else {
+        grabOffsetY = desktopIndicatorStyle.value.height / 2
+      }
     }
   }
 
-  if (isDragging) {
-    if (desktopNavRef.value) {
-      const navRect = desktopNavRef.value.getBoundingClientRect()
-      if (event.clientX < navRect.left - 50 || event.clientX > navRect.right + 70) {
-        return
-      }
+  if (isDragging.value) {
+    if (dragRafId !== null) {
+      cancelAnimationFrame(dragRafId)
     }
-
-    const index = findDesktopItemIndex(event.clientY)
-    if (index !== -1 && index !== activeIndex.value) {
-      const targetItem = computedItems.value[index]
-      if (targetItem) {
-        emit('update:modelValue', targetItem.value)
-      }
-    }
+    dragRafId = requestAnimationFrame(() => {
+      updateDragPosition(event.clientY)
+    })
   }
 }
 
@@ -178,15 +209,34 @@ const handleWindowMouseUp = (event: MouseEvent) => {
   window.removeEventListener('mousemove', handleWindowMouseMove)
   window.removeEventListener('mouseup', handleWindowMouseUp)
 
-  if (isDragging) {
+  if (dragRafId !== null) {
+    cancelAnimationFrame(dragRafId)
+    dragRafId = null
+  }
+
+  if (isDragging.value) {
     dragJustFinished = true
     setTimeout(() => {
       dragJustFinished = false
     }, 60)
+
+    const targetIndex = dragHighlightIndex.value ?? findDesktopItemIndex(event.clientY)
+    isDragging.value = false
+    dragHighlightIndex.value = null
+
+    if (targetIndex !== -1) {
+      const targetItem = computedItems.value[targetIndex]
+      if (targetItem) {
+        emit('update:modelValue', targetItem.value)
+      }
+    }
+
+    nextTick(() => {
+      updateDesktopIndicator()
+    })
   }
 
   isMouseDown = false
-  isDragging = false
 
   if (desktopNavRef.value) {
     const rect = desktopNavRef.value.getBoundingClientRect()
@@ -366,11 +416,13 @@ watch(computedItems, () => {
       :style="{
         top: 0,
         left: 0,
-        transform: `translate3d(${desktopIndicatorStyle.left}px, ${desktopIndicatorStyle.top}px, 0px) scale(${getDesktopItemScale(activeIndex)})`,
+        transform: `translate3d(${desktopIndicatorStyle.left}px, ${desktopIndicatorStyle.top}px, 0px) scale(${getDesktopItemScale(isDragging ? (dragHighlightIndex ?? activeIndex) : activeIndex)})`,
         width: `${desktopIndicatorStyle.width}px`,
         height: `${desktopIndicatorStyle.height}px`,
         opacity: desktopIndicatorStyle.opacity,
-        transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease',
+        transition: isDragging
+          ? 'none'
+          : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease',
         willChange: 'transform'
       }"
     />
@@ -385,7 +437,7 @@ watch(computedItems, () => {
       :aria-selected="isItemActive(item)"
       class="relative flex flex-col items-center justify-center w-full rounded-xl select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent"
       :class="[
-        !isItemActive(item)
+        !isVisualActive(item, index)
           ? 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
           : ''
       ]"
@@ -396,7 +448,7 @@ watch(computedItems, () => {
       <div
         class="flex flex-col items-center justify-center w-full py-2 px-2.5 lg:px-3 rounded-xl transition-colors duration-200 origin-center"
         :class="[
-          isItemActive(item)
+          isVisualActive(item, index)
             ? 'text-white dark:text-zinc-950 font-bold'
             : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'
         ]"
