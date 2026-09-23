@@ -99,9 +99,12 @@ const mousePos = ref<{ x: number; y: number } | null>(null)
 
 const isDragging = ref(false)
 const dragHighlightIndex = ref<number | null>(null)
+const dragStretch = ref(0)
 let isMouseDown = false
 let dragStartY = 0
 let grabOffsetY = 0
+let lastDragClientY = 0
+let dragVelocityY = 0
 let dragJustFinished = false
 let dragRafId: number | null = null
 
@@ -156,6 +159,11 @@ const updateDragPosition = (clientY: number) => {
 
   desktopIndicatorStyle.value.top = clampedTop
 
+  const deltaY = clientY - lastDragClientY
+  lastDragClientY = clientY
+  dragVelocityY = dragVelocityY * 0.6 + deltaY * 0.4
+  dragStretch.value = Math.min(0.08, Math.abs(dragVelocityY) * 0.004)
+
   const index = findDesktopItemIndex(clientY)
   if (index !== -1) {
     dragHighlightIndex.value = index
@@ -172,6 +180,9 @@ const handleMouseDown = (event: MouseEvent) => {
   isMouseDown = true
   isDragging.value = false
   dragStartY = event.clientY
+  lastDragClientY = event.clientY
+  dragVelocityY = 0
+  dragStretch.value = 0
 
   window.addEventListener('mousemove', handleWindowMouseMove)
   window.addEventListener('mouseup', handleWindowMouseUp)
@@ -185,6 +196,7 @@ const handleWindowMouseMove = (event: MouseEvent) => {
   if (!isDragging.value) {
     if (Math.abs(event.clientY - dragStartY) > 4) {
       isDragging.value = true
+      lastDragClientY = event.clientY
       const initialItemIndex = findDesktopItemIndex(dragStartY)
       if (initialItemIndex === activeIndex.value && desktopNavRef.value) {
         const navRect = desktopNavRef.value.getBoundingClientRect()
@@ -223,6 +235,8 @@ const handleWindowMouseUp = (event: MouseEvent) => {
     const targetIndex = dragHighlightIndex.value ?? findDesktopItemIndex(event.clientY)
     isDragging.value = false
     dragHighlightIndex.value = null
+    dragStretch.value = 0
+    dragVelocityY = 0
 
     if (targetIndex !== -1) {
       const targetItem = computedItems.value[targetIndex]
@@ -348,6 +362,15 @@ const updateDesktopIndicator = () => {
   }
 }
 
+const desktopIndicatorTransform = computed(() => {
+  const baseScale = getDesktopItemScale(isDragging.value ? (dragHighlightIndex.value ?? activeIndex.value) : activeIndex.value)
+  if (isDragging.value) {
+    const enlargedScale = (baseScale * 1.1).toFixed(4)
+    return `translate3d(${desktopIndicatorStyle.value.left}px, ${desktopIndicatorStyle.value.top}px, 0px) scale(${enlargedScale}, ${enlargedScale})`
+  }
+  return `translate3d(${desktopIndicatorStyle.value.left}px, ${desktopIndicatorStyle.value.top}px, 0px) scale(${baseScale})`
+})
+
 // ==========================================
 // Lifecycle & Observers
 // ==========================================
@@ -412,17 +435,18 @@ watch(computedItems, () => {
   >
     <!-- Desktop Shared Sliding Selection Indicator -->
     <div
-      class="absolute rounded-xl bg-zinc-950 dark:bg-white shadow-xs pointer-events-none z-0 origin-center"
+      class="absolute bg-zinc-950 dark:bg-white shadow-xs pointer-events-none z-0 origin-center"
       :style="{
         top: 0,
         left: 0,
-        transform: `translate3d(${desktopIndicatorStyle.left}px, ${desktopIndicatorStyle.top}px, 0px) scale(${getDesktopItemScale(isDragging ? (dragHighlightIndex ?? activeIndex) : activeIndex)})`,
+        transform: desktopIndicatorTransform,
         width: `${desktopIndicatorStyle.width}px`,
         height: `${desktopIndicatorStyle.height}px`,
         opacity: desktopIndicatorStyle.opacity,
+        borderRadius: isDragging ? '9999px' : '0.75rem',
         transition: isDragging
-          ? 'none'
-          : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease',
+          ? 'border-radius 600ms cubic-bezier(0.16, 1, 0.3, 1)'
+          : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease, border-radius 400ms cubic-bezier(0.16, 1, 0.3, 1)',
         willChange: 'transform'
       }"
     />

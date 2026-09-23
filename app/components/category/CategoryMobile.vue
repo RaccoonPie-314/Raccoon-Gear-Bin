@@ -95,10 +95,13 @@ const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
 // ==========================================
 const isTouchDragging = ref(false)
 const dragHighlightIndex = ref<number | null>(null)
+const dragStretch = ref(0)
 let isTouchDown = false
 let touchStartX = 0
 let touchStartY = 0
 let grabOffsetX = 0
+let lastDragClientX = 0
+let dragVelocityX = 0
 let dragJustFinished = false
 
 const isVisualActive = (item: ReturnType<typeof computedItems.value>[number], index: number) => {
@@ -153,6 +156,11 @@ const updateMobileDragPosition = (clientX: number) => {
 
   mobileIndicatorStyle.value.left = clampedLeft
 
+  const deltaX = clientX - lastDragClientX
+  lastDragClientX = clientX
+  dragVelocityX = dragVelocityX * 0.6 + deltaX * 0.4
+  dragStretch.value = Math.min(0.08, Math.abs(dragVelocityX) * 0.004)
+
   const index = findMobileItemIndex(clientX)
   if (index !== -1) {
     dragHighlightIndex.value = index
@@ -170,6 +178,9 @@ const handleTouchStart = (event: TouchEvent) => {
   if (!touch) return
   touchStartX = touch.clientX
   touchStartY = touch.clientY
+  lastDragClientX = touch.clientX
+  dragVelocityX = 0
+  dragStretch.value = 0
   isTouchDown = true
   isTouchDragging.value = false
 }
@@ -185,6 +196,7 @@ const handleTouchMove = (event: TouchEvent) => {
   if (!isTouchDragging.value) {
     if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
       isTouchDragging.value = true
+      lastDragClientX = touch.clientX
       const initialIndex = findMobileItemIndex(touchStartX)
       if (initialIndex === activeIndex.value && mobileNavRef.value) {
         const navRect = mobileNavRef.value.getBoundingClientRect()
@@ -216,6 +228,8 @@ const handleTouchEnd = () => {
     const targetIndex = dragHighlightIndex.value !== null ? dragHighlightIndex.value : activeIndex.value
     isTouchDragging.value = false
     dragHighlightIndex.value = null
+    dragStretch.value = 0
+    dragVelocityX = 0
 
     if (targetIndex !== -1) {
       const targetItem = computedItems.value[targetIndex]
@@ -252,6 +266,14 @@ const mobileIndicatorStyle = ref({
   width: 0,
   height: 0,
   opacity: 0
+})
+
+const mobileIndicatorTransform = computed(() => {
+  if (isTouchDragging.value) {
+    const enlargedScale = (1.5 + dragStretch.value).toFixed(4)
+    return `translate3d(${mobileIndicatorStyle.value.left}px, ${mobileIndicatorStyle.value.top}px, 0px) scale(${enlargedScale}, ${enlargedScale})`
+  }
+  return `translate3d(${mobileIndicatorStyle.value.left}px, ${mobileIndicatorStyle.value.top}px, 0px)`
 })
 
 const updateMobileIndicator = () => {
@@ -395,17 +417,18 @@ watch(computedItems, () => {
         >
           <!-- Mobile Shared Sliding Selection Indicator -->
           <div
-            class="absolute rounded-xl bg-zinc-950 dark:bg-white border border-zinc-950 dark:border-white shadow-xs pointer-events-none z-0"
+            class="absolute bg-zinc-950 dark:bg-white border border-zinc-950 dark:border-white shadow-xs pointer-events-none z-0"
             :style="{
               top: 0,
               left: 0,
-              transform: `translate3d(${mobileIndicatorStyle.left}px, ${mobileIndicatorStyle.top}px, 0px)`,
+              transform: mobileIndicatorTransform,
               width: `${mobileIndicatorStyle.width}px`,
               height: `${mobileIndicatorStyle.height}px`,
               opacity: mobileIndicatorStyle.opacity,
+              borderRadius: isTouchDragging ? '9999px' : '0.75rem',
               transition: isTouchDragging
-                ? 'none'
-                : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease'
+                ? 'border-radius 300ms cubic-bezier(0.16, 1, 0.3, 1)'
+                : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease, border-radius 300ms cubic-bezier(0.16, 1, 0.3, 1)'
             }"
           />
 
