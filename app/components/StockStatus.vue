@@ -12,8 +12,8 @@ const status = computed(() => {
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-2 text-xs font-semibold" :class="status.className">
-    <span class="h-1.5 w-1.5 rounded-full" :class="status.dotClass" />
-    {{ status.label }}
+  <span class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide" :class="status.className">
+    <span class="h-1.5 w-1.5 rounded-full shrink-0" :class="status.dotClass" />
+    <span>{{ status.label }}</span>
   </span>
 </template>

@@ -12,6 +12,9 @@ html {
 body {
   font-family: 'Public Sans', 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #ffffff;
 }
 
 ::view-transition-old(root),
@@ -19,17 +22,30 @@ body {
   animation-duration: 180ms;
 }
 
-body {
-  background: #fff;
-}
-
 ::selection {
   background: #18181b;
-  color: #fff;
+  color: #ffffff;
+}
+
+.dark ::selection {
+  background: #f4f4f5;
+  color: #09090b;
 }
 
 .dark body {
   background: #09090b;
+}
+
+/* Apple-style minimalist scrollbar suppression for touch/horizontal scrollers */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .page-enter-active,

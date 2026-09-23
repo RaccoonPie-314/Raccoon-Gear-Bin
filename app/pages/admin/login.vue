@@ -16,7 +16,7 @@ const handleSubmit = async () => {
   errorMessage.value = ''
 
   if (!email.value || !password.value) {
-    errorMessage.value = `${t('email')} ${t('password')}`
+    errorMessage.value = t('requiredFields')
     return
   }
 
@@ -58,17 +58,29 @@ useHead({ title: pageTitle })
 </script>
 
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-zinc-100 px-6 py-12 dark:bg-zinc-950">
-    <UCard class="w-full max-w-md border-0 shadow-lg ring-1 ring-zinc-200 dark:bg-zinc-900 dark:ring-zinc-800">
-      <template #header>
-        <div class="space-y-2">
-          <div class="flex items-center justify-between gap-4"><BrandLogo /><LanguageSwitcher /></div>
-          <p class="text-xs font-semibold uppercase tracking-[0.26em] text-zinc-500">{{ t('adminAccess') }}</p>
-          <h1 class="text-2xl font-black text-zinc-950 dark:text-white">{{ t('signIn') }}</h1>
+  <main class="flex min-h-screen items-center justify-center bg-zinc-50/50 px-4 py-12 dark:bg-zinc-950">
+    <div class="w-full max-w-md rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 shadow-2xl p-6 sm:p-8">
+      <div class="space-y-4 pb-6 border-b border-zinc-100 dark:border-zinc-800/80">
+        <div class="flex items-center justify-between gap-4">
+          <NuxtLink to="/">
+            <BrandLogo />
+          </NuxtLink>
+        <div class="flex items-center gap-2">
+            <ColorModeToggle />
+            <LanguageSwitcher />
+          </div>
         </div>
-      </template>
+        <div>
+          <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
+            {{ t('adminAccess') }}
+          </p>
+          <h1 class="mt-1 text-2xl sm:text-3xl font-black tracking-tight text-zinc-950 dark:text-white">
+            {{ t('signIn') }}
+          </h1>
+        </div>
+      </div>
 
-      <form class="space-y-5" @submit.prevent="handleSubmit">
+      <form class="space-y-5 pt-6" @submit.prevent="handleSubmit">
         <UFormField :label="t('email')" name="email">
           <UInput v-model="email" type="email" :placeholder="t('emailPlaceholder')" class="w-full" />
         </UFormField>
@@ -84,10 +96,25 @@ useHead({ title: pageTitle })
           :title="errorMessage"
         />
 
-        <UButton type="submit" class="w-full" :loading="isSubmitting" :disabled="isSubmitting">
+        <UButton
+          type="submit"
+          color="neutral"
+          class="w-full justify-center rounded-xl py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+          :loading="isSubmitting"
+          :disabled="isSubmitting"
+        >
           {{ isSubmitting ? t('signingIn') : t('signIn') }}
         </UButton>
+
+        <div class="text-center pt-2">
+          <NuxtLink
+            to="/"
+            class="text-xs font-semibold text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors"
+          >
+            ← {{ t('home') }}
+          </NuxtLink>
+        </div>
       </form>
-    </UCard>
+    </div>
   </main>
 </template>

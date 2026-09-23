@@ -17,6 +17,7 @@ export const useCatalog = () => {
       id: product.id,
       categoryId: product.category_id,
       categoryName: category?.category_translations?.find((item: any) => item.locale === locale.value)?.name || category?.category_translations?.find((item: any) => item.locale === 'en')?.name || category?.slug || 'Uncategorized',
+      categorySlug: category?.slug,
       slug: product.slug,
       sku: product.sku,
       price: Number(product.price),
@@ -48,7 +49,11 @@ export const useCatalog = () => {
   const fetchCategories = async (): Promise<CatalogCategory[]> => {
     const { data, error } = await supabase.from('categories').select('id, slug, category_translations(id, locale, name)').eq('is_active', true).order('sort_order')
     if (error) throw error
-    return (data || []).map((category: any) => ({ id: category.id, name: category.category_translations?.find((item: any) => item.locale === locale.value)?.name || category.category_translations?.find((item: any) => item.locale === 'en')?.name || category.slug }))
+    return (data || []).map((category: any) => ({
+      id: category.id,
+      name: category.category_translations?.find((item: any) => item.locale === locale.value)?.name || category.category_translations?.find((item: any) => item.locale === 'en')?.name || category.slug,
+      slug: category.slug
+    }))
   }
 
   return { fetchProducts, fetchProduct, fetchCategories }

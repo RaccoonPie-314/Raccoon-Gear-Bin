@@ -1,5 +1,6 @@
 export default defineNuxtRouteMiddleware(async (to) => {
-  if (to.path === '/admin/login') {
+  // Only guard /admin/* routes (skip login page itself)
+  if (!to.path.startsWith('/admin') || to.path === '/admin/login') {
     return
   }
 

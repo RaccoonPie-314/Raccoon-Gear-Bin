@@ -9,6 +9,7 @@ export interface CatalogProduct {
   id: string
   categoryId: string
   categoryName: string
+  categorySlug?: string
   slug: string
   sku: string
   price: number
@@ -25,4 +26,5 @@ export interface CatalogProduct {
 export interface CatalogCategory {
   id: string
   name: string
+  slug?: string
 }
