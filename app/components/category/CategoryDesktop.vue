@@ -78,6 +78,7 @@ const activeIndex = computed(() => {
 })
 
 const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
+  if (dragJustFinished) return
   if (item.key === 'all') {
     emit('update:modelValue', 'all')
     return
@@ -90,11 +91,115 @@ const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
 }
 
 // ==========================================
-// Desktop: Dock Magnification
+// Desktop: Dock Magnification & Drag-to-Select
 // ==========================================
 const desktopNavRef = ref<HTMLElement | null>(null)
 const desktopItemRefs = ref<(HTMLElement | null)[]>([])
 const mousePos = ref<{ x: number; y: number } | null>(null)
+
+let isMouseDown = false
+let isDragging = false
+let dragStartY = 0
+let dragJustFinished = false
+
+const findDesktopItemIndex = (clientY: number) => {
+  if (!desktopItemRefs.value.length) return -1
+
+  for (let i = 0; i < desktopItemRefs.value.length; i++) {
+    const el = desktopItemRefs.value[i]
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    if (clientY >= rect.top && clientY <= rect.bottom) {
+      return i
+    }
+  }
+
+  // Gap between item i and i+1
+  for (let i = 0; i < desktopItemRefs.value.length - 1; i++) {
+    const el1 = desktopItemRefs.value[i]
+    const el2 = desktopItemRefs.value[i + 1]
+    if (el1 && el2) {
+      const r1 = el1.getBoundingClientRect()
+      const r2 = el2.getBoundingClientRect()
+      if (clientY > r1.bottom && clientY < r2.top) {
+        return clientY - r1.bottom < r2.top - clientY ? i : i + 1
+      }
+    }
+  }
+
+  const firstRect = desktopItemRefs.value[0]?.getBoundingClientRect()
+  const lastRect = desktopItemRefs.value[desktopItemRefs.value.length - 1]?.getBoundingClientRect()
+  if (firstRect && clientY < firstRect.top) return 0
+  if (lastRect && clientY > lastRect.bottom) return desktopItemRefs.value.length - 1
+
+  return -1
+}
+
+const handleMouseDown = (event: MouseEvent) => {
+  if (event.button !== 0) return
+  isMouseDown = true
+  isDragging = false
+  dragStartY = event.clientY
+
+  window.addEventListener('mousemove', handleWindowMouseMove)
+  window.addEventListener('mouseup', handleWindowMouseUp)
+}
+
+const handleWindowMouseMove = (event: MouseEvent) => {
+  mousePos.value = { x: event.clientX, y: event.clientY }
+
+  if (!isMouseDown) return
+
+  if (!isDragging) {
+    if (Math.abs(event.clientY - dragStartY) > 4) {
+      isDragging = true
+    }
+  }
+
+  if (isDragging) {
+    if (desktopNavRef.value) {
+      const navRect = desktopNavRef.value.getBoundingClientRect()
+      if (event.clientX < navRect.left - 50 || event.clientX > navRect.right + 70) {
+        return
+      }
+    }
+
+    const index = findDesktopItemIndex(event.clientY)
+    if (index !== -1 && index !== activeIndex.value) {
+      const targetItem = computedItems.value[index]
+      if (targetItem) {
+        emit('update:modelValue', targetItem.value)
+      }
+    }
+  }
+}
+
+const handleWindowMouseUp = (event: MouseEvent) => {
+  window.removeEventListener('mousemove', handleWindowMouseMove)
+  window.removeEventListener('mouseup', handleWindowMouseUp)
+
+  if (isDragging) {
+    dragJustFinished = true
+    setTimeout(() => {
+      dragJustFinished = false
+    }, 60)
+  }
+
+  isMouseDown = false
+  isDragging = false
+
+  if (desktopNavRef.value) {
+    const rect = desktopNavRef.value.getBoundingClientRect()
+    if (
+      event.clientX < rect.left ||
+      event.clientX > rect.right ||
+      event.clientY < rect.top ||
+      event.clientY > rect.bottom
+    ) {
+      mousePos.value = null
+    }
+  }
+}
 
 const setDesktopItemRef = (el: any, index: number) => {
   if (el) {
@@ -107,7 +212,9 @@ const handleMouseMove = (event: MouseEvent) => {
 }
 
 const handleMouseLeave = () => {
-  mousePos.value = null
+  if (!isMouseDown) {
+    mousePos.value = null
+  }
 }
 
 const getDesktopItemScale = (index: number) => {
@@ -224,6 +331,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateDesktopIndicator)
+  window.removeEventListener('mousemove', handleWindowMouseMove)
+  window.removeEventListener('mouseup', handleWindowMouseUp)
   if (resizeObserver) {
     resizeObserver.disconnect()
   }
@@ -244,10 +353,12 @@ watch(computedItems, () => {
   <nav
     ref="desktopNavRef"
     aria-label="Product categories"
-    class="relative flex flex-col gap-2.5 overflow-visible py-1"
+    class="relative flex flex-col gap-2.5 overflow-visible py-1 select-none"
     tabindex="-1"
     @mousemove="handleMouseMove"
     @mouseleave="handleMouseLeave"
+    @mousedown="handleMouseDown"
+    @dragstart.prevent
   >
     <!-- Desktop Shared Sliding Selection Indicator -->
     <div

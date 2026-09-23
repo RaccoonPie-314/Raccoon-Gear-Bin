@@ -78,6 +78,7 @@ const activeIndex = computed(() => {
 })
 
 const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
+  if (dragJustFinished) return
   if (item.key === 'all') {
     emit('update:modelValue', 'all')
     return
@@ -87,6 +88,101 @@ const handleSelect = (item: ReturnType<typeof computedItems.value>[number]) => {
     return
   }
   emit('update:modelValue', item.value)
+}
+
+// ==========================================
+// Mobile: Drag-to-Select
+// ==========================================
+let isTouchDown = false
+let isTouchDragging = false
+let touchStartX = 0
+let touchStartY = 0
+let dragJustFinished = false
+
+const findMobileItemIndex = (clientX: number) => {
+  if (!mobileItemRefs.value.length) return -1
+
+  for (let i = 0; i < mobileItemRefs.value.length; i++) {
+    const el = mobileItemRefs.value[i]
+    if (!el) continue
+    const rect = el.getBoundingClientRect()
+    if (clientX >= rect.left && clientX <= rect.right) {
+      return i
+    }
+  }
+
+  // Gap between item i and i+1
+  for (let i = 0; i < mobileItemRefs.value.length - 1; i++) {
+    const el1 = mobileItemRefs.value[i]
+    const el2 = mobileItemRefs.value[i + 1]
+    if (el1 && el2) {
+      const r1 = el1.getBoundingClientRect()
+      const r2 = el2.getBoundingClientRect()
+      if (clientX > r1.right && clientX < r2.left) {
+        return clientX - r1.right < r2.left - clientX ? i : i + 1
+      }
+    }
+  }
+
+  const firstRect = mobileItemRefs.value[0]?.getBoundingClientRect()
+  const lastRect = mobileItemRefs.value[mobileItemRefs.value.length - 1]?.getBoundingClientRect()
+  if (firstRect && clientX < firstRect.left) return 0
+  if (lastRect && clientX > lastRect.right) return mobileItemRefs.value.length - 1
+
+  return -1
+}
+
+const handleTouchStart = (event: TouchEvent) => {
+  if (event.touches.length !== 1) return
+  const touch = event.touches[0]
+  if (!touch) return
+  touchStartX = touch.clientX
+  touchStartY = touch.clientY
+  isTouchDown = true
+  isTouchDragging = false
+}
+
+const handleTouchMove = (event: TouchEvent) => {
+  if (!isTouchDown || event.touches.length !== 1) return
+  const touch = event.touches[0]
+  if (!touch) return
+
+  const dx = touch.clientX - touchStartX
+  const dy = touch.clientY - touchStartY
+
+  if (!isTouchDragging) {
+    if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
+      isTouchDragging = true
+    } else if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+      isTouchDown = false
+      return
+    }
+  }
+
+  if (isTouchDragging) {
+    if (event.cancelable) {
+      event.preventDefault()
+    }
+
+    const index = findMobileItemIndex(touch.clientX)
+    if (index !== -1 && index !== activeIndex.value) {
+      const targetItem = computedItems.value[index]
+      if (targetItem) {
+        emit('update:modelValue', targetItem.value)
+      }
+    }
+  }
+}
+
+const handleTouchEnd = () => {
+  if (isTouchDragging) {
+    dragJustFinished = true
+    setTimeout(() => {
+      dragJustFinished = false
+    }, 80)
+  }
+  isTouchDown = false
+  isTouchDragging = false
 }
 
 // ==========================================
@@ -184,6 +280,10 @@ onMounted(() => {
 
   if (mobileNavRef.value) {
     mobileNavRef.value.addEventListener('scroll', updateMobileIndicator, { passive: true })
+    mobileNavRef.value.addEventListener('touchstart', handleTouchStart, { passive: true })
+    mobileNavRef.value.addEventListener('touchmove', handleTouchMove, { passive: false })
+    mobileNavRef.value.addEventListener('touchend', handleTouchEnd, { passive: true })
+    mobileNavRef.value.addEventListener('touchcancel', handleTouchEnd, { passive: true })
   }
 
   if (typeof ResizeObserver !== 'undefined') {
@@ -210,6 +310,10 @@ onUnmounted(() => {
   window.removeEventListener('scroll', handleWindowScroll)
   if (mobileNavRef.value) {
     mobileNavRef.value.removeEventListener('scroll', updateMobileIndicator)
+    mobileNavRef.value.removeEventListener('touchstart', handleTouchStart)
+    mobileNavRef.value.removeEventListener('touchmove', handleTouchMove)
+    mobileNavRef.value.removeEventListener('touchend', handleTouchEnd)
+    mobileNavRef.value.removeEventListener('touchcancel', handleTouchEnd)
   }
   if (resizeObserver) {
     resizeObserver.disconnect()
@@ -238,7 +342,7 @@ watch(computedItems, () => {
         <nav
           ref="mobileNavRef"
           aria-label="Mobile product categories"
-          class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto"
+          class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto touch-pan-y select-none"
           tabindex="-1"
         >
           <!-- Mobile Shared Sliding Selection Indicator -->
