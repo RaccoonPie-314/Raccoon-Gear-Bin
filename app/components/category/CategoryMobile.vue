@@ -241,6 +241,20 @@ watch(computedItems, () => {
           class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto"
           tabindex="-1"
         >
+          <!-- Mobile Shared Sliding Selection Indicator -->
+          <div
+            class="absolute rounded-xl bg-zinc-950 dark:bg-white border border-zinc-950 dark:border-white shadow-xs pointer-events-none z-0"
+            :style="{
+              top: 0,
+              left: 0,
+              transform: `translate3d(${mobileIndicatorStyle.left}px, ${mobileIndicatorStyle.top}px, 0px)`,
+              width: `${mobileIndicatorStyle.width}px`,
+              height: `${mobileIndicatorStyle.height}px`,
+              opacity: mobileIndicatorStyle.opacity,
+              transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease'
+            }"
+          />
+
           <!-- Mobile Category Buttons -->
           <button
             v-for="(item, index) in computedItems"
@@ -249,11 +263,11 @@ watch(computedItems, () => {
             type="button"
             role="tab"
             :aria-selected="isItemActive(item)"
-            class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-xl transition-all duration-200 select-none cursor-pointer z-10 shrink-0 focus-visible:outline-none"
+            class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-xl transition-colors duration-200 select-none cursor-pointer z-10 bg-transparent shrink-0 focus-visible:outline-none"
             :class="[
               isItemActive(item)
-                ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold shadow-xs -translate-x-[0.5px]'
-                : 'bg-transparent text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
+                ? 'text-white dark:text-zinc-950 font-bold'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white'
             ]"
             @click="handleSelect(item)"
           >

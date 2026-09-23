@@ -168,15 +168,23 @@ const desktopIndicatorStyle = ref({
 
 const updateDesktopIndicator = () => {
   const activeEl = desktopItemRefs.value[activeIndex.value]
-  if (!activeEl) return
+  const navEl = desktopNavRef.value
+  if (!activeEl || !navEl) return
 
-  // Use offset properties — these are layout positions unaffected by CSS
-  // scale() transforms, so the indicator is always sized/placed at the
-  // item's natural (unscaled) bounds. The indicator then applies its own
-  // scale() with transform-origin: center, matching the button's origin.
+  // Measure unscaled layout position relative to desktopNavRef
+  let top = 0
+  let left = 0
+  let curr: HTMLElement | null = activeEl
+
+  while (curr && curr !== navEl) {
+    top += curr.offsetTop
+    left += curr.offsetLeft
+    curr = curr.offsetParent as HTMLElement | null
+  }
+
   desktopIndicatorStyle.value = {
-    left: activeEl.offsetLeft,
-    top: activeEl.offsetTop,
+    left,
+    top,
     width: activeEl.offsetWidth,
     height: activeEl.offsetHeight,
     opacity: 1
@@ -241,6 +249,21 @@ watch(computedItems, () => {
     @mousemove="handleMouseMove"
     @mouseleave="handleMouseLeave"
   >
+    <!-- Desktop Shared Sliding Selection Indicator -->
+    <div
+      class="absolute rounded-xl bg-zinc-950 dark:bg-white shadow-xs pointer-events-none z-0 origin-center"
+      :style="{
+        top: 0,
+        left: 0,
+        transform: `translate3d(${desktopIndicatorStyle.left}px, ${desktopIndicatorStyle.top}px, 0px) scale(${getDesktopItemScale(activeIndex)})`,
+        width: `${desktopIndicatorStyle.width}px`,
+        height: `${desktopIndicatorStyle.height}px`,
+        opacity: desktopIndicatorStyle.opacity,
+        transition: 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease',
+        willChange: 'transform'
+      }"
+    />
+
     <!-- Desktop Category Buttons -->
     <button
       v-for="(item, index) in computedItems"
@@ -249,16 +272,22 @@ watch(computedItems, () => {
       type="button"
       role="tab"
       :aria-selected="isItemActive(item)"
-      class="relative flex flex-col items-center justify-center w-full select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent z-10"
+      class="relative flex flex-col items-center justify-center w-full rounded-xl select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent"
+      :class="[
+        !isItemActive(item)
+          ? 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+          : ''
+      ]"
+      :style="{ zIndex: getDesktopItemZIndex(index) }"
       @click="handleSelect(item)"
     >
-      <!-- Inner visual wrapper — scale transform lives here so background + icon + label all scale together -->
+      <!-- Inner visual wrapper -->
       <div
-        class="flex flex-col items-center justify-center w-full py-2 px-2.5 lg:px-3 rounded-xl transition-all duration-200 origin-center"
+        class="flex flex-col items-center justify-center w-full py-2 px-2.5 lg:px-3 rounded-xl transition-colors duration-200 origin-center"
         :class="[
           isItemActive(item)
-            ? 'bg-zinc-950 text-white dark:bg-white dark:text-zinc-950 font-bold shadow-xs'
-            : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/50'
+            ? 'text-white dark:text-zinc-950 font-bold'
+            : 'text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'
         ]"
         :style="{
           transform: `scale(${getDesktopItemScale(index)})`,
