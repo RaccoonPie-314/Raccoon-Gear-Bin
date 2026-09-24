@@ -260,7 +260,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
         <!-- Right Side: Search, Sort & Products -->
         <div class="flex-1 min-w-0">
           <div class="flex flex-col gap-4 border-b border-zinc-200/80 pb-6 dark:border-zinc-800/80 sm:flex-row sm:items-center sm:justify-between">
-            <div data-search-anchor class="flex h-14 w-full items-center gap-3 rounded-full border border-zinc-200/80 bg-white pr-2 pl-5 sm:max-w-xs md:max-w-sm dark:border-zinc-800/80 dark:bg-zinc-900">
+            <div data-search-anchor class="flex h-14 w-full items-center gap-3 rounded-full border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 sm:max-w-xs md:max-w-sm dark:border-zinc-800/80 dark:bg-zinc-900">
               <span class="flex h-5 w-5 shrink-0 items-center justify-center text-zinc-400 dark:text-zinc-500">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
                   <circle cx="11" cy="11" r="8" />
@@ -403,7 +403,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
               type="file"
               accept="image/*"
               multiple
-              class="block w-full text-xs text-zinc-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-700 dark:file:text-zinc-300 hover:file:bg-zinc-200 cursor-pointer"
+              class="block w-full text-xs text-zinc-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-700 dark:file:text-zinc-300 hover:file:bg-zinc-200 cursor-pointer"
               @change="handleImageSelection"
             />
           </UFormField>

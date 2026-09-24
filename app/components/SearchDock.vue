@@ -12,9 +12,11 @@ const FIELD_BACK_AT = 24
 const DOCK_REVEAL_AT = 60
 const DOCK_DIRECTION_DELTA = 6
 
-const OPEN_MORPH_MS = 460
+const OPEN_MORPH_MS = 420
 const CLOSE_MORPH_MS = 380
-const MORPH_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)'
+// Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
+// Ease-out-cubic spreads the same motion across the whole duration.
+const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
 const BACKDROP_IN_MS = 260
 const BACKDROP_OUT_MS = 200
 const CONTENT_IN_MS = 220
@@ -41,6 +43,7 @@ const contentTransition = ref(`opacity ${CONTENT_IN_MS}ms ease ${CONTENT_DELAY_M
 const panelOpacity = ref(1)
 const panelTransform = ref('none')
 const panelTransition = ref('none')
+const panelRadius = ref('')
 const flyerTransform = ref('none')
 const flyerTransition = ref('none')
 const flyerBox = ref<{ left: string, top: string, size: string } | null>(null)
@@ -59,9 +62,12 @@ const flyerColor = ref('')
 let searchFieldEl: HTMLElement | null = null
 let launcherGlyphColor = ''
 let panelGlyphColor = ''
+let collapsedRadius = ''
+let restingRadius = ''
 let originClickEvent: Event | null = null
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
+let settleOn: 'open' | 'close' | null = null
 let restoreFrame = 0
 let scrollTicking = false
 let lastScrollY = 0
@@ -125,25 +131,31 @@ const activeLauncherEl = () => {
   return window.matchMedia(DESKTOP_QUERY).matches ? desktopLauncherRef.value : mobileLauncherRef.value
 }
 
-// Measures the panel while its transform is neutralised so the rect is the untransformed layout box.
+// During a morph the panel reports its *transformed* box, and neutralising it through refs
+// cannot flush before the read. Instead invert the panel's own matrix: origin is top left, so
+// screen = layout + translate and size * scale.
+const toLayoutRect = (rect: DOMRect, panelRect: DOMRect, m: DOMMatrix) => ({
+  left: panelRect.left - m.e + (rect.left - panelRect.left) / m.a,
+  top: panelRect.top - m.f + (rect.top - panelRect.top) / m.d,
+  width: rect.width / m.a,
+  height: rect.height / m.d
+})
+
 const measureScene = () => {
   const panel = panelRef.value
   const glyph = realGlyphRef.value
   if (!panel || !glyph) return null
 
-  const previousTransform = panelTransform.value
-  const previousTransition = panelTransition.value
-  panelTransform.value = 'none'
-  panelTransition.value = 'none'
-
   const panelRect = panel.getBoundingClientRect()
-  const glyphRect = glyph.getBoundingClientRect()
+  const computed = getComputedStyle(panel).transform
+  const m = computed === 'none' ? new DOMMatrix() : new DOMMatrix(computed)
+  const glyphRect = toLayoutRect(glyph.getBoundingClientRect(), panelRect, m)
   panelGlyphColor = getComputedStyle(glyph).color
 
-  panelTransform.value = previousTransform
-  panelTransition.value = previousTransition
-
-  return { panelRect, glyphRect }
+  return {
+    panelRect: toLayoutRect(panelRect, panelRect, m),
+    glyphRect
+  }
 }
 
 const captureScene = (launcherEl: HTMLElement) => {
@@ -168,6 +180,12 @@ const captureScene = (launcherEl: HTMLElement) => {
   panelStartTransform.value = `translate3d(${launcherRect.left - scene.panelRect.left}px, ${launcherRect.top - scene.panelRect.top}px, 0) scale(${launcherRect.width / scene.panelRect.width}, ${launcherRect.height / scene.panelRect.height})`
   flyerStartTransform.value = `translate3d(${launcherGlyphRect.left + launcherGlyphRect.width / 2 - (scene.glyphRect.left + scene.glyphRect.width / 2)}px, ${launcherGlyphRect.top + launcherGlyphRect.height / 2 - (scene.glyphRect.top + scene.glyphRect.height / 2)}px, 0) scale(${launcherGlyphRect.width / scene.glyphRect.width})`
   flyerBox.value = { left: `${scene.glyphRect.left}px`, top: `${scene.glyphRect.top}px`, size: `${scene.glyphRect.width}px` }
+
+  // A non-uniform scale squashes `rounded-full` into a rounded rectangle, so the radii are
+  // pre-compensated per axis: the pill stays a pill and the icon lands on a true circle.
+  const screenRadius = Math.min(launcherRect.width, launcherRect.height) / 2
+  collapsedRadius = `${screenRadius * scene.panelRect.width / launcherRect.width}px / ${screenRadius * scene.panelRect.height / launcherRect.height}px`
+  restingRadius = `${scene.panelRect.height / 2}px`
 
   return true
 }
@@ -208,15 +226,16 @@ const focusOverlayInput = () => {
 
 const finishOpen = () => {
   if (openTimer) { clearTimeout(openTimer); openTimer = null }
-  if (!morphing.value) return
+  if (settleOn === 'open') settleOn = null
+  if (overlayClosing.value || !morphing.value) return
   morphing.value = false
 }
 
-// The panel's transform transition, not a timer, decides when a morph is over.
+// Whichever morph armed the token gets to settle; an interrupted morph never reports in.
 const onMorphSettled = (event: TransitionEvent) => {
   if (event.target !== panelRef.value || event.propertyName !== 'transform') return
-  if (overlayClosing.value) finishClose()
-  else finishOpen()
+  if (settleOn === 'close') finishClose()
+  else if (settleOn === 'open') finishOpen()
 }
 
 const isInsidePanel = (node: EventTarget | null) => {
@@ -279,6 +298,7 @@ const openOverlay = async (event: MouseEvent) => {
   panelOpacity.value = 1
   panelTransform.value = 'none'
   panelTransition.value = 'none'
+  panelRadius.value = ''
   flyerTransform.value = 'none'
   flyerTransition.value = 'none'
   backdropOpacity.value = 0
@@ -291,11 +311,13 @@ const openOverlay = async (event: MouseEvent) => {
   document.addEventListener('click', handleDocumentClick)
 
   await nextTick()
+  if (overlayClosing.value) return
 
   if (!captureScene(launcherEl)) {
     overlayActive.value = true
     launcherTaken.value = true
     morphing.value = false
+    panelRadius.value = ''
     backdropOpacity.value = 1
     contentOpacity.value = 1
     focusOverlayInput()
@@ -304,23 +326,27 @@ const openOverlay = async (event: MouseEvent) => {
 
   // Start from the launcher's exact pixels: the pill and glyph take over the icon's place.
   panelTransform.value = panelStartTransform.value
+  panelRadius.value = collapsedRadius
   flyerTransform.value = flyerStartTransform.value
   flyerColor.value = launcherGlyphColor
   overlayActive.value = true
   launcherTaken.value = true
 
   await nextTick()
+  if (overlayClosing.value) return
   focusOverlayInput()
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (!overlayMounted.value) return
-    panelTransition.value = `transform ${OPEN_MORPH_MS}ms ${MORPH_EASE}`
+    if (!overlayMounted.value || overlayClosing.value) return
+    panelTransition.value = `transform ${OPEN_MORPH_MS}ms ${MORPH_EASE}, border-radius ${OPEN_MORPH_MS}ms ${MORPH_EASE}`
     panelTransform.value = 'translate3d(0px, 0px, 0) scale(1, 1)'
+    panelRadius.value = restingRadius
     flyerTransition.value = `transform ${OPEN_MORPH_MS}ms ${MORPH_EASE}, color ${OPEN_MORPH_MS}ms ${MORPH_EASE}`
     flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
     flyerColor.value = panelGlyphColor
     backdropOpacity.value = 1
     contentOpacity.value = 1
+    settleOn = 'open'
     openTimer = setTimeout(finishOpen, OPEN_MORPH_MS + 120)
   }))
 }
@@ -328,6 +354,7 @@ const openOverlay = async (event: MouseEvent) => {
 const finishClose = () => {
   if (!overlayMounted.value) return
   if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
+  settleOn = null
   overlayMounted.value = false
   overlayActive.value = false
   overlayClosing.value = false
@@ -342,7 +369,7 @@ const finishClose = () => {
 }
 
 const closeOverlay = async () => {
-  if (!overlayMounted.value || !overlayActive.value || overlayClosing.value) return
+  if (!overlayMounted.value || overlayClosing.value) return
   overlayClosing.value = true
   window.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('click', handleDocumentClick)
@@ -360,26 +387,34 @@ const closeOverlay = async () => {
   if (!launcherEl || !launcherRect?.width || !captureScene(launcherEl)) {
     panelTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, opacity ${CONTENT_OUT_MS}ms ease`
     panelTransform.value = 'translate3d(0px, 0px, 0) scale(0.97, 0.97)'
+    panelRadius.value = ''
     panelOpacity.value = 0
+    settleOn = 'close'
     closeTimer = setTimeout(finishClose, CLOSE_MORPH_MS + 120)
     return
   }
 
+  // Mid-flight the flyer already has its own transition running; resetting it would teleport the glyph.
+  const wasMorphing = morphing.value
   morphing.value = true
-  flyerTransition.value = 'none'
-  flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
-  flyerColor.value = panelGlyphColor
+  if (!wasMorphing) {
+    flyerTransition.value = 'none'
+    flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
+    flyerColor.value = panelGlyphColor
+  }
 
   await nextTick()
   if (!overlayMounted.value) return
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!overlayMounted.value) return
-    panelTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}`
+    panelTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, border-radius ${CLOSE_MORPH_MS}ms ${MORPH_EASE}`
     panelTransform.value = panelStartTransform.value
+    panelRadius.value = collapsedRadius
     flyerTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, color ${CLOSE_MORPH_MS}ms ${MORPH_EASE}`
     flyerTransform.value = flyerStartTransform.value
     flyerColor.value = launcherGlyphColor
+    settleOn = 'close'
     closeTimer = setTimeout(finishClose, CLOSE_MORPH_MS + 120)
   }))
 }
@@ -416,7 +451,7 @@ onUnmounted(() => {
     <button
       ref="desktopLauncherRef"
       type="button"
-      class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-zinc-200/80 bg-white text-zinc-950 shadow-sm transition-colors duration-200 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+      class="flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-zinc-200/80 bg-white text-zinc-950 shadow-xs transition-colors duration-200 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
       :style="desktopLauncherStyle"
       :aria-label="t('searchCatalog')"
       :aria-expanded="overlayMounted"
@@ -445,7 +480,7 @@ onUnmounted(() => {
     <button
       ref="mobileLauncherRef"
       type="button"
-      class="fixed right-4 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom))] z-40 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border border-zinc-200/80 bg-white/95 text-zinc-950 shadow-lg backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 lg:hidden dark:border-zinc-800/80 dark:bg-zinc-950/95 dark:text-white dark:focus-visible:ring-white"
+      class="fixed right-4 bottom-[calc(5.25rem_+_env(safe-area-inset-bottom))] z-40 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border border-zinc-200/80 bg-white/95 text-zinc-950 shadow-xs backdrop-blur-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 lg:hidden dark:border-zinc-800/80 dark:bg-zinc-950/95 dark:text-white dark:focus-visible:ring-white"
       :style="mobileLauncherStyle"
       :aria-label="t('searchCatalog')"
       :aria-expanded="overlayMounted"
@@ -487,8 +522,8 @@ onUnmounted(() => {
       <div class="pointer-events-none relative flex h-full flex-col items-center justify-start px-4 pt-[14vh]">
         <div
           ref="panelRef"
-          class="pointer-events-auto flex h-14 w-full max-w-xl origin-top-left items-center gap-3 rounded-full border border-zinc-200/80 bg-white pr-2 pl-5 dark:border-zinc-800/80 dark:bg-zinc-900"
-          :style="{ transform: panelTransform, transition: panelTransition, opacity: panelOpacity, willChange: 'transform' }"
+          class="pointer-events-auto flex h-14 w-full max-w-xl origin-top-left items-center gap-3 rounded-full border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 dark:border-zinc-800/80 dark:bg-zinc-900"
+          :style="{ transform: panelTransform, transition: panelTransition, borderRadius: panelRadius, opacity: panelOpacity, willChange: 'transform' }"
           @transitionend="onMorphSettled"
         >
           <span

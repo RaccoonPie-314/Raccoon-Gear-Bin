@@ -425,7 +425,7 @@ watch(computedItems, () => {
               width: `${mobileIndicatorStyle.width}px`,
               height: `${mobileIndicatorStyle.height}px`,
               opacity: mobileIndicatorStyle.opacity,
-              borderRadius: isTouchDragging ? '9999px' : '0.75rem',
+              borderRadius: '9999px',
               transition: isTouchDragging
                 ? 'border-radius 300ms cubic-bezier(0.16, 1, 0.3, 1)'
                 : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease, border-radius 300ms cubic-bezier(0.16, 1, 0.3, 1)'
@@ -440,7 +440,7 @@ watch(computedItems, () => {
             type="button"
             role="tab"
             :aria-selected="isItemActive(item)"
-            class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-xl transition-colors duration-200 select-none cursor-pointer z-10 bg-transparent shrink-0 focus-visible:outline-none"
+            class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-full transition-colors duration-200 select-none cursor-pointer z-10 bg-transparent shrink-0 focus-visible:outline-none"
             :class="[
               isVisualActive(item, index)
                 ? 'text-white dark:text-zinc-950 font-bold'

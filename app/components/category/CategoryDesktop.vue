@@ -443,7 +443,7 @@ watch(computedItems, () => {
         width: `${desktopIndicatorStyle.width}px`,
         height: `${desktopIndicatorStyle.height}px`,
         opacity: desktopIndicatorStyle.opacity,
-        borderRadius: isDragging ? '9999px' : '0.75rem',
+        borderRadius: '9999px',
         transition: isDragging
           ? 'border-radius 600ms cubic-bezier(0.16, 1, 0.3, 1)'
           : 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1), width 260ms cubic-bezier(0.16, 1, 0.3, 1), height 260ms cubic-bezier(0.16, 1, 0.3, 1), opacity 150ms ease, border-radius 400ms cubic-bezier(0.16, 1, 0.3, 1)',
@@ -459,7 +459,7 @@ watch(computedItems, () => {
       type="button"
       role="tab"
       :aria-selected="isItemActive(item)"
-      class="relative flex flex-col items-center justify-center w-full rounded-xl select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent"
+      class="relative flex flex-col items-center justify-center w-full rounded-full select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent"
       :class="[
         !isVisualActive(item, index)
           ? 'hover:bg-zinc-100 dark:hover:bg-zinc-800/50'

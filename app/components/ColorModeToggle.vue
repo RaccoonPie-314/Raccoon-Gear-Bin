@@ -12,7 +12,7 @@ const toggle = () => {
   <ClientOnly>
     <button
       type="button"
-      class="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border border-zinc-200/80 bg-zinc-100/90 hover:bg-zinc-200/80 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:hover:bg-zinc-800/80 text-zinc-700 dark:text-zinc-200 transition-all shadow-2xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white shrink-0"
+      class="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-full border border-zinc-200/80 bg-zinc-100/90 hover:bg-zinc-200/80 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:hover:bg-zinc-800/80 text-zinc-700 dark:text-zinc-200 transition-all shadow-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white shrink-0"
       :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'"
       @click="toggle"

@@ -99,7 +99,7 @@ useHead({ title: pageTitle })
         <UButton
           type="submit"
           color="neutral"
-          class="w-full justify-center rounded-xl py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+          class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
           :loading="isSubmitting"
           :disabled="isSubmitting"
         >
