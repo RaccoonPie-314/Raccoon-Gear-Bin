@@ -58,3 +58,48 @@ body {
   opacity: 0;
   transform: translateY(4px);
 }
+
+/* Nuxt UI gives popper-positioned selects a 100ms scale, which reads as an instant pop.
+   Unfold the panel out of the trigger instead: reka anchors
+   --reka-select-content-transform-origin at whichever edge touches the control, so a plain
+   scaleY grows away from the pill on its own. The start value is trigger height / panel height
+   (32 / 136) so frame 0 is the pill's own footprint. Opacity only covers the first fifth of the
+   ramp — enough to avoid a hard flash, not enough to read as a fade. */
+[data-slot="content"][role="listbox"][data-state="open"] {
+  animation: select-morph-in 300ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* The collapse must not decelerate: a curve that spends its last third of time covering its
+   last 10% of travel leaves an opaque sliver sitting under the pill, which reads as a hang.
+   Ease-in accelerates into the exit, so the fade overlaps the part that is still moving. */
+[data-slot="content"][role="listbox"][data-state="closed"] {
+  animation: select-morph-out 200ms cubic-bezier(0.42, 0, 1, 1) both;
+}
+
+@keyframes select-morph-in {
+  from {
+    opacity: 0;
+    transform: scaleY(0.24);
+  }
+  18% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes select-morph-out {
+  from {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  55% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: scaleY(0.24);
+  }
+}
