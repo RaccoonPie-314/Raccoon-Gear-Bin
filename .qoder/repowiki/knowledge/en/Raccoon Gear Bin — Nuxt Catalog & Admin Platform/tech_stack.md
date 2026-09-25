@@ -1,0 +1,1 @@
+Nuxt 4 + Vue 3 as the runtime for both catalog and admin; Supabase JS client (anon + service role keys) for data access; Tailwind CSS v4 via `@tailwindcss/vite`; Bun lockfile (`bun.lock`).

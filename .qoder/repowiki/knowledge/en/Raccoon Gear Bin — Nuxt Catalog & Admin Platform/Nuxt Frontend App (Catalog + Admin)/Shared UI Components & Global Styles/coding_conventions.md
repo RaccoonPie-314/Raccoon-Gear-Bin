@@ -1,0 +1,5 @@
+- Components are written as single-file components using `<script setup lang="ts">` with `defineProps` / `withDefaults` for typed inputs and `defineEmits` / `defineModel` for output and two-way binding.
+- Responsive dual-layout components split desktop and mobile variants into sibling files (`CategoryDesktop.vue`, `CategoryMobile.vue`) and expose a single facade (`CategoryNav.vue`) that selects between them via Tailwind breakpoint classes.
+- User-facing strings go through `useI18n()`'s `t()` function instead of hard-coded literals, and all interactive elements carry `aria-*` attributes paired with `aria-hidden="true"` on decorative SVGs.
+- Dark-mode styling uses Tailwind's `dark:` variant prefixes uniformly across every component's class strings rather than separate stylesheets.
+- DOM measurement and animation frames are coordinated with `requestAnimationFrame` and `nextTick`, and event listeners attached in `onMounted` are removed in `onUnmounted`.

@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: frontend_app/app_infrastructure
+title: Nuxt App Shell, Types & Admin Auth
+scope:
+    - app/
+    - app/types/
+    - app/middleware/
+source_files: []
+depends_on: []
+related_to: []

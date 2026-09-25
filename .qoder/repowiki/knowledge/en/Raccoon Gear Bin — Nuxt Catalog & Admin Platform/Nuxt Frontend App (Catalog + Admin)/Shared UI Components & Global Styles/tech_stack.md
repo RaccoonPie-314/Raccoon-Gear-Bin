@@ -1,0 +1,1 @@
+Vue 3 `<script setup>` with TypeScript, Tailwind CSS v4 (`@import "tailwindcss"`), `@nuxt/ui` primitives, Nuxt i18n (`useI18n`), and Nuxt Color Mode; icons are inline SVGs rather than an icon library.

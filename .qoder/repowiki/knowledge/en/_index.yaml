@@ -1,0 +1,84 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-09-25T03:19:38Z"
+modules:
+    "":
+        dir_name: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
+        title: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
+        scope:
+            - package.json
+            - nuxt.config.ts
+            - i18n.config.ts
+            - tsconfig.json
+            - eslint.config.mjs
+            - .gitignore
+            - .editorconfig
+            - bun.lock
+            - skills-lock.json
+            - renovate.json
+            - README.md
+            - public/
+            - .env.example
+            - LICENSE
+        source_files: []
+        children:
+            - frontend_app
+            - supabase_backend
+        depends_on: []
+        related_to: []
+    frontend_app:
+        dir_name: Nuxt Frontend App (Catalog + Admin)
+        title: Nuxt Frontend App (Catalog + Admin)
+        scope:
+            - app/
+        source_files: []
+        children:
+            - frontend_app/app_infrastructure
+            - frontend_app/products_catalog
+            - frontend_app/shared_ui_components
+        depends_on: []
+        related_to: []
+    frontend_app/app_infrastructure:
+        dir_name: Nuxt App Shell, Types & Admin Auth
+        title: Nuxt App Shell, Types & Admin Auth
+        scope:
+            - app/
+            - app/types/
+            - app/middleware/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    frontend_app/products_catalog:
+        dir_name: Products Catalog Pages & Data Layer
+        title: Products Catalog Pages & Data Layer
+        scope:
+            - app/pages/products/
+            - app/components/ProductCard.vue
+            - app/composables/useCatalog.ts
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    frontend_app/shared_ui_components:
+        dir_name: Shared UI Components & Global Styles
+        title: Shared UI Components & Global Styles
+        scope:
+            - app/components/
+            - app/assets/css/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    supabase_backend:
+        dir_name: Supabase Backend (Postgres Schema, RLS & Storage Policies)
+        title: Supabase Backend (Postgres Schema, RLS & Storage Policies)
+        scope:
+            - supabase/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

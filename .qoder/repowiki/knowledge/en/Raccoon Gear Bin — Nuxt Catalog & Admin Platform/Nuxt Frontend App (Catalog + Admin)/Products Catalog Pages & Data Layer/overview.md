@@ -1,0 +1,1 @@
+Nuxt pages and composables for browsing the published product catalog, including a product detail page with image gallery and spec parsing, plus a reusable ProductCard component.

@@ -1,0 +1,1 @@
+Run `supabase start` from the repo root to spin up the configured Postgres (54322), REST API (54321), and Studio (54323); migrations under `supabase/migrations/` are applied automatically on startup. Project linking state lives in `supabase/.temp/linked-project.json`.

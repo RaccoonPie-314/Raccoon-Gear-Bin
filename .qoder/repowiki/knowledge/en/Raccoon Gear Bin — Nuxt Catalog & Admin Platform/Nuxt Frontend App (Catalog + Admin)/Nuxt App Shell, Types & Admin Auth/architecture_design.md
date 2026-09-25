@@ -1,0 +1,7 @@
+The module is organized as a standard Nuxt 3 `app/` directory with four distinct layers:
+- **App shell**: `app.vue` renders `<NuxtPage />`; `app.config.ts` centralizes shadcn/ui theme tokens (neutral/zinc palette, pill-shaped buttons/inputs/selects).
+- **Types (`app/types/`)**: `database.ts` declares the full Supabase `Database` interface mirroring the Postgres schema (categories, product_translations, product_images, admin_users) plus domain enums (`ProductCategory`, `ProductStatus`, `AdminRole`). `catalog.ts` and `product.ts` re-export UI-facing DTOs (`CatalogProduct`, `ProductRecord`, `ProductTranslationRecord`) that map from DB rows to camelCase view models.
+- **Middleware**: `middleware/admin-auth.global.ts` is a Nuxt global route middleware guarding `/admin/*` by checking `useSupabaseUser()` and querying `admin_users` via the Supabase client; unauthenticated or non-admin users are redirected to `/admin/login`.
+- **Composables**: `composables/useAdminAuth.ts` exposes `isAdmin`, `isSuperAdmin`, `signIn`, `signOut` against the same `admin_users` table, used by admin pages.
+
+Dependency direction is one-way: pages/composables/middleware depend on `types/`; types have no runtime dependencies. The Supabase client is accessed through Nuxt's `useSupabaseClient<Database>()` typed helper, keeping DB queries strongly typed across middleware and composables.

@@ -1,0 +1,8 @@
+schema_version: 1
+module_path: supabase_backend
+title: Supabase Backend (Postgres Schema, RLS & Storage Policies)
+scope:
+    - supabase/
+source_files: []
+depends_on: []
+related_to: []

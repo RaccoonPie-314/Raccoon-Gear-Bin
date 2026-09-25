@@ -1,0 +1,1 @@
+Supabase local development stack — PostgreSQL 15, GoTrue auth with email provider, PostgREST, Storage, and Studio; uses `pgcrypto` extension and PL/pgSQL triggers.

@@ -1,0 +1,1 @@
+Reusable Vue 3 composition-API components (catalog navigation, product card, search dock, color mode and language switchers) plus the global Tailwind CSS theme.

@@ -1,0 +1,6 @@
+Three cooperating layers under `app/`:
+- Pages (`app/pages/products/`): `[id].vue` is the product detail route — it resolves the id from the Nuxt router, calls `useCatalog().fetchProduct`, renders an image gallery with thumbnail selection, parses the `specifications` field (JSON array → object → newline-delimited key:value fallback) via a `parsedSpecs` computed, and sets SEO title through `useHead`. `index.vue` is a redirect shim to `/`.
+- Component (`app/components/ProductCard.vue`): presentational card displaying a product's first image, name, short description, price, stock status, and a link to `/products/${id}`; emits an `edit` event when the optional `isAdmin` prop is set.
+- Composable (`app/composables/useCatalog.ts`): data access layer wrapping Supabase queries against `products`, `categories`, and `product_images` tables. It centralizes locale-aware translation resolution (current locale → English → first entry), public URL generation via Supabase Storage bucket `product-images`, and mapping raw rows into the typed `CatalogProduct` / `CatalogCategory` shapes from `~/types/catalog`.
+
+Dependency direction: pages → `useCatalog` → Supabase client; components are pure presentational consumers of `CatalogProduct` and do not import the composable directly.

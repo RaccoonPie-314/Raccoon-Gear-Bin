@@ -1,0 +1,1 @@
+Top-level Nuxt 3 monorepo entry that boots the product catalog and admin SPA, wiring Supabase client, i18n (en/km), color mode, and Tailwind into a single deployable app.

@@ -1,0 +1,4 @@
+- Supabase client access goes through `useSupabaseClient<Database>()` so every `.from(...)` query is fully typed against the generated `Database` interface rather than raw strings.
+- Domain enums (`ProductCategory`, `ProductStatus`, `AdminRole`) live in `types/database.ts` and are re-imported by higher-level DTOs instead of being duplicated as string literals.
+- UI-facing DTOs in `catalog.ts` / `product.ts` translate snake_case DB columns into camelCase properties (e.g. `stock_quantity` → `stockQuantity`), separating persistence shape from presentation shape.
+- Admin authorization checks follow a uniform pattern: fetch current user, query `admin_users` with `.maybeSingle()`, log errors via `console.error`, and return a boolean defaulting to `false` on failure.

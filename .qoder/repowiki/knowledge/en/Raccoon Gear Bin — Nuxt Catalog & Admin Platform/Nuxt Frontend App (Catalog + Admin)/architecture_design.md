@@ -1,0 +1,5 @@
+The `app/` directory is a Nuxt 3 application where three child concerns are wired together at the framework level:
+- Pages (`pages/`) consume composables from `composables/` and render shared UI from `components/`, with route-based code splitting.
+- Shared TypeScript contracts in `types/` (catalog, database, product) are imported uniformly by both the catalog pages/composables and the admin login page, keeping the Supabase schema shape in one place.
+- Global middleware (`middleware/admin-auth.global.ts`) enforces admin authentication before any admin route renders, while the root `app.vue` boots the layout and global styles from `assets/css/main.css`.
+- The `app.config.ts` configures Nuxt features (e.g. theme, plugins) that all children rely on, and `constants/catalog.ts` centralizes catalog-related values reused across pages and components.

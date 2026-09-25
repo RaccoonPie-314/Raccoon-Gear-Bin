@@ -1,0 +1,21 @@
+schema_version: 1
+module_path: ""
+title: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
+scope:
+    - package.json
+    - nuxt.config.ts
+    - i18n.config.ts
+    - tsconfig.json
+    - eslint.config.mjs
+    - .gitignore
+    - .editorconfig
+    - bun.lock
+    - skills-lock.json
+    - renovate.json
+    - README.md
+    - public/
+    - .env.example
+    - LICENSE
+source_files: []
+depends_on: []
+related_to: []

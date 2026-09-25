@@ -1,0 +1,1 @@
+Nuxt 3 `<script setup>` + TypeScript, VueUse-style composables, Supabase client (`useSupabaseClient`) for RDBMS queries and Storage public URLs, Nuxt I18n (`useI18n`) for locale-aware translations, Tailwind CSS utility classes, and shadcn/ui primitives (`UContainer`, `UAlert`, `UButton`).

@@ -1,0 +1,3 @@
+- Shared data shapes live under `types/` and are imported by both catalog pages and admin routes rather than redefined locally.
+- Reusable UI logic is exposed as Vue composition functions in `composables/` and consumed by pages and other components.
+- Route-gated functionality uses Nuxt's global middleware pattern instead of per-page guards.
