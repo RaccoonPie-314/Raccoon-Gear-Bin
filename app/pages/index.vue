@@ -190,14 +190,14 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
 
 <template>
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-    <UContainer class="pt-6 sm:pt-8 pb-28 sm:pb-32 lg:pb-16">
-      <!-- Top Row: Massive Logo on Left, ColorMode & Language Buttons on Right -->
-      <div class="flex items-start justify-between gap-4 pb-8 border-b border-zinc-200/80 dark:border-zinc-800/80">
-        <NuxtLink to="/" :aria-label="t('appName')">
-          <BrandLogo size="hero" />
+    <UContainer class="pt-5 sm:pt-6 pb-28 sm:pb-32 lg:pb-20">
+      <!-- Masthead: slim logo on the left, utility controls on the right, one hairline below -->
+      <header class="flex items-center justify-between gap-4 border-b border-zinc-200/80 pb-4 dark:border-zinc-800/80">
+        <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
+          <BrandLogo size="sm" />
         </NuxtLink>
 
-        <div class="flex items-center gap-3 sm:gap-4 shrink-0 pt-2">
+        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
           <ColorModeToggle />
           <LanguageSwitcher />
           <span
@@ -218,22 +218,24 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
             {{ t('logout') }}
           </UButton>
         </div>
-      </div>
+      </header>
 
-      <!-- Hero Section with 'The Collection' tagline under the logo -->
-      <section class="flex flex-col justify-between gap-6 border-b border-zinc-200/80 py-8 dark:border-zinc-800/80 md:flex-row md:items-end">
-        <div class="max-w-2xl">
-          <p class="text-[11px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
+      <!-- Page heading: eyebrow over the display line, admin action held to the baseline -->
+      <section class="flex flex-col justify-between gap-6 pt-10 sm:pt-14 md:flex-row md:items-end md:gap-10">
+        <div class="max-w-3xl">
+          <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks below
+               the baseline, so the labels drop to a hairline of tracking in that locale. -->
+          <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
             {{ t('collection') }}
           </p>
-          <p class="mt-2 text-base sm:text-lg leading-relaxed text-zinc-500 dark:text-zinc-400 font-normal">
+          <h1 class="mt-3 max-w-[22ch] text-2xl font-bold leading-snug tracking-tight text-balance text-zinc-950 sm:text-3xl lg:text-4xl dark:text-white">
             {{ t('tagLine') }}
-          </p>
+          </h1>
         </div>
         <UButton
           v-if="isAdminMode"
           color="neutral"
-          class="shrink-0 rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs"
+          class="shrink-0 self-start rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs md:self-auto"
           @click="openAddEditor"
         >
           ＋ {{ t('addProduct') }}
@@ -241,10 +243,10 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
       </section>
 
       <!-- Main Layout: Category Navigation Sidebar + Product Listing -->
-      <div class="mt-8 sm:mt-10 flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10">
+      <div class="mt-10 flex flex-col gap-0 sm:mt-12 lg:flex-row lg:items-start lg:gap-10">
         <!-- Left Side: Category Navigation Panel (desktop only in layout flow) -->
-        <aside class="relative w-full lg:w-44 xl:w-48 shrink-0 lg:sticky lg:top-24">
-          <p class="hidden lg:block mb-3 text-[10px] font-bold uppercase tracking-[0.22em] text-zinc-400 dark:text-zinc-500">
+        <aside class="relative w-full shrink-0 lg:sticky lg:top-10 lg:w-44 xl:w-48">
+          <p class="hidden lg:block mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
             {{ t('shopByCategory') }}
           </p>
           <CategoryNav
@@ -258,11 +260,12 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
         </aside>
 
         <!-- Right Side: Search, Sort & Products -->
-        <div class="flex-1 min-w-0">
-          <div class="flex flex-col gap-4 border-b border-zinc-200/80 pb-6 dark:border-zinc-800/80 sm:flex-row sm:items-center sm:justify-between">
-            <div data-search-anchor class="flex h-14 w-full items-center gap-3 rounded-full border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 sm:max-w-xs md:max-w-sm dark:border-zinc-800/80 dark:bg-zinc-900">
+        <div class="min-w-0 flex-1">
+          <!-- Control group: one row from sm up, search and sort share the same 44px rhythm -->
+          <div class="flex flex-col gap-3 border-b border-zinc-200/80 pb-5 dark:border-zinc-800/80 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+            <div data-search-anchor class="flex h-11 w-full shrink-0 items-center gap-2.5 rounded-full border border-zinc-200/80 bg-white pr-1.5 pl-4 shadow-xs sm:w-72 dark:border-zinc-800/80 dark:bg-zinc-900 lg:w-80">
               <span class="flex h-5 w-5 shrink-0 items-center justify-center text-zinc-400 dark:text-zinc-500">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4.5 w-4.5" aria-hidden="true">
                   <circle cx="11" cy="11" r="8" />
                   <path d="m21 21-4.3-4.3" />
                 </svg>
@@ -275,11 +278,11 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 :spellcheck="false"
                 :placeholder="t('searchCatalog')"
                 :aria-label="t('searchCatalog')"
-                class="h-full w-full min-w-0 border-0 bg-transparent p-0 text-base font-medium text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white dark:placeholder:text-zinc-500"
+                class="h-full w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium text-zinc-950 outline-none placeholder:text-zinc-400 sm:text-base dark:text-white dark:placeholder:text-zinc-500"
               >
               <button
                 type="button"
-                class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
+                class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors duration-200 hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
                 :aria-label="t('clearSearch')"
                 :title="t('clearSearch')"
                 @click="search = ''"
@@ -290,8 +293,8 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 </svg>
               </button>
             </div>
-            <div class="flex items-center justify-between sm:justify-end gap-4">
-              <span class="text-xs font-medium text-zinc-400 dark:text-zinc-500 tabular-nums">
+            <div class="flex items-center justify-between gap-4 sm:justify-end sm:gap-5">
+              <span class="text-xs font-medium text-zinc-400 tabular-nums dark:text-zinc-500">
                 {{ filteredProducts.length }} {{ filteredProducts.length === 1 ? 'item' : 'items' }}
               </span>
               <USelect
@@ -302,7 +305,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                   { label: t('priceHigh'), value: 'price-high' },
                   { label: t('nameAZ'), value: 'name' }
                 ]"
-                class="w-44 sm:w-48"
+                class="h-11 w-44 shrink-0 sm:w-48"
               />
             </div>
           </div>
@@ -310,13 +313,13 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           <UAlert v-if="loadError" class="mt-6" color="error" variant="soft" :title="loadError" />
           <UAlert v-if="actionError" class="mt-6" color="error" variant="soft" :title="actionError" />
 
-          <div v-if="isLoading" class="mt-8 grid gap-6 sm:gap-8 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
-            <div v-for="item in 6" :key="item" class="h-96 rounded-2xl bg-zinc-100 dark:bg-zinc-900 animate-pulse border border-zinc-200/60 dark:border-zinc-800/60" />
+          <div v-if="isLoading" class="mt-8 grid grid-cols-1 gap-x-6 gap-y-10 sm:mt-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 xl:grid-cols-3">
+            <div v-for="item in 6" :key="item" class="aspect-[4/5] rounded-2xl border border-zinc-200/60 bg-zinc-100 animate-pulse dark:border-zinc-800/60 dark:bg-zinc-900" />
           </div>
           <div v-else-if="!filteredProducts.length" class="mt-8 rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">
             <p class="text-sm font-medium text-zinc-500">{{ t('noProducts') }}</p>
           </div>
-          <div v-else class="mt-8 grid gap-6 sm:gap-8 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
+          <div v-else class="mt-8 grid grid-cols-1 gap-x-6 gap-y-10 sm:mt-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 xl:grid-cols-3">
             <ProductCard
               v-for="product in filteredProducts"
               :key="product.id"
