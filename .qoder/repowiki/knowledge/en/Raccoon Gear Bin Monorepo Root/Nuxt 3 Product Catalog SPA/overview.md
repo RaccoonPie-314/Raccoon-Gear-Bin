@@ -1,0 +1,1 @@
+Nuxt 3 single-page application wiring product catalog pages, shared Vue components, and Supabase-backed admin auth into one app with global theme and route guards.

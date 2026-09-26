@@ -31,7 +31,7 @@ The catalog feature is implemented as a Nuxt composable with strongly typed inte
 - Types: app/types/catalog.ts (domain types), app/types/database.ts (Supabase schema types)
 - Internationalization: i18n.config.ts
 - Storage policies: supabase/migrations/20260922000002_storage_and_rls.sql
-- Usage examples: app/pages/index.vue (list view), app/pages/products/[id].vue (detail view)
+- Usage examples: app/pages/index.vue (list view, via `fetchCatalog()`), app/pages/products/[id].vue (detail view, via `fetchProduct()`). Both pages read catalog data through this composable only — neither issues its own `products`/`categories` query.
 
 ```mermaid
 graph TB
@@ -53,26 +53,34 @@ Composable --> Storage
 ```
 
 **Diagram sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-122](file://app/types/database.ts#L77-L122)
+- [database.ts:77-163](file://app/types/database.ts#L77-L163)
 - [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 **Section sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-122](file://app/types/database.ts#L77-L122)
+- [database.ts:77-163](file://app/types/database.ts#L77-L163)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 - [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 ## Core Components
 - useCatalog composable exposes:
+  - fetchCatalog(): loads published products and active categories concurrently, returning `{ products, categories }` — the entry point used by the home page
   - fetchProducts(): returns an array of CatalogProduct
   - fetchProduct(id): returns a single CatalogProduct or null
   - fetchCategories(): returns an array of CatalogCategory
+  - parseSpecifications(text): editor input (JSON, or `label: value` per line) into the stored jsonb shape
+  - formatSpecifications(value): the stored jsonb shape back into editor text
 - Internal helpers:
-  - mapProduct(raw): transforms raw Supabase rows into CatalogProduct
+  - mapProduct(row) / mapCategory(row): transform raw Supabase rows into CatalogProduct / CatalogCategory
+  - pickTranslation(rows): the one locale resolution used everywhere — current locale → `en` → first available
   - publicImageUrl(storagePath): resolves public URLs for images
+
+Browsing state (search query, sort order, selected category and the derived `filteredProducts`) is **not** part of `useCatalog`. It lives in `useCatalogBrowse`, which takes the loaded list and returns the subset to render. Data access and view state stay separate.
+
+Typing rule: the Supabase client is used as `useSupabaseClient<Database>()` with no `as any`, and the row types passed to the mappers are **derived from the queries themselves** (`ProductRow`, `CategoryRow`). Dropping a column from a select string therefore breaks the mapper at compile time rather than handing the view an `undefined`.
 
 Key responsibilities:
 - Query products and categories from Supabase with selective fields
@@ -81,7 +89,7 @@ Key responsibilities:
 - Generate public image URLs using Supabase storage
 
 **Section sources**
-- [useCatalog.ts:4-59](file://app/composables/useCatalog.ts#L4-L59)
+- [useCatalog.ts:12-114](file://app/composables/useCatalog.ts#L12-L114)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 
 ## Architecture Overview
@@ -108,16 +116,17 @@ Cat-->>Page : CatalogProduct | null
 ```
 
 **Diagram sources**
-- [useCatalog.ts:37-47](file://app/composables/useCatalog.ts#L37-L47)
-- [useCatalog.ts:8-11](file://app/composables/useCatalog.ts#L8-L11)
+- [useCatalog.ts:90-100](file://app/composables/useCatalog.ts#L90-L100)
+- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
 
 ## Detailed Component Analysis
 
 ### useCatalog Composable
 Responsibilities:
 - Initialize Supabase client and i18n locale
-- Provide fetchProducts, fetchProduct, fetchCategories
-- Map raw rows to CatalogProduct with i18n-aware names and sorted images
+- Provide fetchCatalog, fetchProducts, fetchProduct, fetchCategories
+- Provide the specification parse/format pair used by the admin editor
+- Map raw rows to CatalogProduct with locale-aware names and sorted images
 - Resolve public image URLs
 
 Data flow highlights:
@@ -148,10 +157,10 @@ BuildObject --> End(["Return CatalogProduct"])
 ```
 
 **Diagram sources**
-- [useCatalog.ts:13-33](file://app/composables/useCatalog.ts#L13-L33)
+- [useCatalog.ts:42-63](file://app/composables/useCatalog.ts#L42-L63)
 
 **Section sources**
-- [useCatalog.ts:4-59](file://app/composables/useCatalog.ts#L4-L59)
+- [useCatalog.ts:12-114](file://app/composables/useCatalog.ts#L12-L114)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
@@ -198,7 +207,7 @@ CatalogProduct --> CatalogImage : "has many"
 
 **Section sources**
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-122](file://app/types/database.ts#L77-L122)
+- [database.ts:77-163](file://app/types/database.ts#L77-L163)
 
 ### API Methods
 
@@ -210,11 +219,11 @@ CatalogProduct --> CatalogImage : "has many"
 - Notes: Orders by created_at descending; selects minimal fields
 
 Usage example:
-- See list page loading and mapping logic
+- Reached through `fetchCatalog()` from the home page loader
 
 **Section sources**
-- [useCatalog.ts:37-41](file://app/composables/useCatalog.ts#L37-L41)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [useCatalog.ts:90-94](file://app/composables/useCatalog.ts#L90-L94)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 #### fetchProduct
 - Purpose: Retrieve a single published product by id
@@ -227,7 +236,7 @@ Usage example:
 - See detail page load flow
 
 **Section sources**
-- [useCatalog.ts:43-47](file://app/composables/useCatalog.ts#L43-L47)
+- [useCatalog.ts:96-100](file://app/composables/useCatalog.ts#L96-L100)
 - [products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 #### fetchCategories
@@ -238,11 +247,22 @@ Usage example:
 - Notes: Orders by sort_order; resolves category name by locale with fallback
 
 Usage example:
-- See list page category loading
+- Reached through `fetchCatalog()` from the home page loader
 
 **Section sources**
-- [useCatalog.ts:49-57](file://app/composables/useCatalog.ts#L49-L57)
-- [index.vue:105-115](file://app/pages/index.vue#L105-L115)
+- [useCatalog.ts:102-107](file://app/composables/useCatalog.ts#L102-L107)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
+
+#### fetchCatalog
+- Purpose: Load everything the catalog landing page needs in one call
+- Parameters: none
+- Return type: Promise<{ products: CatalogProduct[]; categories: CatalogCategory[] }>
+- Error handling: propagates the first rejection from either query; the page turns it into `loadError`
+- Notes: Runs `fetchProducts()` and `fetchCategories()` concurrently via `Promise.all`. This is the only catalog entry point the home page uses — the page keeps no query or row mapper of its own
+
+**Section sources**
+- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ### Image URL Generation System
 - Bucket: product-images
@@ -262,11 +282,11 @@ D --> E["Return publicUrl"]
 ```
 
 **Diagram sources**
-- [useCatalog.ts:8-11](file://app/composables/useCatalog.ts#L8-L11)
+- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
 - [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 **Section sources**
-- [useCatalog.ts:8-11](file://app/composables/useCatalog.ts#L8-L11)
+- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
 - [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 ### Internationalization Support
@@ -279,32 +299,40 @@ D --> E["Return publicUrl"]
   - Default locale and messages defined in i18n config
 
 **Section sources**
-- [useCatalog.ts:13-33](file://app/composables/useCatalog.ts#L13-L33)
+- [useCatalog.ts:32-68](file://app/composables/useCatalog.ts#L32-L68)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 ### Usage Examples
 
 #### In List Page
-- Load categories and products concurrently
-- Map raw rows to CatalogProduct
+- Call `fetchCatalog()` once, which loads categories and products concurrently
+- Assign the returned `products` / `categories` to page state
 - Display loading states and errors
+- Hand the loaded list to `useCatalogBrowse` for search, sort and category filtering
+
+The page does not query Supabase for catalog rows and does not map rows itself; both live behind `useCatalog`.
 
 ```mermaid
 sequenceDiagram
 participant Page as "pages/index.vue"
 participant Cat as "useCatalog"
-Page->>Cat : fetchCategories()
-Page->>Cat : fetchProducts()
-Cat-->>Page : CatalogCategory[]
-Cat-->>Page : CatalogProduct[]
-Page->>Page : render UI with filtered/sorted products
+participant Browse as "useCatalogBrowse"
+Page->>Cat : fetchCatalog()
+Cat->>Cat : fetchProducts() + fetchCategories() in parallel
+Cat-->>Page : { products, categories }
+Page->>Browse : useCatalogBrowse(products)
+Browse-->>Page : search, selectedCategory, sortOrder, filteredProducts
+Page->>Page : render filteredProducts
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
+- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
+- [useCatalogBrowse.ts:13-38](file://app/composables/useCatalogBrowse.ts#L13-L38)
 
 **Section sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
+- [useCatalogBrowse.ts:1-39](file://app/composables/useCatalogBrowse.ts#L1-L39)
 
 #### In Detail Page
 - Fetch a single product by id
@@ -322,7 +350,7 @@ Page->>Page : render product details or not-found message
 
 **Diagram sources**
 - [products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
-- [useCatalog.ts:43-47](file://app/composables/useCatalog.ts#L43-L47)
+- [useCatalog.ts:96-100](file://app/composables/useCatalog.ts#L96-L100)
 
 **Section sources**
 - [products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
@@ -347,14 +375,14 @@ SUPA --> ST["Storage Bucket: product-images"]
 ```
 
 **Diagram sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [database.ts:77-122](file://app/types/database.ts#L77-L122)
+- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
+- [database.ts:77-163](file://app/types/database.ts#L77-L163)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 **Section sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [database.ts:77-122](file://app/types/database.ts#L77-L122)
+- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
+- [database.ts:77-163](file://app/types/database.ts#L77-L163)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
@@ -392,7 +420,7 @@ Common issues and resolutions:
   - Catch thrown errors and show user-friendly messages
 
 **Section sources**
-- [useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
+- [useCatalog.ts:90-112](file://app/composables/useCatalog.ts#L90-L112)
 - [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 ## Conclusion

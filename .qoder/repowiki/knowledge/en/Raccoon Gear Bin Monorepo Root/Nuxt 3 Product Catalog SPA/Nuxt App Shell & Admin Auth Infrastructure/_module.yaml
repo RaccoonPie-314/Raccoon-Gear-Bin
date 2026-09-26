@@ -1,10 +1,11 @@
 schema_version: 1
 module_path: frontend_app/app_infrastructure
-title: Nuxt App Shell, Types & Admin Auth
+title: Nuxt App Shell & Admin Auth Infrastructure
 scope:
     - app/
     - app/types/
     - app/middleware/
 source_files: []
 depends_on: []
-related_to: []
+related_to:
+    - path: supabase_backend

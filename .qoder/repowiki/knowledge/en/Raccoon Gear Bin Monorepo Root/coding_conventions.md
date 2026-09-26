@@ -1,0 +1,2 @@
+- Environment-driven configuration is centralized in `nuxt.config.ts` under `runtimeConfig.public` and the `supabase` block rather than scattered across components.
+- User-facing strings live in `i18n.config.ts` keyed by `en` and `km`, using `prefix_except_default` routing and storing locale in the `raccoon-gear-bin-locale` cookie.

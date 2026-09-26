@@ -1,0 +1,1 @@
+`bun install` runs `postinstall: nuxt prepare`; `bun dev` starts the Nuxt dev server, `bun build` / `bun generate` produce the production bundle, and `bun preview` serves it locally. Required env vars: `SUPABASE_SERVICE_ROLE_KEY`, `NUXT_PUBLIC_SUPABASE_URL`, `NUXT_PUBLIC_SUPABASE_ANON_KEY` (see `.env.example`).

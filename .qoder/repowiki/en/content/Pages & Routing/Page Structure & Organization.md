@@ -5,6 +5,11 @@
 - [index.vue](file://app/pages/index.vue)
 - [products/[id].vue](file://app/pages/products/[id].vue)
 - [admin/login.vue](file://app/pages/admin/login.vue)
+- [CategoryNav.vue](file://app/components/CategoryNav.vue)
+- [SearchDock.vue](file://app/components/SearchDock.vue)
+- [ProductCard.vue](file://app/components/ProductCard.vue)
+- [CategoryDesktop.vue](file://app/components/category/CategoryDesktop.vue)
+- [CategoryMobile.vue](file://app/components/category/CategoryMobile.vue)
 - [app.vue](file://app/app.vue)
 - [nuxt.config.ts](file://nuxt.config.ts)
 - [useCatalog.ts](file://app/composables/useCatalog.ts)
@@ -12,6 +17,15 @@
 - [admin-auth.global.ts](file://app/middleware/admin-auth.global.ts)
 - [i18n.config.ts](file://i18n.config.ts)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated catalog page section with comprehensive visual and structural rebalancing details
+- Added detailed documentation for new SearchDock component with morphing search interface
+- Enhanced CategoryNav component documentation with desktop and mobile variants
+- Updated grid spacing and responsive design patterns
+- Improved typography and masthead structure documentation
+- Added advanced interaction patterns including drag-to-select functionality
 
 ## Table of Contents
 1. Introduction
@@ -26,13 +40,13 @@
 
 ## Introduction
 This document explains the Nuxt.js page structure and organization patterns used in the project. It covers file-based routing, directory conventions, and how pages map to routes. It focuses on:
-- The main catalog landing page (index.vue) for browsing products
+- The main catalog landing page (index.vue) for browsing products with enhanced visual design
 - The dynamic product detail page (products/[id].vue) for individual product views
 - The admin login page (admin/login.vue) for administrative access
 It also describes script setup patterns, template organization, styling approaches, integration with data fetching and state management, SEO considerations, and performance strategies.
 
 ## Project Structure
-The application uses Nuxt’s file-based routing under app/pages. Each Vue SFC maps directly to a route path:
+The application uses Nuxt's file-based routing under app/pages. Each Vue SFC maps directly to a route path:
 - app/pages/index.vue → /
 - app/pages/products/[id].vue → /products/:id
 - app/pages/admin/login.vue → /admin/login
@@ -60,9 +74,13 @@ F --> D
 
 ## Core Components
 - Pages:
-  - index.vue: Catalog landing with search, category filtering, sorting, and admin CRUD modal
+  - index.vue: Enhanced catalog landing with sophisticated masthead, unified search/sort controls, improved grid spacing, and responsive sidebar navigation
   - products/[id].vue: Dynamic product detail with image gallery, specs, and stock status
   - admin/login.vue: Admin authentication form with validation and error handling
+- Advanced UI Components:
+  - SearchDock.vue: Morphing search interface with animated transitions and scroll-aware behavior
+  - CategoryNav.vue: Responsive category navigation with desktop and mobile variants
+  - ProductCard.vue: Enhanced product cards with hover effects and admin controls
 - Composables:
   - useCatalog.ts: Data fetching for products, categories, and mapping to typed models
   - useAdminAuth.ts: Authentication helpers for sign-in/sign-out and role checks
@@ -72,28 +90,33 @@ F --> D
   - i18n.config.ts: Locale definitions and messages used across pages
 
 Key responsibilities:
-- Routing and navigation via Nuxt’s file system
+- Routing and navigation via Nuxt's file system
 - Data fetching through Supabase client within composables or pages
-- UI composition using shared components (e.g., ProductCard, CategoryNav, SearchDock, StockStatus)
+- Sophisticated UI composition using advanced components with complex interactions
 - Global behavior via middleware and config
 
 **Section sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
+- [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
+- [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
+- [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 ## Architecture Overview
-Pages integrate with Supabase via composables and utilities. Authentication is handled by Supabase Auth and enforced by middleware. Internationalization is provided by i18n. Styling uses Tailwind classes and global CSS.
+Pages integrate with Supabase via composables and utilities. Authentication is handled by Supabase Auth and enforced by middleware. Internationalization is provided by i18n. Styling uses Tailwind classes and global CSS with sophisticated animations and transitions.
 
 ```mermaid
 sequenceDiagram
 participant U as "User"
 participant R as "Nuxt Router"
 participant P as "Page (index.vue)"
+participant SD as "SearchDock"
+participant CN as "CategoryNav"
 participant C as "useCatalog"
 participant S as "Supabase Client"
 participant M as "Middleware (admin-auth.global.ts)"
@@ -103,7 +126,9 @@ P->>C : fetchProducts()
 C->>S : Query products + categories
 S-->>C : Data
 C-->>P : Mapped products
-P-->>U : Catalog UI
+P->>SD : Initialize morphing search
+P->>CN : Load category navigation
+P-->>U : Enhanced catalog UI
 U->>R : Navigate to "/admin/*"
 R->>M : Run global middleware
 M->>S : Check admin_users
@@ -116,57 +141,150 @@ end
 
 **Diagram sources**
 - [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [SearchDock.vue:288-352](file://app/components/SearchDock.vue#L288-L352)
+- [CategoryNav.vue:20-36](file://app/components/CategoryNav.vue#L20-L36)
 - [useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 
 ## Detailed Component Analysis
 
-### Landing Page: app/pages/index.vue
+### Enhanced Landing Page: app/pages/index.vue
+**Updated** The catalog page underwent comprehensive visual and structural rebalancing with sophisticated design improvements.
+
 Responsibilities:
-- Loads categories and published products concurrently
-- Filters by category slug/name, searches by name/sku/description
-- Sorts by newest, price low/high, name A-Z
-- Renders product grid using ProductCard
-- Provides admin mode: add/edit/delete products, manage images, and logout
-- Sets page title via useHead
+- Loads categories and published products concurrently with enhanced loading states
+- Provides unified search/sort controls with improved UX patterns
+- Implements responsive sidebar navigation with desktop and mobile variants
+- Renders product grid with improved spacing and typography
+- Offers admin mode: add/edit/delete products, manage images, and logout
+- Sets page title via useHead with enhanced SEO
+
+**Visual Enhancements:**
+- **Masthead Restructuring**: Slim logo on left with utility controls on right, separated by hairline borders
+- **Unified Controls**: Search and sort controls share consistent 44px rhythm and responsive layout
+- **Improved Grid Spacing**: Enhanced gap values (gap-x-6 gap-y-10 sm:gap-x-8 sm:gap-y-12) for better visual hierarchy
+- **Typography Enhancements**: Improved tracking values, font weights, and responsive text sizing
+- **Responsive Design**: Mobile-first approach with sophisticated breakpoints and adaptive layouts
 
 Data flow:
-- On mount, load catalog data from Supabase
+- On mount, load catalog data from Supabase with parallel queries
 - Map raw records into typed models with translations based on current locale
-- Compute filtered and sorted lists reactively
+- Compute filtered and sorted lists reactively with enhanced filtering logic
 - Persist changes via Supabase and refresh catalog
 
 SEO:
-- Title set dynamically with useHead
+- Title set dynamically with useHead for optimal search engine optimization
 
 Performance:
 - Parallel queries for categories and products
 - Local computed filtering/sorting avoids extra network calls
 - Loading skeletons improve perceived performance
+- Optimized image loading with lazy loading
 
 Styling:
 - Tailwind utility classes for responsive layout and dark mode support
+- Sophisticated animation transitions and micro-interactions
+- Consistent spacing and typography system
 
 **Section sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
 
-#### Sequence: Load Catalog and Render Products
+#### Enhanced Layout Structure
 ```mermaid
-sequenceDiagram
-participant Page as "index.vue"
-participant Cat as "useCatalog"
-participant SB as "Supabase"
-Page->>Cat : fetchProducts()
-Cat->>SB : SELECT products (published)
-SB-->>Cat : Raw product rows
-Cat-->>Page : Mapped products
-Page->>Page : Filter + Sort (computed)
-Page-->>Page : Render ProductCard list
+flowchart TD
+Masthead["Enhanced Masthead<br/>Logo + Utility Controls"] --> Heading["Refined Page Heading<br/>Eyebrow + Display Line"]
+Heading --> MainLayout["Main Layout Container<br/>Sidebar + Content Area"]
+MainLayout --> Sidebar["Category Navigation Sidebar<br/>Sticky Desktop + Fixed Mobile"]
+MainLayout --> Content["Content Area<br/>Unified Controls + Product Grid"]
+Sidebar --> CategoryNav["CategoryNav Component<br/>Desktop/Mobile Variants"]
+Sidebar --> SearchDock["SearchDock Component<br/>Morphing Interface"]
+Content --> Controls["Unified Search/Sort Controls<br/>Consistent 44px Rhythm"]
+Content --> ProductGrid["Enhanced Product Grid<br/>Improved Spacing + Typography"]
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
-- [useCatalog.ts:37-41](file://app/composables/useCatalog.ts#L37-L41)
+- [index.vue:192-332](file://app/pages/index.vue#L192-L332)
+
+### Advanced Search Interface: app/components/SearchDock.vue
+**New** Sophisticated morphing search interface with advanced animations and scroll-aware behavior.
+
+Responsibilities:
+- Creates morphing transition between launcher icon and full search interface
+- Implements scroll-aware visibility with hysteresis for smooth user experience
+- Provides both desktop and mobile launcher interfaces
+- Handles keyboard navigation and accessibility features
+- Manages complex animation states and timing
+
+**Advanced Features:**
+- **Morphing Animation**: Smooth transition from launcher icon to search panel with precise timing
+- **Scroll Awareness**: Automatically collapses when search field scrolls off-screen
+- **Backdrop Management**: Animated backdrop with blur effects and proper z-index management
+- **Keyboard Navigation**: Full keyboard support with focus trapping and escape key handling
+- **Touch Support**: Mobile-optimized touch interactions and gesture handling
+
+Animation System:
+- Uses cubic-bezier easing functions for natural motion curves
+- Implements requestAnimationFrame for smooth 60fps animations
+- Manages multiple animation states with proper cleanup
+- Handles resize events and viewport changes
+
+Accessibility:
+- Proper ARIA attributes and roles for screen readers
+- Focus management and keyboard navigation
+- Semantic HTML structure with proper labeling
+
+**Section sources**
+- [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
+
+### Enhanced Category Navigation: app/components/CategoryNav.vue
+**Updated** Responsive category navigation with sophisticated desktop and mobile implementations.
+
+Responsibilities:
+- Provides dual implementation: desktop vertical nav and mobile bottom bar
+- Handles category selection with enhanced visual feedback
+- Integrates with parent component for two-way data binding
+- Supports both database categories and predefined category sets
+
+**Desktop Implementation (CategoryDesktop.vue):**
+- **Magnification Effects**: Mouse proximity-based scaling for interactive feel
+- **Drag-to-Select**: Advanced drag gestures with velocity detection
+- **Sliding Indicator**: Smooth animated selection indicator with precise positioning
+- **Z-index Management**: Dynamic layering based on mouse proximity
+
+**Mobile Implementation (CategoryMobile.vue):**
+- **Fixed Bottom Bar**: Persistent navigation accessible at all times
+- **Horizontal Scrolling**: Smooth scrolling with active item auto-centering
+- **Touch Gestures**: Drag-to-select with momentum and bounce effects
+- **Scroll Detection**: Auto-hide/show based on page scroll position
+
+Both implementations feature:
+- Consistent category data structure and selection logic
+- Enhanced visual feedback with smooth transitions
+- Accessibility support with proper ARIA attributes
+- Responsive design principles throughout
+
+**Section sources**
+- [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
+- [CategoryDesktop.vue:1-611](file://app/components/category/CategoryDesktop.vue#L1-L611)
+- [CategoryMobile.vue:1-577](file://app/components/category/CategoryMobile.vue#L1-L577)
+
+### Enhanced Product Cards: app/components/ProductCard.vue
+**Updated** Product cards with improved hover effects, admin controls, and responsive design.
+
+Responsibilities:
+- Displays product information with enhanced visual hierarchy
+- Provides hover-triggered edit buttons for admin mode
+- Implements lazy loading for product images
+- Shows stock status and pricing information
+
+**Enhanced Features:**
+- **Hover Effects**: Subtle scale transforms and shadow changes on hover
+- **Admin Controls**: Contextual edit buttons that appear on hover in admin mode
+- **Image Handling**: Graceful fallbacks for missing images with placeholder content
+- **Responsive Typography**: Adaptive text sizing across different screen sizes
+
+**Section sources**
+- [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
 ### Dynamic Product Detail: app/pages/products/[id].vue
 Responsibilities:
@@ -180,7 +298,7 @@ Responsibilities:
 Error states:
 - Loading skeleton while fetching
 - Alert on load errors
-- “Product not found” view when missing
+- "Product not found" view when missing
 
 SEO:
 - Title includes product name and app name
@@ -191,25 +309,6 @@ Performance:
 
 **Section sources**
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
-
-#### Flowchart: Parse Specifications
-```mermaid
-flowchart TD
-Start(["Start"]) --> HasSpecs{"Has specifications?"}
-HasSpecs --> |No| Empty["Return empty array"]
-HasSpecs --> |Yes| TryJSON{"Try JSON parse"}
-TryJSON --> |Success| IsArray{"Is Array?"}
-TryJSON --> |Fail| SplitLines["Split by lines"]
-IsArray --> |Yes| FilterItems["Filter items with label/value"]
-IsArray --> |No| ToEntries["Convert object to entries"]
-SplitLines --> MapPairs["Map to {label,value} pairs"]
-FilterItems --> Return["Return parsed specs"]
-ToEntries --> Return
-MapPairs --> Return
-```
-
-**Diagram sources**
-- [products/[id].vue:22-43](file://app/pages/products/[id].vue#L22-L43)
 
 ### Admin Login: app/pages/admin/login.vue
 Responsibilities:
@@ -231,32 +330,6 @@ UX:
 **Section sources**
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
-#### Sequence: Admin Sign-In Flow
-```mermaid
-sequenceDiagram
-participant User as "User"
-participant Login as "admin/login.vue"
-participant Auth as "useAdminAuth"
-participant SB as "Supabase"
-User->>Login : Submit email/password
-Login->>Auth : signIn(email,password)
-Auth->>SB : auth.signInWithPassword
-SB-->>Auth : Session
-Login->>SB : SELECT admin_users WHERE user_id = ?
-alt Admin record exists
-SB-->>Login : Record
-Login->>User : Redirect to "/"
-else No admin record
-SB-->>Login : None
-Login->>Auth : signOut()
-Login-->>User : Show "unauthorized"
-end
-```
-
-**Diagram sources**
-- [admin/login.vue:15-54](file://app/pages/admin/login.vue#L15-L54)
-- [useAdminAuth.ts:56-69](file://app/composables/useAdminAuth.ts#L56-L69)
-
 ### Middleware: app/middleware/admin-auth.global.ts
 Behavior:
 - Guards all /admin/* routes except /admin/login
@@ -265,7 +338,7 @@ Behavior:
 - Redirects to /admin/login if not authorized
 
 Integration:
-- Works globally with Nuxt’s middleware pipeline
+- Works globally with Nuxt's middleware pipeline
 - Ensures consistent protection across admin features
 
 **Section sources**
@@ -290,13 +363,16 @@ These composables centralize logic and reduce duplication across pages.
 Pages depend on:
 - Supabase client for data and auth
 - i18n for localized strings
-- Shared UI components for layout and interactions
+- Advanced UI components for sophisticated interactions
 - Middleware for route guards
 
 ```mermaid
 graph LR
 Index["index.vue"] --> UC["useCatalog.ts"]
 Index --> UA["useAdminAuth.ts"]
+Index --> SD["SearchDock.vue"]
+Index --> CN["CategoryNav.vue"]
+Index --> PC["ProductCard.vue"]
 Detail["products/[id].vue"] --> UC
 Login["admin/login.vue"] --> UA
 UA --> SB["Supabase Client"]
@@ -305,21 +381,30 @@ MW["admin-auth.global.ts"] --> SB
 Index --> I18N["i18n.config.ts"]
 Detail --> I18N
 Login --> I18N
+SD --> I18N
+CN --> I18N
+PC --> I18N
 ```
 
 **Diagram sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
+- [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
+- [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
+- [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 **Section sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
+- [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
+- [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
+- [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
@@ -334,6 +419,14 @@ Login --> I18N
   - Use head meta tags for SEO titles per page
   - Keep payloads lean by selecting only needed fields
 - Middleware efficiency: Minimal checks and early redirects prevent unnecessary work.
+- **Advanced Animation Performance**: 
+  - Efficient animation state management with proper cleanup
+  - RequestAnimationFrame usage for smooth 60fps animations
+  - Optimized DOM manipulation and event handling
+- **Component Optimization**:
+  - Lazy loading for heavy components like SearchDock
+  - Virtual scrolling considerations for large product lists
+  - Debounced event handlers for scroll and resize events
 
 [No sources needed since this section provides general guidance]
 
@@ -349,23 +442,38 @@ Common issues and where to inspect:
   - Review sign-in flow and redirection logic
 - Middleware redirects:
   - If stuck on /admin/login, confirm user session and admin role lookup
+- **Search Dock Issues**:
+  - Verify animation state cleanup and event listener removal
+  - Check scroll event handling and position calculations
+- **Category Navigation Problems**:
+  - Ensure proper component mounting and lifecycle hooks
+  - Verify touch event handling on mobile devices
+  - Check responsive breakpoint behavior
 
 Relevant locations:
 - Catalog load error handling and retry
 - Product detail error and not-found states
 - Admin login validation and error messaging
 - Middleware authorization checks
+- Search dock animation and event management
+- Category navigation component lifecycle
 
 **Section sources**
 - [index.vue:101-120](file://app/pages/index.vue#L101-L120)
 - [products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 - [admin/login.vue:15-54](file://app/pages/admin/login.vue#L15-L54)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
+- [SearchDock.vue:429-445](file://app/components/SearchDock.vue#L429-L445)
+- [CategoryDesktop.vue:379-412](file://app/components/category/CategoryDesktop.vue#L379-L412)
+- [CategoryMobile.vue:343-391](file://app/components/category/CategoryMobile.vue#L343-L391)
 
 ## Conclusion
-The project follows Nuxt’s file-based routing with clear separation of concerns:
-- Pages handle presentation and orchestration
+The project follows Nuxt's file-based routing with clear separation of concerns and significantly enhanced user experience:
+- Pages handle presentation and orchestration with sophisticated visual design
+- Advanced components provide rich interactions including morphing animations and drag gestures
 - Composables encapsulate data fetching and business logic
 - Middleware enforces security for admin areas
-- Internationalization and styling are consistently applied
-This structure supports scalable feature growth, maintainable code, and strong UX with robust error handling and performance optimizations.
+- Internationalization and styling are consistently applied with modern design principles
+- Enhanced responsive design ensures optimal experience across all device types
+
+This structure supports scalable feature growth, maintainable code, strong UX with robust error handling, performance optimizations, and sophisticated interaction patterns that elevate the user experience beyond basic functionality.

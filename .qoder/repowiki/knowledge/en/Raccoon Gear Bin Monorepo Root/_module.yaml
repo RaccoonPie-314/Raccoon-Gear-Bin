@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: ""
-title: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
+title: Raccoon Gear Bin Monorepo Root
 scope:
     - package.json
     - nuxt.config.ts

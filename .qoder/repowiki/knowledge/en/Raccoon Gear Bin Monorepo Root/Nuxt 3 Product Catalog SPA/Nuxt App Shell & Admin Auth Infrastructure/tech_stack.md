@@ -1,0 +1,1 @@
+Nuxt 3 app shell with shadcn-vue theme config; Supabase client for auth and RLS-backed `admin_users` table queries; TypeScript interfaces generated to mirror the Postgres schema.

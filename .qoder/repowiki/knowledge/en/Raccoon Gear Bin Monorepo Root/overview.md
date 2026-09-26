@@ -1,0 +1,1 @@
+Single Nuxt 4 application that composes the frontend catalog/admin SPA with the Supabase backend schema, auth, and storage into one deployable product-catalog site.

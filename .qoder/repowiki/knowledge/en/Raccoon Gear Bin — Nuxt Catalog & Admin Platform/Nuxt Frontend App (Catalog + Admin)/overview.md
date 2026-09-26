@@ -1,1 +1,0 @@
-Nuxt 3 frontend app that wires the product catalog pages, shared UI components, and admin auth into a single SPA backed by Supabase.

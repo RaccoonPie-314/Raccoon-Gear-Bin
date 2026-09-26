@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-09-25T03:19:38Z"
+exported_at: "2026-09-25T23:00:54Z"
 modules:
     "":
-        dir_name: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
-        title: Raccoon Gear Bin — Nuxt Catalog & Admin Platform
+        dir_name: Raccoon Gear Bin Monorepo Root
+        title: Raccoon Gear Bin Monorepo Root
         scope:
             - package.json
             - nuxt.config.ts
@@ -30,8 +30,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app:
-        dir_name: Nuxt Frontend App (Catalog + Admin)
-        title: Nuxt Frontend App (Catalog + Admin)
+        dir_name: Nuxt 3 Product Catalog SPA
+        title: Nuxt 3 Product Catalog SPA
         scope:
             - app/
         source_files: []
@@ -42,8 +42,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app/app_infrastructure:
-        dir_name: Nuxt App Shell, Types & Admin Auth
-        title: Nuxt App Shell, Types & Admin Auth
+        dir_name: Nuxt App Shell & Admin Auth Infrastructure
+        title: Nuxt App Shell & Admin Auth Infrastructure
         scope:
             - app/
             - app/types/
@@ -51,21 +51,27 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: supabase_backend
     frontend_app/products_catalog:
         dir_name: Products Catalog Pages & Data Layer
         title: Products Catalog Pages & Data Layer
         scope:
+            - app/pages/index.vue
             - app/pages/products/
             - app/components/ProductCard.vue
             - app/composables/useCatalog.ts
+            - app/composables/useCatalogBrowse.ts
+            - app/types/catalog.ts
+            - app/types/database.ts
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: supabase_backend
     frontend_app/shared_ui_components:
-        dir_name: Shared UI Components & Global Styles
-        title: Shared UI Components & Global Styles
+        dir_name: Shared Presentation Components & Global Theme
+        title: Shared Presentation Components & Global Theme
         scope:
             - app/components/
             - app/assets/css/
@@ -81,4 +87,6 @@ modules:
         source_files: []
         children: []
         depends_on: []
-        related_to: []
+        related_to:
+            - path: frontend_app/app_infrastructure
+            - path: frontend_app/products_catalog

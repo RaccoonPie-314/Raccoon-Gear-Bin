@@ -1,1 +1,0 @@
-Root Nuxt application shell providing global middleware, shared TypeScript type contracts for the Supabase catalog schema, and the admin authentication composables and route guard.

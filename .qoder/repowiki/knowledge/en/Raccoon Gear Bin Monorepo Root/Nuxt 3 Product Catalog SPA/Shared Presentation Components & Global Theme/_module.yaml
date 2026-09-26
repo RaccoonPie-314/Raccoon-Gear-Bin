@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app/shared_ui_components
-title: Shared UI Components & Global Styles
+title: Shared Presentation Components & Global Theme
 scope:
     - app/components/
     - app/assets/css/
