@@ -93,6 +93,7 @@ const stubSource = [
   '(function () {',
   `  var PRODUCTS = ${JSON.stringify(FIXTURES.products)};`,
   `  var CATEGORIES = ${JSON.stringify(FIXTURES.categories)};`,
+  `  var SITE = ${JSON.stringify(FIXTURES.siteSettings)};`,
   '  var FIXED_USER = "00000000-0000-4000-8000-0000000000ad";',
   '  var NEW_ROW_ID = "11111111-2222-4333-8444-555555555555";',
   '  function b64(o) { return btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/[+]/g, "-").replace(/[/]/g, "_") }',
@@ -120,6 +121,10 @@ const stubSource = [
   '    if (new RegExp("^/storage/v1/object").test(p) && method !== "GET") return json({ Key: "ok", Id: NEW_ROW_ID }, 200);',
   '    if (p === "/rest/v1/products" && method === "GET") { var one = new RegExp("id=eq[.]([0-9a-f-]+)").exec(q); return json(one ? (PRODUCTS.filter(function (x) { return x.id === one[1] })[0] || null) : PRODUCTS, 200) }',
   '    if (p === "/rest/v1/categories" && method === "GET") return json(CATEGORIES, 200);',
+  '    if (p === "/rest/v1/site_settings" && method === "GET") return json([SITE], 200);',
+  // The site-info singleton is editable in-stub so the "public reflects the save" check can
+  // read back what the admin flow wrote, without any real project being touched.
+  '    if (p === "/rest/v1/site_settings" && (method === "PATCH" || method === "POST")) { try { Object.assign(SITE, JSON.parse(raw || "{}")); } catch (e) {} return json(method === "POST" ? [SITE] : null, method === "POST" ? 201 : 204); }',
   '    if (p === "/rest/v1/products" && method === "POST") return json({ id: NEW_ROW_ID }, 201);',
   '    if (method === "PATCH" || method === "DELETE") return json(null, 204);',
   '    if (method === "POST") return json([], 201);',
@@ -269,6 +274,19 @@ const run = async () => {
     return waitExpr ? waitFor(waitExpr, 8000) : true
   }
   const setInput = (sel, value) => '(() => { const el = document.querySelector(' + JSON.stringify(sel) + '); if (!el) return false; const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ' + JSON.stringify(value) + '); el.dispatchEvent(new Event("input", { bubbles: true })); return el.value })()'
+  // Scroll the target into view before measuring it: rows low on a long form sit below the
+  // fold, and Chrome silently drops clicks (and touch points) aimed outside the viewport.
+  // Re-measure after the scroll settles — a rect taken mid-smooth-scroll is stale by the
+  // time the click lands, and the click hits whichever row slid into those coordinates.
+  const clickSelector = async (sel, waitExpr) => {
+    if (!await waitFor(`!!document.querySelector(${JSON.stringify(sel)})`)) return false
+    const boxExpr = '(() => { const el = document.querySelector(' + JSON.stringify(sel) + '); el.scrollIntoView({ block: "center", inline: "nearest" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()'
+    await ev(boxExpr)
+    await sleep(300)
+    const box = await ev(boxExpr)
+    await clickAt(box.x, box.y)
+    return waitExpr ? waitFor(waitExpr) : true
+  }
   const byLabel = (label, value) => '(() => { const dlg = document.querySelector(\'[role="dialog"]\'); if (!dlg) return "NODIALOG"; const lbl = [...dlg.querySelectorAll("label")].find(l => (l.textContent || "").trim().replace(/[*\\s]+$/, "").trim() === ' + JSON.stringify(label) + '); if (!lbl) return "NOLABEL"; const el = dlg.querySelector("#" + (window.CSS ? CSS.escape(lbl.htmlFor) : lbl.htmlFor)) || (lbl.parentElement && lbl.parentElement.querySelector("input, textarea")); if (!el) return "NOFIELD"; const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ' + JSON.stringify(value) + '); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return el.value })()'
   const allW = async () => (await ev('window.__W || []'))
   const writes = async () => (await allW()).filter(w => w.method !== 'GET' && !w.p.startsWith('/auth/'))
@@ -303,6 +321,15 @@ const run = async () => {
     check('catalog renders every fixture product', cards.length === EXP.cards, { cards: cards.length })
     check('guest sees no admin affordance', !(await ev('!![...document.querySelectorAll("header span")].find(el => /admin\\s*mode/i.test(el.textContent || ""))')) && (await ev(`document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length`)) === 0)
     check('cards carry an image and a price', (await ev('document.querySelectorAll("main article img").length')) === EXP.cards && (await ev('document.querySelectorAll("main article p.tabular-nums").length')) === EXP.cards)
+
+    // site info in the masthead: what the fixture singleton stores is what the header exposes
+    const phoneLink = await ev('(() => { const a = document.querySelector("header a[data-site-phone]"); return a ? { href: a.getAttribute("href"), text: (a.textContent || "").trim() } : null })()')
+    check('header renders the phone as a tel link', !!phoneLink && phoneLink.href === EXP.siteInfo.phoneHref && phoneLink.text === EXP.siteInfo.phoneText, phoneLink)
+    const locationLink = await ev('(() => { const a = document.querySelector("header a[data-site-location]"); return a ? { href: a.getAttribute("href"), text: (a.textContent || "").trim() } : null })()')
+    check('header renders the location as a link', !!locationLink && locationLink.href === EXP.siteInfo.locationUrl && locationLink.text === EXP.siteInfo.locationLabel, locationLink)
+    const socials = await ev('[...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform"))')
+    check('enabled social links render icon-only, in stored order', JSON.stringify(socials) === JSON.stringify(EXP.siteInfo.socialOrder), { socials })
+    check('disabled social link is not rendered', !(await ev(`document.body.innerHTML.includes(${JSON.stringify(EXP.siteInfo.hiddenSocialUrl)})`)))
 
     const search = (await ev(boxesExpr('[data-search-anchor] input')))[0]
     await clickAt(search.x, search.y)
@@ -506,6 +533,39 @@ const run = async () => {
     const delW = await writes()
     check('delete issues exactly one DELETE on the product row', delW.length === 1 && delW[0].method === 'DELETE' && delW[0].p === '/rest/v1/products' && /^id=eq[.]/.test(delW[0].q), seqOf(delW))
     check('no error alert surfaced by any admin flow', !(await ev('document.body.innerText.includes("could not be")')))
+
+    // --- site info editor: open, seed, edit, add/toggle/reorder/remove links, save, reflect ---
+    const SI = FIXTURES.siteSettings
+    const SITE_FORM = '[data-site-info-form]'
+    check('site info editor opens from the header', await clickByText('header button', 'Site info', `location.pathname === "/admin/site-info" && !!document.querySelector('${SITE_FORM}')`))
+    const seed = await ev('(() => { const f = document.querySelector(' + JSON.stringify(SITE_FORM) + '); if (!f) return null; const v = (k) => (f.querySelector("[data-field=" + k + "]") || {}).value; return { phone: v("phone"), url: v("location-url"), en: v("location-en"), km: v("location-km"), rows: f.querySelectorAll("[data-social-row]").length } })()')
+    check('editor seeds every stored value, disabled links included', !!seed && seed.phone === SI.phone && seed.url === SI.location_url && seed.en === 'Phnom Penh, Cambodia' && seed.km === 'ភ្នំពេញ កម្ពុជា' && seed.rows === 3, seed)
+    await ev(setInput('[data-field=phone]', '+855 99 888 777'))
+    await ev(setInput('[data-field=location-en]', 'RGB Bin HQ'))
+    await ev(setInput('[data-field=location-url]', 'https://maps.example/hq'))
+    check('adding a link appends an editable row', await clickByText('[data-social-add]', 'Add social link', 'document.querySelectorAll("[data-social-row]").length === 4'))
+    await ev(setInput('[data-social-platform="3"]', 'youtube'))
+    await ev(setInput('[data-social-url="3"]', 'https://youtube.com/@raccoongearbin'))
+    const SWITCH_1 = '[data-social-enabled="1"]'
+    const SWITCH_OFF = '(() => { const b = document.querySelector(' + JSON.stringify(SWITCH_1) + '); return !!b && b.getAttribute("aria-checked") === "false" })()'
+    await clickSelector(SWITCH_1, SWITCH_OFF)
+    check('a social link can be disabled from its row', await ev(SWITCH_OFF))
+    check('a link can be reordered up', await clickSelector('[data-social-up="3"]', 'JSON.stringify([...document.querySelectorAll("[data-social-platform]")].map(i => i.value)) === "[\\"facebook\\",\\"telegram\\",\\"youtube\\",\\"tiktok\\"]"'))
+    check('a link can be removed', await clickSelector('[data-social-remove="0"]', 'document.querySelectorAll("[data-social-row]").length === 3 && document.querySelectorAll("[data-social-platform]")[0].value === "telegram"'))
+    await resetW()
+    await clickByText('form button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Site info saved")')
+    const siteW = await writes()
+    check('save issues exactly one upsert on the singleton', siteW.length === 1 && siteW[0].method === 'POST' && siteW[0].p === '/rest/v1/site_settings', seqOf(siteW))
+    const siteBody = JSON.parse(siteW[0]?.body || '{}')
+    check('saved phone, location label and link reflect the edits', siteBody.phone === '+855 99 888 777' && siteBody.location_url === 'https://maps.example/hq' && JSON.stringify(siteBody.location_translations) === JSON.stringify([{ locale: 'en', label: 'RGB Bin HQ' }, { locale: 'km', label: 'ភ្នំពេញ កម្ពុជា' }]), { phone: siteBody.phone, url: siteBody.location_url, labels: siteBody.location_translations })
+    check('saved links reflect add, edit, disable, reorder and remove', JSON.stringify(siteBody.social_links) === JSON.stringify([
+      { platform: 'telegram', url: 'https://t.me/raccoongearbin', enabled: false, sort_order: 0 },
+      { platform: 'youtube', url: 'https://youtube.com/@raccoongearbin', enabled: true, sort_order: 1 },
+      { platform: 'tiktok', url: 'https://tiktok.com/@raccoongearbin.hidden', enabled: false, sort_order: 2 }
+    ]), siteBody.social_links)
+    check('editor reloads the saved row', await waitFor('document.querySelectorAll("[data-social-row]").length === 3'))
+    await ev('document.querySelector("main header a")?.click(); true')
+    check('public header reflects the saved values', await waitFor('location.pathname === "/" && document.querySelector("header a[data-site-phone]")?.getAttribute("href") === "tel:+85599888777" && document.querySelector("header a[data-site-location]")?.getAttribute("href") === "https://maps.example/hq" && [...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform")).join() === "youtube"'))
 
     // --- logout ---
     check('logout clears admin mode', await clickByText('header button', 'Log out', `document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length === 0`))

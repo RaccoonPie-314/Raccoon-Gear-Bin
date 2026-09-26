@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
+import type { SiteInfo } from '~/types/site-info'
 
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
 const { fetchCatalog } = useCatalog()
+const { fetchSiteInfo } = useSiteInfo()
 const { locale, t } = useI18n()
 
 const products = ref<CatalogProduct[]>([])
 const categories = ref<CatalogCategory[]>([])
+const siteInfo = ref<SiteInfo | null>(null)
 const isAdminMode = ref(false)
 const isLoading = ref(true)
 const isSigningOut = ref(false)
@@ -26,6 +29,13 @@ const loadCatalog = async () => {
   } catch (error: any) {
     loadError.value = error?.message || t('catalogLoadError')
   } finally { isLoading.value = false }
+}
+
+// A failed site-info read leaves the header cluster unrendered rather than alerting: contact
+// links are the masthead's least load-bearing content, and a red banner there would outweigh
+// the phone number it stands in for. The reason is still logged for the console.
+const loadSiteInfo = async () => {
+  try { siteInfo.value = await fetchSiteInfo() } catch (error: any) { console.error('Site info load failed:', error) }
 }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
@@ -52,7 +62,7 @@ const {
 
 const logout = async () => { isSigningOut.value = true; try { await signOut(); isAdminMode.value = false } finally { isSigningOut.value = false } }
 watch(user, () => { void refreshAdminMode() }, { immediate: true })
-onMounted(() => { void loadCatalog() })
+onMounted(() => { void loadCatalog(); void loadSiteInfo() })
 useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
 </script>
 
@@ -65,6 +75,12 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           <BrandLogo size="sm" />
         </NuxtLink>
 
+        <!-- Site info (phone / location / socials) sits between the marks it describes and the
+             view controls; below md it yields the row to the logo and the language/theme pair. -->
+        <div class="hidden min-w-0 flex-1 justify-end md:flex">
+          <SiteInfoLinks :site-info="siteInfo" />
+        </div>
+
         <div class="flex items-center gap-2 sm:gap-3 shrink-0">
           <ColorModeToggle />
           <LanguageSwitcher />
@@ -75,6 +91,15 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
             <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
             {{ t('adminMode') }}
           </span>
+          <UButton
+            v-if="isAdminMode"
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            @click="navigateTo('/admin/site-info')"
+          >
+            {{ t('siteInfo') }}
+          </UButton>
           <UButton
             v-if="isAdminMode"
             size="xs"

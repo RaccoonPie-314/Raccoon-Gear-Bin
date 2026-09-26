@@ -192,6 +192,20 @@
       }
     }
   ],
+  "siteSettings": {
+    "id": 1,
+    "phone": "+855 12 345 678",
+    "location_url": "https://maps.google.com/?q=Phnom+Penh",
+    "location_translations": [
+      { "locale": "en", "label": "Phnom Penh, Cambodia" },
+      { "locale": "km", "label": "ភ្នំពេញ កម្ពុជា" }
+    ],
+    "social_links": [
+      { "platform": "facebook", "url": "https://facebook.com/raccoongearbin", "enabled": true, "sort_order": 0 },
+      { "platform": "telegram", "url": "https://t.me/raccoongearbin", "enabled": true, "sort_order": 1 },
+      { "platform": "tiktok", "url": "https://tiktok.com/@raccoongearbin.hidden", "enabled": false, "sort_order": 2 }
+    ]
+  },
   "categories": [
     {
       "id": "cccccccc-0000-4000-8000-0000000000c01",
@@ -228,6 +242,14 @@
       "aaaaaaaa-0000-4000-8000-000000000002": [["Sensor", "PixArt 3395"], ["DPI", "26000"]],
       "aaaaaaaa-0000-4000-8000-000000000003": [["Battery", "40h"], ["Codec", "LC3"]]
     },
-    "sortedPayloadColumns": "category_id,price,sku,slug,status,stock_quantity"
+    "sortedPayloadColumns": "category_id,price,sku,slug,status,stock_quantity",
+    "siteInfo": {
+      "phoneText": "+855 12 345 678",
+      "phoneHref": "tel:+85512345678",
+      "locationLabel": "Phnom Penh, Cambodia",
+      "locationUrl": "https://maps.google.com/?q=Phnom+Penh",
+      "socialOrder": ["facebook", "telegram"],
+      "hiddenSocialUrl": "raccoongearbin.hidden"
+    }
   }
 }

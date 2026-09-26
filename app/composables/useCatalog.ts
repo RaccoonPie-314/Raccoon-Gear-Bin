@@ -40,7 +40,9 @@ export const useCatalog = () => {
   }
 
   // Current locale → English → first available. Shared by product and category translations
-  // so a locale can never resolve differently in one place than another.
+  // so a locale can never resolve differently in one place than another. Also exported for
+  // the one other locale-resolved jsonb in the app (site_settings.location_translations) —
+  // this stays the only implementation in the codebase.
   const pickTranslation = <T extends { locale: string }>(translations: T[] | null | undefined): T | undefined => {
     if (!translations?.length) return undefined
     return translations.find((item) => item.locale === locale.value) || translations.find((item) => item.locale === FALLBACK_LOCALE) || translations[0]
@@ -140,5 +142,5 @@ export const useCatalog = () => {
     return { products, categories }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, formatSpecifications, parseSpecificationPairs }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, formatSpecifications, parseSpecificationPairs, pickTranslation }
 }

@@ -5,7 +5,13 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   const user = useSupabaseUser()
-  if (!user.value?.id) {
+  // On client-side navigation the supabase plugin re-places this state with the JWT
+  // *claims* (its `page:start` hook), and a GoTrue claims payload names the user `sub`,
+  // not `id`. Reading only `id` bounced every SPA navigation to /admin/site-info - the
+  // first route that ever exercised this guard. Both spellings are the same uuid.
+  const identity = user.value as { id?: string; sub?: string } | null
+  const userId = identity?.id || identity?.sub
+  if (!userId) {
     return navigateTo('/admin/login', { replace: true })
   }
 
@@ -13,7 +19,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const { data, error } = await client
     .from('admin_users')
     .select('id')
-    .eq('user_id', user.value.id)
+    .eq('user_id', userId)
     .maybeSingle()
 
   if (error) {

@@ -78,6 +78,19 @@ export type AdminUserRow = {
   updated_at: string
 }
 
+// Singleton row (the schema's check constraint keeps id = 1). `location_translations` holds
+// [{ locale, label }]; `social_links` holds [{ platform, url, enabled, sort_order }] so new
+// platforms never touch the schema. Both are parsed only in useSiteInfo.
+export type SiteSettingsRow = {
+  id: number
+  phone: string
+  location_url: string
+  location_translations: Json
+  social_links: Json
+  created_at: string
+  updated_at: string
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -147,6 +160,12 @@ export interface Database {
         Row: AdminUserRow
         Insert: Partial<Omit<AdminUserRow, 'id' | 'created_at' | 'updated_at'>> & Pick<AdminUserRow, 'user_id'>
         Update: Partial<Omit<AdminUserRow, 'id' | 'created_at' | 'updated_at'>>
+        Relationships: []
+      }
+      site_settings: {
+        Row: SiteSettingsRow
+        Insert: Partial<Omit<SiteSettingsRow, 'created_at' | 'updated_at'>>
+        Update: Partial<Omit<SiteSettingsRow, 'created_at' | 'updated_at'>>
         Relationships: []
       }
     }
