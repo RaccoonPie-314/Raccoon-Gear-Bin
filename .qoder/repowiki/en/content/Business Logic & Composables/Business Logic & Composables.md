@@ -3,7 +3,6 @@
 <cite>
 **Referenced Files in This Document**
 - [useCatalog.ts](file://app/composables/useCatalog.ts)
-- [useCatalogBrowse.ts](file://app/composables/useCatalogBrowse.ts)
 - [useAdminAuth.ts](file://app/composables/useAdminAuth.ts)
 - [catalog.ts](file://app/types/catalog.ts)
 - [product.ts](file://app/types/product.ts)
@@ -40,7 +39,7 @@ This document explains the business logic layer centered on Vue 3 composables an
 
 ## Project Structure
 The business logic is organized around:
-- Composables in app/composables for reusable domain logic — `useCatalog` for catalog data access, `useCatalogBrowse` for browsing state (search, sort, category selection, filtered results), `useAdminAuth` for admin identity
+- Composables in app/composables for reusable domain logic
 - Types in app/types for shared contracts
 - Pages and middleware for UI orchestration and route-level guards
 - Server utilities for privileged Supabase access
@@ -54,7 +53,6 @@ AdminMiddleware["Admin Auth Middleware<br/>[admin-auth.global.ts]"]
 end
 subgraph "Business Logic"
 UseCatalog["useCatalog<br/>[composables/useCatalog.ts]"]
-UseCatalogBrowse["useCatalogBrowse<br/>[composables/useCatalogBrowse.ts]"]
 UseAdminAuth["useAdminAuth<br/>[composables/useAdminAuth.ts]"]
 end
 subgraph "Types"

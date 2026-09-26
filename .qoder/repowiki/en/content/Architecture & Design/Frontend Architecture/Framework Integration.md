@@ -112,7 +112,7 @@ Page-->>Browser : HTML + hydrated state
 **Diagram sources**
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 
 ## Detailed Component Analysis
 

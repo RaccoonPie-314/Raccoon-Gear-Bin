@@ -47,7 +47,7 @@ A --> F["Dependencies<br/>package.json"]
 **Diagram sources**
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [package.json:1-26](file://package.json#L1-L26)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [app/components/CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
@@ -74,7 +74,7 @@ Key performance-relevant behaviors:
 - Client-side filtering and sorting over fetched data.
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [app/components/ProductCard.vue:14-20](file://app/components/ProductCard.vue#L14-L20)
 - [app/components/CategoryNav.vue:19-35](file://app/components/CategoryNav.vue#L19-L35)
@@ -98,7 +98,7 @@ UI->>UI : lazy load images
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [app/components/ProductCard.vue:14-20](file://app/components/ProductCard.vue#L14-L20)
 
@@ -315,7 +315,7 @@ Actionable steps:
 - Monitor with DevTools and integrate performance checks in CI.
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 
 ## Conclusion

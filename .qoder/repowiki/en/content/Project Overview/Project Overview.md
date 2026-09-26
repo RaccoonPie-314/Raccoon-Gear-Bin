@@ -97,7 +97,7 @@ J --> H
 
 **Diagram sources**
 - [app.vue:1-4](file://app/app.vue#L1-L4)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
@@ -127,7 +127,7 @@ These components work together to deliver a cohesive catalog experience with rob
 **Section sources**
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
@@ -153,7 +153,7 @@ Page->>Page : Filter, sort, render ProductCard
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [useCatalog.ts:37-47](file://app/composables/useCatalog.ts#L37-L47)
 - [useCatalog.ts:8-11](file://app/composables/useCatalog.ts#L8-L11)
 
@@ -242,12 +242,12 @@ Refresh --> Render
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [index.vue:46-63](file://app/pages/index.vue#L46-L63)
 - [index.vue:134-183](file://app/pages/index.vue#L134-L183)
 
 **Section sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 
 ### Product Card Component (ProductCard.vue)
 The product card component:

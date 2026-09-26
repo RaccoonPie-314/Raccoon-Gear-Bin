@@ -119,7 +119,7 @@ Page->>UI : render products
 **Diagram sources**
 - [useCatalog.ts:37-47](file://app/composables/useCatalog.ts#L37-L47)
 - [useCatalog.ts:8-11](file://app/composables/useCatalog.ts#L8-L11)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [ProductCard.vue:14-23](file://app/components/ProductCard.vue#L14-L23)
 
 ## Detailed Component Analysis
@@ -310,7 +310,7 @@ These patterns ensure efficient data retrieval and consistent ordering across th
 
 **Section sources**
 - [useCatalog.ts:35-57](file://app/composables/useCatalog.ts#L35-L57)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ### UI Consumption and Rendering
 - `pages/index.vue` loads categories and products concurrently using parallel promises, maps rows to UI models, and handles loading/error states.
@@ -328,11 +328,11 @@ Card-->>Index : render product card
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [ProductCard.vue:14-23](file://app/components/ProductCard.vue#L14-L23)
 
 **Section sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
 ## Dependency Analysis
@@ -356,12 +356,12 @@ product_card["components/ProductCard.vue"] --> catalog_types
 
 **Diagram sources**
 - [useCatalog.ts:1-59](file://app/composables/useCatalog.ts#L1-L59)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
 **Section sources**
 - [useCatalog.ts:1-59](file://app/composables/useCatalog.ts#L1-L59)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
 ## Performance Considerations

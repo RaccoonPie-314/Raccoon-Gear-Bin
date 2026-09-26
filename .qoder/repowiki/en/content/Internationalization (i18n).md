@@ -140,7 +140,7 @@ Patterns observed:
 - [StockStatus.vue:1-20](file://app/components/StockStatus.vue#L1-L20)
 - [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
 - [index.vue:79-99](file://app/pages/index.vue#L79-L99)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ### Message Formatting and Pluralization
 - Message formatting supports parameter interpolation (e.g., placeholders in confirmation prompts).

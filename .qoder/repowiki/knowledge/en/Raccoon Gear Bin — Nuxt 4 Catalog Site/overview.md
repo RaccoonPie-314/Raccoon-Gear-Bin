@@ -1,0 +1,1 @@
+Single Nuxt 4 project that composes the frontend storefront/admin SPA with the Supabase backend schema, auth, and storage into one deployable product-catalog site.

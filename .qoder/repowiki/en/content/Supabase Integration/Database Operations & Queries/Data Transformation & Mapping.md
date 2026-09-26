@@ -330,7 +330,7 @@ Error propagation:
 
 **Section sources**
 - [useCatalog.ts:37-47](file://app/composables/useCatalog.ts#L37-L47)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ## Conclusion
 The transformation layer centralizes conversion from raw Supabase responses to application-specific types, ensuring consistent localization, robust fallbacks, and reliable image URL resolution. By adhering to the patterns described here, you can extend the system with new mappers while maintaining type safety and predictable behavior.

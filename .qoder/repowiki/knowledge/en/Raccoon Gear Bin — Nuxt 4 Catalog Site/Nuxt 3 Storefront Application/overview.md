@@ -1,0 +1,1 @@
+Nuxt 3 storefront app wiring product catalog pages, shared Vue components, Supabase-backed admin auth, and global theme into a single routed application.

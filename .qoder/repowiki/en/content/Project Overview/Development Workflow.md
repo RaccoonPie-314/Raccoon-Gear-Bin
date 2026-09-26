@@ -188,7 +188,7 @@ FilterSort --> Render["Render product grid"]
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/index.vue:46-68](file://app/pages/index.vue#L46-L68)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 

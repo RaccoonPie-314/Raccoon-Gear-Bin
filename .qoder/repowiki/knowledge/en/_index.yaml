@@ -3,11 +3,11 @@ schema_version: 1
 locale: en-US
 branch: main
 nodes_managed: true
-exported_at: "2026-09-25T23:00:54Z"
+exported_at: "2026-09-26T00:32:41Z"
 modules:
     "":
-        dir_name: Raccoon Gear Bin Monorepo Root
-        title: Raccoon Gear Bin Monorepo Root
+        dir_name: Raccoon Gear Bin — Nuxt 4 Catalog Site
+        title: Raccoon Gear Bin — Nuxt 4 Catalog Site
         scope:
             - package.json
             - nuxt.config.ts
@@ -30,8 +30,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app:
-        dir_name: Nuxt 3 Product Catalog SPA
-        title: Nuxt 3 Product Catalog SPA
+        dir_name: Nuxt 3 Storefront Application
+        title: Nuxt 3 Storefront Application
         scope:
             - app/
         source_files: []
@@ -42,8 +42,8 @@ modules:
         depends_on: []
         related_to: []
     frontend_app/app_infrastructure:
-        dir_name: Nuxt App Shell & Admin Auth Infrastructure
-        title: Nuxt App Shell & Admin Auth Infrastructure
+        dir_name: Nuxt App Shell, Admin Auth & Catalog Type Contracts
+        title: Nuxt App Shell, Admin Auth & Catalog Type Contracts
         scope:
             - app/
             - app/types/
@@ -54,9 +54,10 @@ modules:
         related_to:
             - path: supabase_backend
     frontend_app/products_catalog:
-        dir_name: Products Catalog Pages & Data Layer
-        title: Products Catalog Pages & Data Layer
+        dir_name: Product Catalog Browsing & Detail Pages
+        title: Product Catalog Browsing & Detail Pages
         scope:
+            - ARCHITECTURE.md
             - app/pages/index.vue
             - app/pages/products/
             - app/components/ProductCard.vue

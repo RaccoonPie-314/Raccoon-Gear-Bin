@@ -1,1 +1,0 @@
-Root Nuxt application shell providing the global admin-auth route guard, shared Supabase-typed data contracts for the catalog schema, and admin authentication composables.

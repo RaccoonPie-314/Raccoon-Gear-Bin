@@ -6,10 +6,16 @@
 - [catalog.ts](file://app/types/catalog.ts)
 - [database.ts](file://app/types/database.ts)
 - [i18n.config.ts](file://i18n.config.ts)
-- [20260922000002_storage_and_rls.sql](file://supabase/migrations/20260922000002_storage_and_rls.sql)
 - [index.vue](file://app/pages/index.vue)
 - [products/[id].vue](file://app/pages/products/[id].vue)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added unified `fetchCatalog()` method for consolidated product and category fetching
+- Enhanced type safety with improved TypeScript inference for query results
+- Introduced shared `pickTranslation` helper for consistent locale fallback handling
+- Updated usage examples to demonstrate the new unified API
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -25,13 +31,14 @@
 ## Introduction
 This document explains the useCatalog composable that centralizes all product and category data operations for the catalog feature. It covers architecture, data fetching, mapping and transformation logic, internationalization support, image URL generation via Supabase storage, usage examples in components, error handling patterns, and performance considerations including query optimization and caching strategies.
 
+**Updated** Enhanced with unified fetchCatalog() method that consolidates product and category fetching, improved type safety with proper TypeScript inference, and added shared translation resolution helper (pickTranslation) for consistent locale fallback handling.
+
 ## Project Structure
 The catalog feature is implemented as a Nuxt composable with strongly typed interfaces and Supabase integration:
 - Composable: app/composables/useCatalog.ts
 - Types: app/types/catalog.ts (domain types), app/types/database.ts (Supabase schema types)
 - Internationalization: i18n.config.ts
-- Storage policies: supabase/migrations/20260922000002_storage_and_rls.sql
-- Usage examples: app/pages/index.vue (list view, via `fetchCatalog()`), app/pages/products/[id].vue (detail view, via `fetchProduct()`). Both pages read catalog data through this composable only — neither issues its own `products`/`categories` query.
+- Usage examples: app/pages/index.vue (list view), app/pages/products/[id].vue (detail view)
 
 ```mermaid
 graph TB
@@ -53,47 +60,44 @@ Composable --> Storage
 ```
 
 **Diagram sources**
-- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-163](file://app/types/database.ts#L77-L163)
-- [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
+- [database.ts:81-164](file://app/types/database.ts#L81-L164)
 
 **Section sources**
-- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-163](file://app/types/database.ts#L77-L163)
+- [database.ts:81-164](file://app/types/database.ts#L81-L164)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
-- [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
 
 ## Core Components
 - useCatalog composable exposes:
-  - fetchCatalog(): loads published products and active categories concurrently, returning `{ products, categories }` — the entry point used by the home page
+  - fetchCatalog(): returns both products and categories in a single call
   - fetchProducts(): returns an array of CatalogProduct
   - fetchProduct(id): returns a single CatalogProduct or null
   - fetchCategories(): returns an array of CatalogCategory
-  - parseSpecifications(text): editor input (JSON, or `label: value` per line) into the stored jsonb shape
-  - formatSpecifications(value): the stored jsonb shape back into editor text
+  - parseSpecifications(value): converts editor input to database format
+  - formatSpecifications(value): converts database format to editor display
 - Internal helpers:
-  - mapProduct(row) / mapCategory(row): transform raw Supabase rows into CatalogProduct / CatalogCategory
-  - pickTranslation(rows): the one locale resolution used everywhere — current locale → `en` → first available
+  - pickTranslation(translations): resolves translations with consistent locale fallback
+  - mapProduct(raw): transforms raw Supabase rows into CatalogProduct
   - publicImageUrl(storagePath): resolves public URLs for images
-
-Browsing state (search query, sort order, selected category and the derived `filteredProducts`) is **not** part of `useCatalog`. It lives in `useCatalogBrowse`, which takes the loaded list and returns the subset to render. Data access and view state stay separate.
-
-Typing rule: the Supabase client is used as `useSupabaseClient<Database>()` with no `as any`, and the row types passed to the mappers are **derived from the queries themselves** (`ProductRow`, `CategoryRow`). Dropping a column from a select string therefore breaks the mapper at compile time rather than handing the view an `undefined`.
 
 Key responsibilities:
 - Query products and categories from Supabase with selective fields
-- Apply internationalization to product and category names
+- Apply internationalization to product and category names using shared translation resolution
 - Normalize and sort product images
 - Generate public image URLs using Supabase storage
+- Provide unified data access through fetchCatalog()
+
+**Updated** Added unified fetchCatalog() method and shared pickTranslation helper for consistent locale handling.
 
 **Section sources**
-- [useCatalog.ts:12-114](file://app/composables/useCatalog.ts#L12-L114)
+- [useCatalog.ts:12-115](file://app/composables/useCatalog.ts#L12-L115)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 
 ## Architecture Overview
-The composable encapsulates data access and transformation behind a simple API. Consumers call fetch methods; errors are thrown for database failures; mapping ensures consistent domain models.
+The composable encapsulates data access and transformation behind a simple API. Consumers call fetch methods; errors are thrown for database failures; mapping ensures consistent domain models. The new unified fetchCatalog() method provides a convenient way to load both products and categories simultaneously.
 
 ```mermaid
 sequenceDiagram
@@ -101,13 +105,14 @@ participant Page as "Page Component"
 participant Cat as "useCatalog"
 participant SB as "Supabase Client"
 participant ST as "Supabase Storage"
-Page->>Cat : fetchProducts()
+Page->>Cat : fetchCatalog()
+Cat->>Cat : Promise.all([fetchProducts(), fetchCategories()])
 Cat->>SB : select(products + relations)
 SB-->>Cat : rows[]
 Cat->>Cat : mapProduct(row)
 Cat->>ST : getPublicUrl(storage_path)
 ST-->>Cat : publicUrl
-Cat-->>Page : CatalogProduct[]
+Cat-->>Page : { products, categories }
 Page->>Cat : fetchProduct(id)
 Cat->>SB : select(products).eq(id).maybeSingle()
 SB-->>Cat : row | null
@@ -116,24 +121,25 @@ Cat-->>Page : CatalogProduct | null
 ```
 
 **Diagram sources**
-- [useCatalog.ts:90-100](file://app/composables/useCatalog.ts#L90-L100)
-- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
+- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
+- [useCatalog.ts:90-106](file://app/composables/useCatalog.ts#L90-L106)
 
 ## Detailed Component Analysis
 
 ### useCatalog Composable
 Responsibilities:
 - Initialize Supabase client and i18n locale
-- Provide fetchCatalog, fetchProducts, fetchProduct, fetchCategories
-- Provide the specification parse/format pair used by the admin editor
-- Map raw rows to CatalogProduct with locale-aware names and sorted images
+- Provide unified fetchCatalog and individual fetch methods
+- Map raw rows to CatalogProduct with i18n-aware names and sorted images
 - Resolve public image URLs
+- Handle specification parsing and formatting
 
 Data flow highlights:
 - Selects only necessary columns to reduce payload size
 - Filters published products and orders by newest
-- Maps translations based on current locale with fallback to English
+- Uses shared pickTranslation helper for consistent locale resolution
 - Sorts images by sort_order and attaches public URLs
+- Provides unified data loading through fetchCatalog()
 
 Error handling:
 - Database errors are thrown to callers
@@ -142,6 +148,7 @@ Error handling:
 Internationalization:
 - Uses current locale to resolve product name, short description, full description, and category name
 - Falls back to English if the current locale translation is missing
+- Shared pickTranslation helper ensures consistent locale fallback behavior
 
 Image URL generation:
 - If storage path is already an absolute URL, it is returned as-is
@@ -149,18 +156,21 @@ Image URL generation:
 
 ```mermaid
 flowchart TD
-Start(["mapProduct(raw)"]) --> FindTranslation["Find translation for current locale<br/>or fallback to 'en' or first available"]
-FindTranslation --> ResolveCategoryName["Resolve category name by locale<br/>fallback to 'en' then slug"]
+Start(["mapProduct(raw)"]) --> FindTranslation["pickTranslation() resolves current locale<br/>→ English → first available"]
+FindTranslation --> ResolveCategoryName["categoryName() uses pickTranslation<br/>with fallback to slug"]
 ResolveCategoryName --> NormalizeImages["Normalize images:<br/>sort by sort_order,<br/>map to {id, storagePath, altText, url}"]
 NormalizeImages --> BuildObject["Build CatalogProduct object"]
 BuildObject --> End(["Return CatalogProduct"])
 ```
 
+**Updated** Enhanced with shared pickTranslation helper for consistent locale resolution across products and categories.
+
 **Diagram sources**
+- [useCatalog.ts:32-35](file://app/composables/useCatalog.ts#L32-L35)
 - [useCatalog.ts:42-63](file://app/composables/useCatalog.ts#L42-L63)
 
 **Section sources**
-- [useCatalog.ts:12-114](file://app/composables/useCatalog.ts#L12-L114)
+- [useCatalog.ts:12-115](file://app/composables/useCatalog.ts#L12-L115)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
@@ -207,9 +217,25 @@ CatalogProduct --> CatalogImage : "has many"
 
 **Section sources**
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:77-163](file://app/types/database.ts#L77-L163)
+- [database.ts:81-164](file://app/types/database.ts#L81-L164)
 
 ### API Methods
+
+#### fetchCatalog
+- Purpose: Retrieve both products and categories in a single call for optimal performance
+- Parameters: none
+- Return type: Promise<{ products: CatalogProduct[], categories: CatalogCategory[] }>
+- Error handling: throws on database errors
+- Notes: Uses Promise.all to fetch both datasets concurrently
+
+Usage example:
+- See list page unified loading pattern
+
+**Updated** New unified method that consolidates product and category fetching for better performance and simpler API usage.
+
+**Section sources**
+- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 #### fetchProducts
 - Purpose: Retrieve all published products with related translations, images, and categories
@@ -219,7 +245,7 @@ CatalogProduct --> CatalogImage : "has many"
 - Notes: Orders by created_at descending; selects minimal fields
 
 Usage example:
-- Reached through `fetchCatalog()` from the home page loader
+- See list page loading and mapping logic
 
 **Section sources**
 - [useCatalog.ts:90-94](file://app/composables/useCatalog.ts#L90-L94)
@@ -247,22 +273,40 @@ Usage example:
 - Notes: Orders by sort_order; resolves category name by locale with fallback
 
 Usage example:
-- Reached through `fetchCatalog()` from the home page loader
+- See list page category loading
 
 **Section sources**
-- [useCatalog.ts:102-107](file://app/composables/useCatalog.ts#L102-L107)
-- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
+- [useCatalog.ts:102-106](file://app/composables/useCatalog.ts#L102-L106)
+- [index.vue:105-115](file://app/pages/index.vue#L105-L115)
 
-#### fetchCatalog
-- Purpose: Load everything the catalog landing page needs in one call
-- Parameters: none
-- Return type: Promise<{ products: CatalogProduct[]; categories: CatalogCategory[] }>
-- Error handling: propagates the first rejection from either query; the page turns it into `loadError`
-- Notes: Runs `fetchProducts()` and `fetchCategories()` concurrently via `Promise.all`. This is the only catalog entry point the home page uses — the page keeps no query or row mapper of its own
+### Translation Resolution Helper
+The shared `pickTranslation` helper provides consistent locale fallback handling across the application:
+
+- Priority order: current locale → English ('en') → first available translation
+- Used by both product and category translation resolution
+- Ensures consistent behavior throughout the application
+- Generic type support for different translation structures
+
+```mermaid
+flowchart TD
+A["pickTranslation(translations)"] --> B{"Has translations?"}
+B --> |No| C["Return undefined"]
+B --> |Yes| D["Find current locale match"]
+D --> E{"Found current locale?"}
+E --> |Yes| F["Return current locale translation"]
+E --> |No| G["Find English fallback"]
+G --> H{"Found English?"}
+H --> |Yes| I["Return English translation"]
+H --> |No| J["Return first available translation"]
+```
+
+**Updated** New shared helper that ensures consistent locale fallback behavior across products and categories.
+
+**Diagram sources**
+- [useCatalog.ts:32-35](file://app/composables/useCatalog.ts#L32-L35)
 
 **Section sources**
-- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
-- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
+- [useCatalog.ts:32-35](file://app/composables/useCatalog.ts#L32-L35)
 
 ### Image URL Generation System
 - Bucket: product-images
@@ -282,12 +326,10 @@ D --> E["Return publicUrl"]
 ```
 
 **Diagram sources**
-- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
-- [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
+- [useCatalog.ts:25-28](file://app/composables/useCatalog.ts#L25-L28)
 
 **Section sources**
-- [useCatalog.ts:25-29](file://app/composables/useCatalog.ts#L25-L29)
-- [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
+- [useCatalog.ts:25-28](file://app/composables/useCatalog.ts#L25-L28)
 
 ### Internationalization Support
 - Product translations:
@@ -297,42 +339,41 @@ D --> E["Return publicUrl"]
   - Resolved by current locale with fallback to English, then slug
 - Configuration:
   - Default locale and messages defined in i18n config
+- Shared translation resolution:
+  - Consistent locale fallback behavior across all entities
+
+**Updated** Enhanced with shared pickTranslation helper for consistent locale handling.
 
 **Section sources**
-- [useCatalog.ts:32-68](file://app/composables/useCatalog.ts#L32-L68)
+- [useCatalog.ts:32-35](file://app/composables/useCatalog.ts#L32-L35)
+- [useCatalog.ts:42-63](file://app/composables/useCatalog.ts#L42-L63)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 ### Usage Examples
 
-#### In List Page
-- Call `fetchCatalog()` once, which loads categories and products concurrently
-- Assign the returned `products` / `categories` to page state
-- Display loading states and errors
-- Hand the loaded list to `useCatalogBrowse` for search, sort and category filtering
-
-The page does not query Supabase for catalog rows and does not map rows itself; both live behind `useCatalog`.
+#### Unified Catalog Loading
+- Load both categories and products concurrently using fetchCatalog()
+- Simplified error handling and state management
+- Optimal performance through parallel data fetching
 
 ```mermaid
 sequenceDiagram
 participant Page as "pages/index.vue"
 participant Cat as "useCatalog"
-participant Browse as "useCatalogBrowse"
 Page->>Cat : fetchCatalog()
-Cat->>Cat : fetchProducts() + fetchCategories() in parallel
+Cat->>Cat : Promise.all([fetchProducts(), fetchCategories()])
 Cat-->>Page : { products, categories }
-Page->>Browse : useCatalogBrowse(products)
-Browse-->>Page : search, selectedCategory, sortOrder, filteredProducts
-Page->>Page : render filteredProducts
+Page->>Page : render UI with filtered/sorted products
 ```
+
+**Updated** Demonstrates the new unified fetchCatalog() method for simplified data loading.
 
 **Diagram sources**
 - [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
-- [useCatalogBrowse.ts:13-38](file://app/composables/useCatalogBrowse.ts#L13-L38)
 
 **Section sources**
 - [index.vue:46-56](file://app/pages/index.vue#L46-L56)
-- [useCatalogBrowse.ts:1-39](file://app/composables/useCatalogBrowse.ts#L1-L39)
 
 #### In Detail Page
 - Fetch a single product by id
@@ -375,14 +416,14 @@ SUPA --> ST["Storage Bucket: product-images"]
 ```
 
 **Diagram sources**
-- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
-- [database.ts:77-163](file://app/types/database.ts#L77-L163)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [database.ts:81-164](file://app/types/database.ts#L81-L164)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 **Section sources**
-- [useCatalog.ts:1-115](file://app/composables/useCatalog.ts#L1-L115)
-- [database.ts:77-163](file://app/types/database.ts#L77-L163)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [database.ts:81-164](file://app/types/database.ts#L81-L164)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
@@ -394,15 +435,18 @@ SUPA --> ST["Storage Bucket: product-images"]
 - Caching strategies:
   - Cache fetched lists and single items in component state or a global store
   - Invalidate cache on mutations (add/edit/delete)
-  - Consider Nuxt’s built-in data fetching utilities or third-party caches for SSR/CSR scenarios
+  - Consider Nuxt's built-in data fetching utilities or third-party caches for SSR/CSR scenarios
 - Image handling:
   - Avoid redundant getPublicUrl calls by caching generated URLs per storage path
   - Prefer absolute URLs when possible to bypass storage calls
 - Concurrency:
-  - Fetch categories and products in parallel where appropriate
+  - Use fetchCatalog() to fetch categories and products in parallel where appropriate
+  - Leverage Promise.all for optimal performance
 - Memory and rendering:
   - Limit number of images loaded initially; lazy-load thumbnails
   - Defer heavy computations (e.g., spec parsing) until needed
+
+**Updated** Added guidance for using the new unified fetchCatalog() method for optimal performance.
 
 [No sources needed since this section provides general guidance]
 
@@ -414,14 +458,21 @@ Common issues and resolutions:
   - Verify product-images bucket policies allow public reads and admin writes
 - Locale fallback:
   - If translations are missing for the current locale, ensure English fallback exists
+  - The shared pickTranslation helper ensures consistent fallback behavior
 - Not found product:
   - fetchProduct returns null; display a friendly not-found message
 - Network errors:
   - Catch thrown errors and show user-friendly messages
+- Type inference issues:
+  - The enhanced type system should provide compile-time feedback for missing columns
+
+**Updated** Added guidance for the shared pickTranslation helper and enhanced type inference.
 
 **Section sources**
 - [useCatalog.ts:90-112](file://app/composables/useCatalog.ts#L90-L112)
-- [20260922000002_storage_and_rls.sql:162-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L162-L205)
+- [useCatalog.ts:32-35](file://app/composables/useCatalog.ts#L32-L35)
 
 ## Conclusion
-The useCatalog composable provides a clean, typed, and internationalized interface for catalog data. It centralizes querying, mapping, and image URL resolution while keeping consumers simple. By following the recommended query optimizations, caching strategies, and error handling patterns, applications can deliver fast, reliable catalog experiences.
+The useCatalog composable provides a clean, typed, and internationalized interface for catalog data. With the new unified fetchCatalog() method, developers can easily load both products and categories in a single call, while the shared pickTranslation helper ensures consistent locale fallback behavior. The enhanced type system provides better compile-time safety, and the existing mapping and image URL resolution capabilities remain robust. By following the recommended query optimizations, caching strategies, and error handling patterns, applications can deliver fast, reliable catalog experiences.
+
+**Updated** Enhanced with unified data loading, consistent translation resolution, and improved type safety for better developer experience and application performance.

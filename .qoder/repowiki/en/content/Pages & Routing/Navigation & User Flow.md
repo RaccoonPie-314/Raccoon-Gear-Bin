@@ -97,7 +97,7 @@ Key responsibilities:
 
 **Section sources**
 - [index.vue:26-63](file://app/pages/index.vue#L26-L63)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [SearchDock.vue:1-446](file://app/components/SearchDock.vue#L1-L446)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
@@ -165,13 +165,13 @@ UserInteraction --> |No| End(["Idle"])
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [index.vue:46-63](file://app/pages/index.vue#L46-L63)
 - [index.vue:319-327](file://app/pages/index.vue#L319-L327)
 
 **Section sources**
 - [index.vue:26-63](file://app/pages/index.vue#L26-L63)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [index.vue:243-328](file://app/pages/index.vue#L243-L328)
 
 ### CategoryNav Component

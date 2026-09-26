@@ -49,7 +49,7 @@ F --> |redirect if not authorized| E
 
 **Diagram sources**
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/index.vue:1-8](file://app/pages/products/index.vue#L1-L8)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
@@ -57,7 +57,7 @@ F --> |redirect if not authorized| E
 
 **Section sources**
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/index.vue:1-8](file://app/pages/products/index.vue#L1-L8)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
@@ -84,7 +84,7 @@ Key responsibilities:
 - Pages handle UI, loading states, errors, and SEO via useHead.
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [app/middleware/admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
@@ -152,7 +152,7 @@ Programmatic navigation:
 - Uses navigateTo for redirects and form submissions where needed.
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 
 ### Dynamic Product Detail Page (/products/:id)
@@ -268,7 +268,7 @@ AU --> SA
 - [app/composables/useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
 **Section sources**
@@ -276,7 +276,7 @@ AU --> SA
 - [app/composables/useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
 ## Performance Considerations
@@ -322,7 +322,7 @@ This project leverages Nuxt’s file-based routing for clean URL-to-page mapping
 
 **Section sources**
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 
 ### Implementing Route Guards
 - Create a middleware file under app/middleware.
@@ -343,7 +343,7 @@ This project leverages Nuxt’s file-based routing for clean URL-to-page mapping
 - Keep titles concise and descriptive, including product names where applicable.
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
@@ -363,7 +363,7 @@ This project leverages Nuxt’s file-based routing for clean URL-to-page mapping
 - Log detailed errors for debugging.
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
@@ -373,6 +373,6 @@ This project leverages Nuxt’s file-based routing for clean URL-to-page mapping
 - Clear loading state in finally blocks to ensure UI consistency.
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)

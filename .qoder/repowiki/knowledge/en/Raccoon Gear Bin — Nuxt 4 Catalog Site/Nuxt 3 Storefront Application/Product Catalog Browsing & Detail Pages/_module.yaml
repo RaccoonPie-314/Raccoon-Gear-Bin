@@ -1,7 +1,8 @@
 schema_version: 1
 module_path: frontend_app/products_catalog
-title: Products Catalog Pages & Data Layer
+title: Product Catalog Browsing & Detail Pages
 scope:
+    - ARCHITECTURE.md
     - app/pages/index.vue
     - app/pages/products/
     - app/components/ProductCard.vue

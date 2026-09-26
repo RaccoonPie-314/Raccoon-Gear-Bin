@@ -52,7 +52,7 @@ B --> G["useCatalog composable<br/>app/composables/useCatalog.ts"]
 
 **Diagram sources**
 - [app/app.vue:1-4](file://app/app.vue#L1-L4)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [app/components/CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
@@ -77,7 +77,7 @@ Key lazy-loading touchpoints:
 - Data fetching deferred until component mounts or route activates
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 - [app/components/ProductCard.vue:14-20](file://app/components/ProductCard.vue#L14-L20)
 - [app/components/CategoryNav.vue:20-35](file://app/components/CategoryNav.vue#L20-L35)
@@ -103,7 +103,7 @@ UI-->>User : Render product cards with lazy images
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 - [app/components/ProductCard.vue:14-20](file://app/components/ProductCard.vue#L14-L20)
 
@@ -115,12 +115,12 @@ UI-->>User : Render product cards with lazy images
 
 Implementation references:
 - Root page container: [app/app.vue:1-4](file://app/app.vue#L1-L4)
-- Home page entry: [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- Home page entry: [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - Product detail entry: [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 
 **Section sources**
 - [app/app.vue:1-4](file://app/app.vue#L1-L4)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 
 ### Component-Level Lazy Loading with defineAsyncComponent
@@ -178,11 +178,11 @@ Best practices:
 - Product detail page fetches a single product and handles errors gracefully.
 
 References:
-- Concurrent data fetch and loading flags: [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- Concurrent data fetch and loading flags: [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - Single product fetch with loading/error states: [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 ## Dependency Analysis
@@ -198,7 +198,7 @@ Detail["pages/products/[id].vue"] --> UC
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [app/components/CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [app/components/category/CategoryMobile.vue:1-577](file://app/components/category/CategoryMobile.vue#L1-L577)
@@ -206,7 +206,7 @@ Detail["pages/products/[id].vue"] --> UC
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [app/components/CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [app/components/category/CategoryMobile.vue:1-577](file://app/components/category/CategoryMobile.vue#L1-L577)
@@ -246,11 +246,11 @@ References:
 - Handle network errors with user-friendly messages and retry options.
 
 References:
-- Loading and error states on home page: [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- Loading and error states on home page: [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - Loading and error states on product detail: [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 ### Measuring Lazy Loading Effectiveness

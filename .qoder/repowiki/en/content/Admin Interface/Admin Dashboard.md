@@ -94,7 +94,7 @@ Key responsibilities:
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [CategoryDesktop.vue:1-611](file://app/components/category/CategoryDesktop.vue#L1-L611)
 - [CategoryMobile.vue:1-577](file://app/components/category/CategoryMobile.vue#L1-L577)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 
 ## Architecture Overview
@@ -283,7 +283,7 @@ CN --> CM["CategoryMobile.vue"]
 - [main.css:1-106](file://app/assets/css/main.css#L1-L106)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [CategoryDesktop.vue:1-611](file://app/components/category/CategoryDesktop.vue#L1-L611)
 - [CategoryMobile.vue:1-577](file://app/components/category/CategoryMobile.vue#L1-L577)
@@ -327,7 +327,7 @@ CN --> CM["CategoryMobile.vue"]
 **Section sources**
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [login.vue:15-54](file://app/pages/admin/login.vue#L15-L54)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [index.vue:134-183](file://app/pages/index.vue#L134-L183)
 - [nuxt.config.ts:16-26](file://nuxt.config.ts#L16-L26)
 - [nuxt.config.ts:32-50](file://nuxt.config.ts#L32-L50)

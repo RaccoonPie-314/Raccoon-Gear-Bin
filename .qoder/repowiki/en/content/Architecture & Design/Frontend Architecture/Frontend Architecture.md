@@ -83,7 +83,7 @@ A --> H["Tailwind + UI Kit<br/>package.json"]
 
 **Section sources**
 - [app/app.vue:1-4](file://app/app.vue#L1-L4)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/pages/products/index.vue:1-8](file://app/pages/products/index.vue#L1-L8)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
@@ -128,7 +128,7 @@ CUseAdminAuth --> Supabase
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 - [app/components/CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
@@ -173,13 +173,13 @@ Page-->>User : Render product grid
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/index.vue:46-63](file://app/pages/index.vue#L46-L63)
 - [app/composables/useCatalog.ts:13-33](file://app/composables/useCatalog.ts#L13-L33)
 - [app/composables/useAdminAuth.ts:16-34](file://app/composables/useAdminAuth.ts#L16-L34)
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/composables/useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 

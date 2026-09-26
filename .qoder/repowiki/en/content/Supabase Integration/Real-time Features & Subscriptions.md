@@ -55,13 +55,13 @@ Schema["supabase/migrations/...create_catalog_schema.sql"] --> DB
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [server/utils/supabase.ts:3-19](file://server/utils/supabase.ts#L3-L19)
 - [supabase/migrations/20260922_000001_create_catalog_schema.sql:22-59](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L22-L59)
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [server/utils/supabase.ts:3-19](file://server/utils/supabase.ts#L3-L19)
 - [supabase/migrations/20260922_000001_create_catalog_schema.sql:22-59](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L22-L59)
@@ -78,7 +78,7 @@ Key responsibilities:
 - Stock visualization is isolated in a small presentational component.
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:13-57](file://app/composables/useCatalog.ts#L13-L57)
 - [app/components/StockStatus.vue:1-20](file://app/components/StockStatus.vue#L1-L20)
 - [server/utils/supabase.ts:3-19](file://server/utils/supabase.ts#L3-L19)
@@ -101,7 +101,7 @@ Catalog-->>Page : Products list
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-41](file://app/composables/useCatalog.ts#L37-L41)
 
 To add real-time:

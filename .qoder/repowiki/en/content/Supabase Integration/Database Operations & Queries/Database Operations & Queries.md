@@ -57,14 +57,14 @@ TypesCat --> PDetail
 
 **Diagram sources**
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
 - [20260922000002_storage_and_rls.sql:1-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L1-L205)
 
 **Section sources**
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
 - [20260922000002_storage_and_rls.sql:1-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L1-L205)
@@ -85,7 +85,7 @@ Key responsibilities:
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
 - [20260922000002_storage_and_rls.sql:1-205](file://supabase/migrations/20260922000002_storage_and_rls.sql#L1-L205)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [supabase.ts:1-20](file://server/utils/supabase.ts#L1-L20)
 - [database.ts:1-123](file://app/types/database.ts#L1-L123)

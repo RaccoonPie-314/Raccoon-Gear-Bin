@@ -64,7 +64,7 @@ F --> E
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [package.json:1-26](file://package.json#L1-L26)
 - [app.vue:1-4](file://app/app.vue#L1-L4)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [supabase.ts:1-200](file://server/utils/supabase.ts#L1-L200)
@@ -73,7 +73,7 @@ F --> E
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [package.json:1-26](file://package.json#L1-L26)
 - [app.vue:1-4](file://app/app.vue#L1-L4)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [supabase.ts:1-200](file://server/utils/supabase.ts#L1-L200)
@@ -94,7 +94,7 @@ These are the primary integration points for adding performance instrumentation:
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ## Architecture Overview
 The runtime flow involves client-side rendering via Nuxt, data retrieval from Supabase REST/Realtime APIs, and optional storage access for images. Performance instrumentation should be added at these boundaries:
@@ -124,7 +124,7 @@ Nuxt-->>Browser : Render UI
 **Diagram sources**
 - [useCatalog.ts:37-41](file://app/composables/useCatalog.ts#L37-L41)
 - [useAdminAuth.ts:16-34](file://app/composables/useAdminAuth.ts#L16-L34)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ## Detailed Component Analysis
 
@@ -166,11 +166,11 @@ ReturnError --> End
 
 **Diagram sources**
 - [useCatalog.ts:37-41](file://app/composables/useCatalog.ts#L37-L41)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 **Section sources**
 - [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ### Authentication Flow and UX Timing
 - useAdminAuth.ts retrieves current user, checks admin roles, and handles sign-in/sign-out. Errors are logged or thrown.

@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app/app_infrastructure
-title: Nuxt App Shell & Admin Auth Infrastructure
+title: Nuxt App Shell, Admin Auth & Catalog Type Contracts
 scope:
     - app/
     - app/types/

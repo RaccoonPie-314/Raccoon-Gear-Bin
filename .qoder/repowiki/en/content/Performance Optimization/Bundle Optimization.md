@@ -68,7 +68,7 @@ Key areas to optimize:
 **Section sources**
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [main.css:1-106](file://app/assets/css/main.css#L1-L106)
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 
 ## Architecture Overview
 At build time, Nuxt compiles pages, components, and modules into optimized bundles. The current setup uses:
@@ -132,7 +132,7 @@ Example pattern:
 - Load admin editor functionality conditionally after verifying admin privileges.
 
 **Section sources**
-- [index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 
 ### Static Assets and Compression
 - Place static assets under the public directory for direct serving.

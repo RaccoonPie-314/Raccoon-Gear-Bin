@@ -12,6 +12,13 @@
 - [20260922_000001_create_catalog_schema.sql](file://supabase/migrations/20260922_000001_create_catalog_schema.sql)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated Database-mirroring Types section to reflect the critical conversion from interface declarations to type literals
+- Added explanation of why type literals are required for Supabase query type inference
+- Enhanced troubleshooting guide with specific guidance about interface vs type literal usage
+- Updated architecture diagrams to reflect the improved type inference system
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -30,6 +37,8 @@ This document explains the TypeScript type definitions that provide end-to-end t
 - Domain-specific product record types used to model translations and images.
 - How these types are consumed in composables and UI components.
 - Type inference patterns, validation strategies, and migration guidance when the database schema evolves.
+
+**Updated** The database schema definitions have been enhanced with critical TypeScript fixes - all row shape interfaces converted from interface declarations to type literals for proper index signature support, enabling correct Supabase query type inference and resolving compilation issues where queries were resolving to never.
 
 ## Project Structure
 The type system is organized into three layers:
@@ -67,22 +76,22 @@ UC --> MIG
 
 **Diagram sources**
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:1-123](file://app/types/database.ts#L1-L123)
+- [database.ts:1-164](file://app/types/database.ts#L1-L164)
 - [product.ts:1-40](file://app/types/product.ts#L1-L40)
 - [database.types.ts:1-2](file://app/types/database.types.ts#L1-L2)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [index.vue:1-120](file://app/pages/index.vue#L1-L120)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
 
 **Section sources**
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
-- [database.ts:1-123](file://app/types/database.ts#L1-L123)
+- [database.ts:1-164](file://app/types/database.ts#L1-L164)
 - [product.ts:1-40](file://app/types/product.ts#L1-L40)
 - [database.types.ts:1-2](file://app/types/database.types.ts#L1-L2)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [index.vue:1-120](file://app/pages/index.vue#L1-L120)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
 
 ## Core Components
@@ -110,6 +119,8 @@ Relationships:
 ### Database-mirroring Types (database.ts)
 These types mirror the Supabase schema and enable strongly-typed queries.
 
+**Critical Update**: All row shape types have been converted from interface declarations to type literals to ensure proper Supabase query type inference.
+
 - Json: Generic flexible JSON type used for specification fields.
 - ProductCategory: Enumerated product categories.
 - ProductStatus: Enumerated product statuses.
@@ -117,13 +128,16 @@ These types mirror the Supabase schema and enable strongly-typed queries.
 - CategoryRow, CategoryTranslationRow, ProductRow, ProductTranslationRow, ProductImageRow, AdminUserRow: Row types matching table columns.
 - Database: Top-level type describing public schema tables with Row, Insert, Update, and Relationships per table.
 
+**Why Type Literals Instead of Interfaces?**
+Every row shape below must be a `type` literal, not an `interface`. Supabase's GenericSchema requires `Row extends Record<string, unknown>`, and TypeScript only gives object *type literals* an implicit index signature — interfaces do not get one, so the constraint silently fails and every query result resolves to `never`.
+
 Highlights:
 - Row types align with SQL column names and types.
 - Insert/Update types derive from Row using Partial and Pick to enforce required fields on writes.
 - Database.Public.Tables exposes all tables with consistent shape for query builders.
 
 **Section sources**
-- [database.ts:1-123](file://app/types/database.ts#L1-L123)
+- [database.ts:1-164](file://app/types/database.ts#L1-L164)
 
 ### Domain Record Types (product.ts)
 These types represent normalized records for product data and translations.
@@ -167,8 +181,8 @@ Composable-->>UI : CatalogProduct[]
 ```
 
 **Diagram sources**
-- [useCatalog.ts:13-41](file://app/composables/useCatalog.ts#L13-L41)
-- [index.vue:79-116](file://app/pages/index.vue#L79-L116)
+- [useCatalog.ts:13-116](file://app/composables/useCatalog.ts#L13-L116)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 - [20260922_000001_create_catalog_schema.sql:22-59](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L22-L59)
 
 ## Detailed Component Analysis
@@ -222,8 +236,10 @@ Migration alignment:
 - Column names and constraints in Row types match the SQL schema.
 - Insert/Update types restrict mutable fields and enforce required keys.
 
+**Critical Enhancement**: The Database type definition now uses type literals for all Row shapes, ensuring proper index signature support and preventing query results from resolving to `never`.
+
 **Section sources**
-- [database.ts:14-123](file://app/types/database.ts#L14-L123)
+- [database.ts:14-164](file://app/types/database.ts#L14-L164)
 - [20260922_000001_create_catalog_schema.sql:3-67](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L3-L67)
 
 ### Composable Usage: useCatalog
@@ -259,10 +275,10 @@ Result --> End
 ```
 
 **Diagram sources**
-- [useCatalog.ts:13-41](file://app/composables/useCatalog.ts#L13-L41)
+- [useCatalog.ts:13-116](file://app/composables/useCatalog.ts#L13-L116)
 
 **Section sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 
 ### Component Usage: ProductCard.vue
 Responsibilities:
@@ -288,7 +304,7 @@ Type inference:
 - Ensures consistency between UI state and catalog types.
 
 **Section sources**
-- [index.vue:1-120](file://app/pages/index.vue#L1-L120)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 
 ## Dependency Analysis
 The following diagram shows how types flow through the application.
@@ -304,12 +320,12 @@ DomainTypes["Product Record Types<br/>product.ts"] --> Composable
 
 **Diagram sources**
 - [20260922_000001_create_catalog_schema.sql:1-113](file://supabase/migrations/20260922_000001_create_catalog_schema.sql#L1-L113)
-- [database.ts:1-123](file://app/types/database.ts#L1-L123)
+- [database.ts:1-164](file://app/types/database.ts#L1-L164)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [product.ts:1-40](file://app/types/product.ts#L1-L40)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [index.vue:1-120](file://app/pages/index.vue#L1-L120)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 
 Coupling and cohesion:
 - High cohesion within each type file (application vs database vs domain).
@@ -323,8 +339,8 @@ External dependencies:
 - i18n integration for locale resolution.
 
 **Section sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [database.ts:1-123](file://app/types/database.ts#L1-L123)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [database.ts:1-164](file://app/types/database.ts#L1-L164)
 - [catalog.ts:1-31](file://app/types/catalog.ts#L1-L31)
 - [product.ts:1-40](file://app/types/product.ts#L1-L40)
 
@@ -334,10 +350,13 @@ External dependencies:
 - Denormalization: categoryName and categorySlug reduce join costs in templates.
 - Specification serialization: Serialize once during mapping to avoid repeated JSON.stringify in templates.
 
-[No sources needed since this section provides general guidance]
-
 ## Troubleshooting Guide
 Common issues and resolutions:
+
+- **Interface vs Type Literal Issues**: 
+  - If you encounter compilation errors where queries resolve to `never`, ensure all row shape types are defined as `type` literals, not `interface` declarations.
+  - The comment in database.ts explicitly states: "Every row shape below must be a `type` literal, not an `interface`."
+  - This is required because Supabase's GenericSchema needs `Row extends Record<string, unknown>`, which only works with type literals due to implicit index signatures.
 
 - Mismatch between database columns and Row types:
   - Ensure database.ts Row types match the migration schema exactly.
@@ -359,8 +378,9 @@ Common issues and resolutions:
   - Composables throw errors from Supabase; ensure pages catch and display meaningful messages.
 
 **Section sources**
-- [useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [useCatalog.ts:37-116](file://app/composables/useCatalog.ts#L37-L116)
+- [index.vue:70-120](file://app/pages/index.vue#L70-L120)
+- [database.ts:14-17](file://app/types/database.ts#L14-L17)
 
 ## Conclusion
 The type system cleanly separates concerns:
@@ -368,6 +388,6 @@ The type system cleanly separates concerns:
 - Application-facing types provide a stable contract for UI and composables.
 - Domain record types support internal normalization and composition.
 
-By maintaining strict alignment between migrations, database types, and application types—and by centralizing mapping logic in composables—the application achieves strong type safety, predictable behavior, and easier maintenance during schema evolution.
+**Enhanced Stability**: By converting all row shape interfaces to type literals, the application now achieves robust Supabase query type inference, preventing the common issue where queries would resolve to `never`. This critical fix ensures that type safety works correctly throughout the entire data pipeline.
 
-[No sources needed since this section summarizes without analyzing specific files]
+By maintaining strict alignment between migrations, database types, and application types—and by centralizing mapping logic in composables—the application achieves strong type safety, predictable behavior, and easier maintenance during schema evolution.

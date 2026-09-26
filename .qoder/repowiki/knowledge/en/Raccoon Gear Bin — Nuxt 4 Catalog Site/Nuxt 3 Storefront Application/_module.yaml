@@ -1,6 +1,6 @@
 schema_version: 1
 module_path: frontend_app
-title: Nuxt 3 Product Catalog SPA
+title: Nuxt 3 Storefront Application
 scope:
     - app/
 source_files: []

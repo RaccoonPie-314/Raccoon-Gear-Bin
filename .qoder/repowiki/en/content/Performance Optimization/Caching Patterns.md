@@ -55,7 +55,7 @@ D --> C
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [server/utils/supabase.ts:1-20](file://server/utils/supabase.ts#L1-L20)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
@@ -63,7 +63,7 @@ D --> C
 - [nuxt.config.ts:1-52](file://nuxt.config.ts#L1-L52)
 - [server/utils/supabase.ts:1-20](file://server/utils/supabase.ts#L1-L20)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
@@ -80,7 +80,7 @@ Key responsibilities:
 
 **Section sources**
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
 
@@ -109,7 +109,7 @@ Page-->>UI : Render catalog/detail
 
 **Diagram sources**
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/pages/products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 
 ## Detailed Component Analysis
@@ -291,7 +291,7 @@ Recommendations:
 - Use prefetching techniques to reduce initial load latency
 
 **Section sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ## Dependency Analysis
 The following diagram illustrates dependencies among key modules involved in data fetching and rendering:
@@ -305,7 +305,7 @@ NuxtConfig["nuxt.config.ts"] --> SupabaseServer["server/utils/supabase.ts"]
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
@@ -313,7 +313,7 @@ NuxtConfig["nuxt.config.ts"] --> SupabaseServer["server/utils/supabase.ts"]
 - [server/utils/supabase.ts:1-20](file://server/utils/supabase.ts#L1-L20)
 
 **Section sources**
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/components/ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)

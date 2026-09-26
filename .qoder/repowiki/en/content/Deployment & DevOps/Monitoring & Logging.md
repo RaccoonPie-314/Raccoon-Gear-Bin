@@ -77,7 +77,7 @@ G --> I
 
 **Diagram sources**
 - [app.vue:1-4](file://app/app.vue#L1-L4)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/composables/useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
@@ -144,7 +144,7 @@ S->>O : Log server metrics/errors
 
 **Diagram sources**
 - [app.vue:1-4](file://app/app.vue#L1-L4)
-- [app/pages/index.vue:1-465](file://app/pages/index.vue#L1-L465)
+- [index.vue:1-403](file://app/pages/index.vue#L1-L403)
 - [app/pages/products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
 - [app/middleware/admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
@@ -194,12 +194,12 @@ Page->>Mon : Emit UX event {event : "catalog_loaded"}
 ```
 
 **Diagram sources**
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [app/composables/useCatalog.ts:37-47](file://app/composables/useCatalog.ts#L37-L47)
 
 **Section sources**
 - [app/composables/useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
-- [app/pages/index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 
 ### Admin Authentication and Authorization
 - Purpose: Monitor auth flows, detect failed checks, and track authorization decisions.

@@ -13,6 +13,7 @@
 - [app.vue](file://app/app.vue)
 - [nuxt.config.ts](file://nuxt.config.ts)
 - [useCatalog.ts](file://app/composables/useCatalog.ts)
+- [useCatalogBrowse.ts](file://app/composables/useCatalogBrowse.ts)
 - [useAdminAuth.ts](file://app/composables/useAdminAuth.ts)
 - [admin-auth.global.ts](file://app/middleware/admin-auth.global.ts)
 - [i18n.config.ts](file://i18n.config.ts)
@@ -20,12 +21,11 @@
 
 ## Update Summary
 **Changes Made**
-- Updated catalog page section with comprehensive visual and structural rebalancing details
-- Added detailed documentation for new SearchDock component with morphing search interface
-- Enhanced CategoryNav component documentation with desktop and mobile variants
-- Updated grid spacing and responsive design patterns
-- Improved typography and masthead structure documentation
-- Added advanced interaction patterns including drag-to-select functionality
+- Updated catalog page section to reflect simplified architecture with composition-focused implementation
+- Added detailed documentation for new useCatalogBrowse composable that manages browsing state
+- Enhanced description of how data fetching is delegated to composables, eliminating duplicate query logic
+- Updated component interaction patterns to show cleaner separation of concerns
+- Revised performance considerations to highlight improved maintainability and reduced complexity
 
 ## Table of Contents
 1. Introduction
@@ -40,7 +40,7 @@
 
 ## Introduction
 This document explains the Nuxt.js page structure and organization patterns used in the project. It covers file-based routing, directory conventions, and how pages map to routes. It focuses on:
-- The main catalog landing page (index.vue) for browsing products with enhanced visual design
+- The main catalog landing page (index.vue) for browsing products with enhanced visual design and simplified architecture
 - The dynamic product detail page (products/[id].vue) for individual product views
 - The admin login page (admin/login.vue) for administrative access
 It also describes script setup patterns, template organization, styling approaches, integration with data fetching and state management, SEO considerations, and performance strategies.
@@ -74,7 +74,7 @@ F --> D
 
 ## Core Components
 - Pages:
-  - index.vue: Enhanced catalog landing with sophisticated masthead, unified search/sort controls, improved grid spacing, and responsive sidebar navigation
+  - index.vue: Simplified catalog landing with composition-focused architecture, delegating data fetching to useCatalog() and browsing state to useCatalogBrowse()
   - products/[id].vue: Dynamic product detail with image gallery, specs, and stock status
   - admin/login.vue: Admin authentication form with validation and error handling
 - Advanced UI Components:
@@ -83,6 +83,7 @@ F --> D
   - ProductCard.vue: Enhanced product cards with hover effects and admin controls
 - Composables:
   - useCatalog.ts: Data fetching for products, categories, and mapping to typed models
+  - useCatalogBrowse.ts: Browsing state management including search, filtering, and sorting
   - useAdminAuth.ts: Authentication helpers for sign-in/sign-out and role checks
 - Middleware:
   - admin-auth.global.ts: Guards /admin/* routes, redirects unauthenticated users to /admin/login
@@ -92,17 +93,19 @@ F --> D
 Key responsibilities:
 - Routing and navigation via Nuxt's file system
 - Data fetching through Supabase client within composables or pages
+- Clean separation of concerns with dedicated composables for data and state management
 - Sophisticated UI composition using advanced components with complex interactions
 - Global behavior via middleware and config
 
 **Section sources**
-- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [useCatalogBrowse.ts:1-40](file://app/composables/useCatalogBrowse.ts#L1-L40)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
@@ -115,17 +118,19 @@ sequenceDiagram
 participant U as "User"
 participant R as "Nuxt Router"
 participant P as "Page (index.vue)"
+participant UC as "useCatalog"
+participant UCB as "useCatalogBrowse"
 participant SD as "SearchDock"
 participant CN as "CategoryNav"
-participant C as "useCatalog"
 participant S as "Supabase Client"
 participant M as "Middleware (admin-auth.global.ts)"
 U->>R : Navigate to "/"
 R->>P : Render index.vue
-P->>C : fetchProducts()
-C->>S : Query products + categories
-S-->>C : Data
-C-->>P : Mapped products
+P->>UC : fetchCatalog()
+UC->>S : Query products + categories
+S-->>UC : Data
+UC-->>P : Catalog data
+P->>UCB : Initialize browsing state
 P->>SD : Initialize morphing search
 P->>CN : Load category navigation
 P-->>U : Enhanced catalog UI
@@ -140,44 +145,45 @@ end
 ```
 
 **Diagram sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:23-40](file://app/pages/index.vue#L23-L40)
+- [useCatalog.ts:109-112](file://app/composables/useCatalog.ts#L109-L112)
+- [useCatalogBrowse.ts:13-39](file://app/composables/useCatalogBrowse.ts#L13-L39)
 - [SearchDock.vue:288-352](file://app/components/SearchDock.vue#L288-L352)
 - [CategoryNav.vue:20-36](file://app/components/CategoryNav.vue#L20-L36)
-- [useCatalog.ts:37-57](file://app/composables/useCatalog.ts#L37-L57)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 
 ## Detailed Component Analysis
 
-### Enhanced Landing Page: app/pages/index.vue
-**Updated** The catalog page underwent comprehensive visual and structural rebalancing with sophisticated design improvements.
+### Simplified Landing Page: app/pages/index.vue
+**Updated** The catalog page underwent significant architectural simplification, reducing from over 100 lines of data manipulation to a clean composition-focused implementation.
 
 Responsibilities:
-- Loads categories and published products concurrently with enhanced loading states
+- Delegates data fetching to useCatalog().fetchCatalog() for concurrent loading of categories and products
+- Manages browsing state through useCatalogBrowse() composable for search, filtering, and sorting
 - Provides unified search/sort controls with improved UX patterns
 - Implements responsive sidebar navigation with desktop and mobile variants
 - Renders product grid with improved spacing and typography
 - Offers admin mode: add/edit/delete products, manage images, and logout
 - Sets page title via useHead with enhanced SEO
 
-**Visual Enhancements:**
-- **Masthead Restructuring**: Slim logo on left with utility controls on right, separated by hairline borders
-- **Unified Controls**: Search and sort controls share consistent 44px rhythm and responsive layout
-- **Improved Grid Spacing**: Enhanced gap values (gap-x-6 gap-y-10 sm:gap-x-8 sm:gap-y-12) for better visual hierarchy
-- **Typography Enhancements**: Improved tracking values, font weights, and responsive text sizing
-- **Responsive Design**: Mobile-first approach with sophisticated breakpoints and adaptive layouts
+**Architectural Improvements:**
+- **Composition-Focused Design**: All data manipulation logic moved to dedicated composables
+- **State Management Separation**: useCatalogBrowse handles all browsing-related state (search, filters, sorting)
+- **Data Fetching Delegation**: useCatalog provides centralized data fetching with proper error handling
+- **Reduced Complexity**: Eliminated duplicate query logic and complex data transformation in the page component
 
 Data flow:
-- On mount, load catalog data from Supabase with parallel queries
-- Map raw records into typed models with translations based on current locale
-- Compute filtered and sorted lists reactively with enhanced filtering logic
+- On mount, load catalog data via fetchCatalog() which returns both products and categories
+- Initialize browsing state with useCatalogBrowse(products) for reactive filtering and sorting
+- Computed filteredProducts automatically updates based on search, category selection, and sort order
 - Persist changes via Supabase and refresh catalog
 
 SEO:
 - Title set dynamically with useHead for optimal search engine optimization
 
 Performance:
-- Parallel queries for categories and products
-- Local computed filtering/sorting avoids extra network calls
+- Parallel queries for categories and products through fetchCatalog()
+- Client-side filtering and sorting through computed properties in useCatalogBrowse
 - Loading skeletons improve perceived performance
 - Optimized image loading with lazy loading
 
@@ -187,7 +193,7 @@ Styling:
 - Consistent spacing and typography system
 
 **Section sources**
-- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 
 #### Enhanced Layout Structure
 ```mermaid
@@ -200,10 +206,12 @@ Sidebar --> CategoryNav["CategoryNav Component<br/>Desktop/Mobile Variants"]
 Sidebar --> SearchDock["SearchDock Component<br/>Morphing Interface"]
 Content --> Controls["Unified Search/Sort Controls<br/>Consistent 44px Rhythm"]
 Content --> ProductGrid["Enhanced Product Grid<br/>Improved Spacing + Typography"]
+ControlState["useCatalogBrowse<br/>Search + Filters + Sort"] --> ProductGrid
 ```
 
 **Diagram sources**
-- [index.vue:192-332](file://app/pages/index.vue#L192-L332)
+- [index.vue:182-267](file://app/pages/index.vue#L182-L267)
+- [useCatalogBrowse.ts:13-39](file://app/composables/useCatalogBrowse.ts#L13-L39)
 
 ### Advanced Search Interface: app/components/SearchDock.vue
 **New** Sophisticated morphing search interface with advanced animations and scroll-aware behavior.
@@ -344,19 +352,26 @@ Integration:
 **Section sources**
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 
-### Composables: Data and Auth
+### Composables: Data and State Management
 - useCatalog.ts
-  - Provides fetchProducts, fetchProduct, fetchCategories
+  - Provides fetchCatalog, fetchProducts, fetchProduct, fetchCategories
   - Maps raw Supabase results to typed models with localization-aware names
   - Builds public URLs for product images
+  - Centralizes all data fetching logic with proper error handling
+- useCatalogBrowse.ts
+  - Manages browsing state: search query, selected category, sort order
+  - Computes filtered and sorted product lists reactively
+  - Handles complex filtering logic for categories and search queries
+  - Provides clean API for pages to consume browsing state
 - useAdminAuth.ts
   - Exposes getCurrentUser, isAdmin, isSuperAdmin, signIn, signOut
   - Queries admin_users to determine roles
 
-These composables centralize logic and reduce duplication across pages.
+These composables centralize logic and reduce duplication across pages, following the principle of separation of concerns.
 
 **Section sources**
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [useCatalogBrowse.ts:1-40](file://app/composables/useCatalogBrowse.ts#L1-L40)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 
 ## Dependency Analysis
@@ -365,10 +380,12 @@ Pages depend on:
 - i18n for localized strings
 - Advanced UI components for sophisticated interactions
 - Middleware for route guards
+- Dedicated composables for data fetching and state management
 
 ```mermaid
 graph LR
 Index["index.vue"] --> UC["useCatalog.ts"]
+Index --> UCB["useCatalogBrowse.ts"]
 Index --> UA["useAdminAuth.ts"]
 Index --> SD["SearchDock.vue"]
 Index --> CN["CategoryNav.vue"]
@@ -377,6 +394,7 @@ Detail["products/[id].vue"] --> UC
 Login["admin/login.vue"] --> UA
 UA --> SB["Supabase Client"]
 UC --> SB
+UCB --> PC
 MW["admin-auth.global.ts"] --> SB
 Index --> I18N["i18n.config.ts"]
 Detail --> I18N
@@ -387,38 +405,44 @@ PC --> I18N
 ```
 
 **Diagram sources**
-- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
+- [index.vue:23-40](file://app/pages/index.vue#L23-L40)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [useCatalogBrowse.ts:1-40](file://app/composables/useCatalogBrowse.ts#L1-L40)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 **Section sources**
-- [index.vue:1-468](file://app/pages/index.vue#L1-L468)
+- [index.vue:1-404](file://app/pages/index.vue#L1-L404)
 - [products/[id].vue:1-177](file://app/pages/products/[id].vue#L1-L177)
 - [admin/login.vue:1-121](file://app/pages/admin/login.vue#L1-L121)
 - [SearchDock.vue:1-628](file://app/components/SearchDock.vue#L1-L628)
 - [CategoryNav.vue:1-37](file://app/components/CategoryNav.vue#L1-L37)
 - [ProductCard.vue:1-68](file://app/components/ProductCard.vue#L1-L68)
-- [useCatalog.ts:1-61](file://app/composables/useCatalog.ts#L1-L61)
+- [useCatalog.ts:1-116](file://app/composables/useCatalog.ts#L1-L116)
+- [useCatalogBrowse.ts:1-40](file://app/composables/useCatalogBrowse.ts#L1-L40)
 - [useAdminAuth.ts:1-79](file://app/composables/useAdminAuth.ts#L1-L79)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [i18n.config.ts:1-14](file://i18n.config.ts#L1-L14)
 
 ## Performance Considerations
-- Parallel data loading: The landing page loads categories and products concurrently to minimize total load time.
-- Client-side filtering and sorting: Reduces server round-trips by computing derived lists reactively.
+- Parallel data loading: The landing page loads categories and products concurrently through fetchCatalog() to minimize total load time.
+- Client-side filtering and sorting: Reduces server round-trips by computing derived lists reactively through useCatalogBrowse.
 - Skeleton loaders: Provide immediate feedback during async operations.
 - Image handling: Public URLs are generated per storage path; consider caching strategies at CDN level.
 - Route-level concerns:
   - Use head meta tags for SEO titles per page
   - Keep payloads lean by selecting only needed fields
 - Middleware efficiency: Minimal checks and early redirects prevent unnecessary work.
+- **Composability Benefits**: 
+  - Separation of concerns reduces component complexity
+  - Reusable state management through dedicated composables
+  - Easier testing and maintenance of business logic
 - **Advanced Animation Performance**: 
   - Efficient animation state management with proper cleanup
   - RequestAnimationFrame usage for smooth 60fps animations
@@ -449,6 +473,10 @@ Common issues and where to inspect:
   - Ensure proper component mounting and lifecycle hooks
   - Verify touch event handling on mobile devices
   - Check responsive breakpoint behavior
+- **Browsing State Issues**:
+  - Verify useCatalogBrowse initialization with proper product data
+  - Check computed property dependencies for search and filtering
+  - Ensure reactivity is maintained when products array changes
 
 Relevant locations:
 - Catalog load error handling and retry
@@ -457,23 +485,25 @@ Relevant locations:
 - Middleware authorization checks
 - Search dock animation and event management
 - Category navigation component lifecycle
+- useCatalogBrowse composable state management
 
 **Section sources**
-- [index.vue:101-120](file://app/pages/index.vue#L101-L120)
+- [index.vue:46-56](file://app/pages/index.vue#L46-L56)
 - [products/[id].vue:10-20](file://app/pages/products/[id].vue#L10-L20)
 - [admin/login.vue:15-54](file://app/pages/admin/login.vue#L15-L54)
 - [admin-auth.global.ts:1-28](file://app/middleware/admin-auth.global.ts#L1-L28)
 - [SearchDock.vue:429-445](file://app/components/SearchDock.vue#L429-L445)
 - [CategoryDesktop.vue:379-412](file://app/components/category/CategoryDesktop.vue#L379-L412)
 - [CategoryMobile.vue:343-391](file://app/components/category/CategoryMobile.vue#L343-L391)
+- [useCatalogBrowse.ts:18-36](file://app/composables/useCatalogBrowse.ts#L18-L36)
 
 ## Conclusion
-The project follows Nuxt's file-based routing with clear separation of concerns and significantly enhanced user experience:
-- Pages handle presentation and orchestration with sophisticated visual design
+The project follows Nuxt's file-based routing with clear separation of concerns and significantly enhanced user experience through architectural simplification:
+- Pages handle presentation and orchestration with sophisticated visual design and clean composition patterns
 - Advanced components provide rich interactions including morphing animations and drag gestures
-- Composables encapsulate data fetching and business logic
+- Dedicated composables encapsulate data fetching (useCatalog) and state management (useCatalogBrowse)
 - Middleware enforces security for admin areas
 - Internationalization and styling are consistently applied with modern design principles
 - Enhanced responsive design ensures optimal experience across all device types
 
-This structure supports scalable feature growth, maintainable code, strong UX with robust error handling, performance optimizations, and sophisticated interaction patterns that elevate the user experience beyond basic functionality.
+The recent architectural improvements have made the codebase more maintainable, testable, and scalable by eliminating complex data manipulation logic from pages and delegating it to focused composables. This separation of concerns improves code organization, reduces duplication, and makes the application easier to understand and modify while maintaining high performance and excellent user experience.
