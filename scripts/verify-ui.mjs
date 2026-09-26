@@ -308,6 +308,66 @@ const run = async () => {
   const ALERT = '[role="alertdialog"]'
   const EDIT_BTN = 'main article button[aria-label="Edit product"]'
 
+  // Masthead geometry in one read. Two levels: the contact line (phone left, location right)
+  // above a rule, then the brand row — emblem on the left, and on the right a column holding the
+  // utility line over the social group. `rows` and `collide` describe the brand row only, since
+  // the contact line is a block above it by construction.
+  const MASTHEAD_EXPR = `(() => {
+    const h = document.querySelector('header');
+    if (!h) return null;
+    const bx = el => { if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.left, right: b.right, y: b.top, bottom: b.bottom, w: b.width, h: b.height, cy: b.top + b.height / 2 }; };
+    const logoEl = [...h.querySelectorAll('a img')].find(i => i.getBoundingClientRect().height > 0);
+    if (!logoEl) return null;
+    const row = h.lastElementChild;
+    const col = row.querySelector(':scope > div');
+    const socialsEl = h.querySelector('[data-site-socials]');
+    const groups = [bx(logoEl), bx(col)].filter(Boolean);
+    const rows = groups.slice().sort((a, b) => a.y - b.y);
+    let wrapped = 1;
+    for (let i = 1; i < rows.length; i++) if (rows[i].y >= rows[i - 1].y + rows[i - 1].h - 2) wrapped++;
+    const clash = (a, b) => a.y < b.y + b.h && b.y < a.y + a.h && a.x < b.right && b.x < a.right;
+    let collide = false;
+    for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) if (clash(groups[i], groups[j])) collide = true;
+    return {
+      header: bx(h), logo: groups[0], contact: bx(h.querySelector('[data-site-contact]')),
+      phone: bx(h.querySelector('a[data-site-phone]')), location: bx(h.querySelector('a[data-site-location]')),
+      utils: bx(col && col.firstElementChild), socials: bx(socialsEl),
+      rows: wrapped, collide
+    };
+  })()`
+  // The emblem's Tailwind step per viewport: base / sm / md / lg / xl.
+  const LOGO_STEP = { 390: 96, 640: 112, 834: 112, 1024: 112, 1280: 128, 1440: 128 }
+  // How far the contact pair lifts off each container margin: none until `lg`, where the line is
+  // wide enough that pinning the two labels to the extremes stops reading as one pair.
+  const CONTACT_INSET = { 390: 0, 640: 0, 834: 0, 1024: 32, 1280: 48, 1440: 48 }
+  // Returns the list of things that went wrong, so a failure names itself instead of just
+  // re-printing the geometry that already looked right.
+  const mastheadFaults = (m, w) => {
+    if (!m) return ['no masthead']
+    const f = []
+    if (Math.abs(m.logo.h - LOGO_STEP[w]) >= 1) f.push(`logo ${m.logo.h} want ${LOGO_STEP[w]}`)
+    if (m.rows !== 1) f.push(`${m.rows} rows in the brand row`)
+    if (m.collide) f.push('emblem and right column collide')
+    if (m.contact && m.contact.bottom > m.logo.top + 1) f.push('contact line is not above the emblem')
+    if (m.phone && m.location && m.phone.right > m.location.x) f.push('phone and location overlap')
+    if (m.phone && m.location) {
+      const left = m.phone.x - m.header.x
+      const right = m.header.right - m.location.right
+      if (Math.abs(left - right) > 2) f.push(`contact inset is asymmetric (${left.toFixed(1)} / ${right.toFixed(1)})`)
+      if (Math.abs(left - CONTACT_INSET[w]) > 2) f.push(`contact inset ${left.toFixed(1)} want ${CONTACT_INSET[w]}`)
+      // Still a spread pair rather than a centred one: each stays on its own side of the line.
+      if (m.phone.right > m.header.x + m.header.w / 2) f.push('phone has crossed the centre line')
+      if (m.location.x < m.header.x + m.header.w / 2) f.push('location has crossed the centre line')
+    }
+    if (m.socials && m.utils) {
+      if (m.socials.y < m.utils.bottom - 1) f.push('socials share the utility line')
+      if (Math.abs(m.socials.right - m.utils.right) > 1.5) f.push('socials not flush with the utility line')
+      if (m.utils.x < m.logo.right) f.push('utility line collides with the emblem')
+      if (m.socials.x < m.logo.right) f.push('socials collide with the emblem')
+    }
+    return f
+  }
+
   // ============================== GUEST ==============================
   if (ONLY !== 'admin') {
     await metrics(1440, 900, false)
@@ -330,6 +390,22 @@ const run = async () => {
     const socials = await ev('[...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform"))')
     check('enabled social links render icon-only, in stored order', JSON.stringify(socials) === JSON.stringify(EXP.siteInfo.socialOrder), { socials })
     check('disabled social link is not rendered', !(await ev(`document.body.innerHTML.includes(${JSON.stringify(EXP.siteInfo.hiddenSocialUrl)})`)))
+
+    // the masthead's two levels, measured rather than eyeballed
+    const mast = await ev(MASTHEAD_EXPR)
+    check('masthead is two levels: contact line, then emblem | utilities over socials', !!mast && !!mast.contact && !!mast.socials && !!mast.phone && !!mast.location, mast && { contact: !!mast?.contact, phone: !!mast?.phone, location: !!mast?.location, socials: !!mast?.socials })
+    check('masthead keeps its levels apart, aligned and collision-free', mastheadFaults(mast, 1440).length === 0, mastheadFaults(mast, 1440))
+    const glyphs = await ev('(() => { const links = [...document.querySelectorAll("header a[data-site-social]")]; return links.map(a => { const s = a.querySelector("svg"); const g = s.getBoundingClientRect(); const ink = s.getBBox(); return { text: (a.textContent || "").trim(), svgs: a.querySelectorAll("svg").length, fill: s.getAttribute("fill"), w: g.width, h: g.height, ink: [Math.round(ink.width), Math.round(ink.height)], cy: g.top + g.height / 2 } }) })()')
+    check('social links stay icon-only, one glyph each', glyphs.length > 0 && glyphs.every(g => g.text === '' && g.svgs === 1), glyphs)
+    check('social glyphs share a size and one centre line', glyphs.every(g => g.w === glyphs[0].w && g.h === glyphs[0].h && Math.abs(g.cy - glyphs[0].cy) < 1.5), glyphs)
+    check('every social glyph is a platform mark, not the globe fallback', glyphs.every(g => g.fill === 'currentColor'), glyphs)
+    // A truncated path still yields an element, a fill and a 16px box — youtube shipped as a 1.4px
+    // speck that satisfied every one of those. getBBox() answers in viewBox units, so this asks
+    // "does it actually paint most of the frame", which is the only check that means "the icon
+    // is there" rather than "an icon node exists".
+    check('every social glyph paints most of its frame', glyphs.every(g => g.ink[0] >= 12 && g.ink[1] >= 12), glyphs.map(g => g.ink))
+    check('tagline is gone from the page', !(await ev('document.body.innerText.includes("Premium gaming gear")')))
+    check('the catalog label is the page heading', (await ev('(document.querySelector("main h1") || {}).textContent?.trim()')) === 'The collection')
 
     const search = (await ev(boxesExpr('[data-search-anchor] input')))[0]
     await clickAt(search.x, search.y)
@@ -401,6 +477,8 @@ const run = async () => {
       await metrics(w, h, w < 500)
       await sleep(600)
       check(`no horizontal overflow @${w}`, (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+      const m = await ev(MASTHEAD_EXPR)
+      check(`masthead reflows without losing its hierarchy @${w}`, mastheadFaults(m, w).length === 0, mastheadFaults(m, w))
     }
 
     // mobile dock: scroll reveal + indicator
@@ -452,6 +530,9 @@ const run = async () => {
     // stay in the SPA: a hard reload would make the un-stubbed server validate the fake JWT
     check('admin mode turns on', await waitFor(`document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length === ${EXP.cards}`, 15000))
     check('admin banner labels the mode', await ev('!![...document.querySelectorAll("header span")].find(el => /admin\\s*mode/i.test(el.textContent || ""))'))
+    // The admin affordances join the utility group, so this is the widest the masthead ever gets.
+    const adminMast = await ev(MASTHEAD_EXPR)
+    check('masthead holds with the admin affordances in the utility group', mastheadFaults(adminMast, 1440).length === 0, mastheadFaults(adminMast, 1440))
 
     // --- add product, with a real file attached ---
     check('add button opens the editor', await clickByText('main button', 'Add product', `!!document.querySelector('${DIALOG} h2')`))
@@ -496,6 +577,10 @@ const run = async () => {
     check('catalog reloaded after the write', (await allW()).some(w => w.method === 'GET' && w.p === '/rest/v1/products'))
 
     // --- edit + update ---
+    // The pen used to be `opacity-0 group-hover:opacity-100`: still clickable, still invisible,
+    // so the affordance read as a dead spot that happened to work. Assert it is actually painted.
+    const pen = await ev('(() => { const b = document.querySelector(' + JSON.stringify(EDIT_BTN) + '); if (!b) return null; const s = getComputedStyle(b); const r = b.getBoundingClientRect(); return { opacity: +s.opacity, w: r.width, h: r.height } })()')
+    check('the edit affordance is visible without hovering', !!pen && pen.opacity === 1 && pen.w >= 32 && pen.h >= 32, pen)
     await ev(`document.querySelector(${JSON.stringify(EDIT_BTN)}).click()`)
     check('edit editor opens', await waitFor(`(document.querySelector('${DIALOG} h2')?.textContent || "").trim() === "Edit product"`))
     const seeded = await ev(`(() => { const d = document.querySelector(${JSON.stringify(DIALOG)}); if (!d) return { texts: [], nums: [], tas: [] }; return { texts: [...d.querySelectorAll("input")].filter(i => i.type !== "number" && i.type !== "file").map(i => i.value), nums: [...d.querySelectorAll("input[type=number]")].map(i => i.value), tas: [...d.querySelectorAll("textarea")].map(t => t.value.slice(0, 20)) } })()`)
@@ -550,6 +635,10 @@ const run = async () => {
     const SWITCH_OFF = '(() => { const b = document.querySelector(' + JSON.stringify(SWITCH_1) + '); return !!b && b.getAttribute("aria-checked") === "false" })()'
     await clickSelector(SWITCH_1, SWITCH_OFF)
     check('a social link can be disabled from its row', await ev(SWITCH_OFF))
+    const SWITCH_2 = '[data-social-enabled="2"]'
+    const SWITCH_ON = '(() => { const b = document.querySelector(' + JSON.stringify(SWITCH_2) + '); return !!b && b.getAttribute("aria-checked") === "true" })()'
+    await clickSelector(SWITCH_2, SWITCH_ON)
+    check('a social link can be enabled from its row', await ev(SWITCH_ON))
     check('a link can be reordered up', await clickSelector('[data-social-up="3"]', 'JSON.stringify([...document.querySelectorAll("[data-social-platform]")].map(i => i.value)) === "[\\"facebook\\",\\"telegram\\",\\"youtube\\",\\"tiktok\\"]"'))
     check('a link can be removed', await clickSelector('[data-social-remove="0"]', 'document.querySelectorAll("[data-social-row]").length === 3 && document.querySelectorAll("[data-social-platform]")[0].value === "telegram"'))
     await resetW()
@@ -558,14 +647,24 @@ const run = async () => {
     check('save issues exactly one upsert on the singleton', siteW.length === 1 && siteW[0].method === 'POST' && siteW[0].p === '/rest/v1/site_settings', seqOf(siteW))
     const siteBody = JSON.parse(siteW[0]?.body || '{}')
     check('saved phone, location label and link reflect the edits', siteBody.phone === '+855 99 888 777' && siteBody.location_url === 'https://maps.example/hq' && JSON.stringify(siteBody.location_translations) === JSON.stringify([{ locale: 'en', label: 'RGB Bin HQ' }, { locale: 'km', label: 'ភ្នំពេញ កម្ពុជា' }]), { phone: siteBody.phone, url: siteBody.location_url, labels: siteBody.location_translations })
-    check('saved links reflect add, edit, disable, reorder and remove', JSON.stringify(siteBody.social_links) === JSON.stringify([
+    check('saved links reflect add, edit, disable, enable, reorder and remove', JSON.stringify(siteBody.social_links) === JSON.stringify([
       { platform: 'telegram', url: 'https://t.me/raccoongearbin', enabled: false, sort_order: 0 },
       { platform: 'youtube', url: 'https://youtube.com/@raccoongearbin', enabled: true, sort_order: 1 },
-      { platform: 'tiktok', url: 'https://tiktok.com/@raccoongearbin.hidden', enabled: false, sort_order: 2 }
+      { platform: 'tiktok', url: 'https://tiktok.com/@raccoongearbin.hidden', enabled: true, sort_order: 2 }
     ]), siteBody.social_links)
     check('editor reloads the saved row', await waitFor('document.querySelectorAll("[data-social-row]").length === 3'))
     await ev('document.querySelector("main header a")?.click(); true')
-    check('public header reflects the saved values', await waitFor('location.pathname === "/" && document.querySelector("header a[data-site-phone]")?.getAttribute("href") === "tel:+85599888777" && document.querySelector("header a[data-site-location]")?.getAttribute("href") === "https://maps.example/hq" && [...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform")).join() === "youtube"'))
+    check('public header reflects the saved values', await waitFor('location.pathname === "/" && document.querySelector("header a[data-site-phone]")?.getAttribute("href") === "tel:+85599888777" && document.querySelector("header a[data-site-location]")?.getAttribute("href") === "https://maps.example/hq" && [...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform")).join() === "youtube,tiktok"'))
+    // Every enabled platform must land on its own mark rather than the globe stand-in. TikTok is
+    // the one that used to render as a generic music icon; youtube is asserted by name because it
+    // is the platform the site owner asks for by name.
+    const marks = await ev('(() => { const seen = {}; for (const a of document.querySelectorAll("header a[data-site-social]")) { const s = a.querySelector("svg"); const g = s.getBoundingClientRect(); const ink = s.getBBox(); seen[a.getAttribute("data-platform")] = { fill: s.getAttribute("fill"), children: s.children.length, paths: s.querySelectorAll("path").length, w: g.width, h: g.height, ink: [Math.round(ink.width), Math.round(ink.height)], d: s.querySelector("path")?.getAttribute("d") } } return seen })()')
+    // Reported as `<platform>: <ink>` so a failure names which mark went blank instead of just
+    // saying the set was wrong.
+    const inkOf = () => Object.entries(marks).map(([k, g]) => `${k}=${g.ink.join('x')}`).join(' ')
+    check('every enabled platform renders one filled mark, not the globe', Object.keys(marks).length > 1 && Object.values(marks).every(g => g.fill === 'currentColor' && g.children === 1 && g.paths === 1 && g.w === 16 && g.h === 16) && new Set(Object.values(marks).map(g => g.d)).size === Object.keys(marks).length, Object.keys(marks))
+    check('every enabled platform paints its mark, none is a blank', Object.values(marks).every(g => g.ink[0] >= 12 && g.ink[1] >= 12), inkOf())
+    check('youtube and tiktok are both on screen, as distinct marks', !!marks.youtube && !!marks.tiktok && marks.youtube.d !== marks.tiktok.d, inkOf())
 
     // --- logout ---
     check('logout clears admin mode', await clickByText('header button', 'Log out', `document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length === 0`))

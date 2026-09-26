@@ -69,66 +69,68 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
 <template>
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
     <UContainer class="pt-5 sm:pt-6 pb-28 sm:pb-32 lg:pb-20">
-      <!-- Masthead: slim logo on the left, utility controls on the right, one hairline below -->
-      <header class="flex items-center justify-between gap-4 border-b border-zinc-200/80 pb-4 dark:border-zinc-800/80">
-        <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
-          <BrandLogo size="sm" />
-        </NuxtLink>
+      <!-- Masthead, two levels: the quiet contact line, a rule, then the row that carries the
+           brand. The emblem is the anchor on the left; on the right the utility pair and the
+           social group stack as two separately bounded groups, so neither reads as part of the
+           other and neither sits beside the logo. `flex-wrap` is the reflow valve — a group that
+           no longer fits drops to its own line instead of widening the page. -->
+      <header class="border-b border-zinc-200/80 pb-3 sm:pb-5 dark:border-zinc-800/80">
+        <SiteInfoContact :site-info="siteInfo" />
 
-        <!-- Site info (phone / location / socials) sits between the marks it describes and the
-             view controls; below md it yields the row to the logo and the language/theme pair. -->
-        <div class="hidden min-w-0 flex-1 justify-end md:flex">
-          <SiteInfoLinks :site-info="siteInfo" />
-        </div>
+        <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 pt-2.5 sm:pt-4 lg:gap-x-6">
+          <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
+            <BrandLogo size="masthead" />
+          </NuxtLink>
 
-        <div class="flex items-center gap-2 sm:gap-3 shrink-0">
-          <ColorModeToggle />
-          <LanguageSwitcher />
-          <span
-            v-if="isAdminMode"
-            class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
-          >
-            <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
-            {{ t('adminMode') }}
-          </span>
-          <UButton
-            v-if="isAdminMode"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            @click="navigateTo('/admin/site-info')"
-          >
-            {{ t('siteInfo') }}
-          </UButton>
-          <UButton
-            v-if="isAdminMode"
-            size="xs"
-            color="neutral"
-            variant="ghost"
-            :loading="isSigningOut"
-            @click="logout"
-          >
-            {{ t('logout') }}
-          </UButton>
+          <div class="ml-auto flex shrink-0 flex-col items-end gap-2.5 sm:gap-3">
+            <div class="flex items-center gap-2 sm:gap-3">
+              <ColorModeToggle />
+              <LanguageSwitcher />
+              <span
+                v-if="isAdminMode"
+                class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
+              >
+                <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
+                {{ t('adminMode') }}
+              </span>
+              <UButton
+                v-if="isAdminMode"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                @click="navigateTo('/admin/site-info')"
+              >
+                {{ t('siteInfo') }}
+              </UButton>
+              <UButton
+                v-if="isAdminMode"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                :loading="isSigningOut"
+                @click="logout"
+              >
+                {{ t('logout') }}
+              </UButton>
+            </div>
+
+            <SiteInfoSocials :site-info="siteInfo" />
+          </div>
         </div>
       </header>
 
-      <!-- Page heading: eyebrow over the display line, admin action held to the baseline -->
-      <section class="flex flex-col justify-between gap-6 pt-10 sm:pt-14 md:flex-row md:items-end md:gap-10">
-        <div class="max-w-3xl">
-          <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks below
-               the baseline, so the labels drop to a hairline of tracking in that locale. -->
-          <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
-            {{ t('collection') }}
-          </p>
-          <h1 class="mt-3 max-w-[22ch] text-2xl font-bold leading-snug tracking-tight text-balance text-zinc-950 sm:text-3xl lg:text-4xl dark:text-white">
-            {{ t('tagLine') }}
-          </h1>
-        </div>
+      <!-- Catalog label: the masthead carries the brand weight now, so the section under it is
+           one line of eyebrow plus the admin action, not a second heading block. -->
+      <section class="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 pt-7 sm:pt-9">
+        <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks below
+             the baseline, so the labels drop to a hairline of tracking in that locale. -->
+        <h1 class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+          {{ t('collection') }}
+        </h1>
         <UButton
           v-if="isAdminMode"
           color="neutral"
-          class="shrink-0 self-start rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs md:self-auto"
+          class="shrink-0 rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs"
           @click="openAddEditor"
         >
           ＋ {{ t('addProduct') }}
@@ -136,7 +138,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
       </section>
 
       <!-- Main Layout: Category Navigation Sidebar + Product Listing -->
-      <div class="mt-10 flex flex-col gap-0 sm:mt-12 lg:flex-row lg:items-start lg:gap-10">
+      <div class="mt-8 flex flex-col gap-0 sm:mt-10 lg:flex-row lg:items-start lg:gap-10">
         <!-- Left Side: Category Navigation Panel (desktop only in layout flow) -->
         <aside class="relative w-full shrink-0 lg:sticky lg:top-10 lg:w-44 xl:w-48">
           <p class="hidden lg:block mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">

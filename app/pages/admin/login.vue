@@ -59,7 +59,11 @@ useHead({ title: pageTitle })
 
 <template>
   <main class="flex min-h-screen items-center justify-center bg-zinc-50/50 px-4 py-12 dark:bg-zinc-950">
-    <div class="w-full max-w-md rounded-3xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 shadow-2xl p-6 sm:p-8">
+    <!-- dark:bg-zinc-950, not zinc-900: the dark emblem ships with its own #09090b field, so a
+         lighter card turns the logo into a black rectangle pasted onto gray. One near-black value
+         for page, card and logo is the OLED treatment the rest of the site already uses, and it
+         lifts the inputs (which stay zinc-900) off the surface instead of burying them in it. -->
+    <div class="w-full max-w-md rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200/80 dark:border-zinc-800/80 shadow-2xl p-6 sm:p-8">
       <div class="space-y-4 pb-6 border-b border-zinc-100 dark:border-zinc-800/80">
         <div class="flex items-center justify-between gap-4">
           <NuxtLink to="/">

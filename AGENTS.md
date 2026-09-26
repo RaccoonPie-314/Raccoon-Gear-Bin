@@ -56,8 +56,9 @@ bun run verify                                               # scripts/verify-ui
 
 - **`bun run verify` exists so you do not rebuild a test harness.** It serves `.output`, drives
   headless Chrome over CDP, and asserts the tuned interactions (category drag, indicator snap and
-  260ms curve, magnification profile, scroll reveal, spotlight morph, no overflow at five widths)
-  plus the **entire admin flow** — login, add, image upload, save/update, cancel, delete, logout —
+  260ms curve, magnification profile, scroll reveal, spotlight morph, the masthead's two levels
+  and emblem height step at five widths, no overflow at five widths) plus the
+  **entire admin flow** — login, add, image upload, save/update, cancel, delete, logout —
   against a stubbed Supabase in `scripts/fixtures.json`. No real project is contacted and nothing
   is written. Build first; add `--only=guest|admin` while iterating.
 - To prove a refactor is behaviour-preserving, run it against the pre-change build too (worktree

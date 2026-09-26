@@ -36,7 +36,7 @@ app/
 │   └── useAdminAuth.ts          admin identity
 ├── components/       presentational; never import a data composable
 │   ├── category/     CategoryNav (facade) + CategoryDesktop + CategoryMobile
-│   ├── site-info/    SiteInfoLinks (masthead phone / location / social icons)
+│   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
 │   └── …
 ├── middleware/       admin-auth.global.ts — guards /admin/*
 ├── types/            database.ts (schema mirror), catalog.ts + site-info.ts (view models)
@@ -201,23 +201,67 @@ and none of them are visible to the compiler or to `build`.
 | Indicator slide | 260ms `cubic-bezier(0.16, 1, 0.3, 1)` | `CategoryDesktop.vue` |
 | Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
+| Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
+| Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
+| Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; phone left of the centre line, location right of it | `index.vue` header, asserted by `verify-ui.mjs` |
 
 `0.24` is trigger-height ÷ panel-height, so the panel grows out of the control instead of
 popping beside it. The exit uses an accelerating curve on purpose: a decelerating collapse
 leaves an opaque remnant motionless under the pill, which reads as a hang.
+
+### The storefront masthead
+
+Two levels, not one row. **Level one** is the supporting contact line — phone on the left,
+location on the right, quiet type, no pills, closed by a full-bleed hairline. **Level two** is the
+brand row: the emblem anchors the left, and the right edge is a column carrying the utility pair
+(theme + language) over the social group. Nothing from Site Info sits beside the emblem.
+
+From `lg` the contact pair lifts 32 px (48 px at `xl`) off each container margin while its rule
+stays full-bleed. Pinned to the extremes, two labels on one line read as things that merely
+happen to share it; inset by the same amount at both ends, they read as a pair.
+
+The split is structural, not cosmetic: `site-info/` holds two presentational siblings —
+`SiteInfoContact` (phone + location) and `SiteInfoSocials` (the icon group) — both fed the same
+`SiteInfo` prop by `index.vue`. Neither fetches, neither maps rows, and neither knows about the
+other, which is what lets the two levels live in different parts of the header without a second
+copy of the data path.
+
+Each group on the right bounds itself with the header's pill-group container (the same idiom as
+`LanguageSwitcher`), because that box is the only thing saying "these belong together" and
+"these two boxes are not one box". The brand row is `flex-wrap`: a group that no longer fits
+drops to its own line rather than widening the page. Nothing is hidden below `md` — the contact
+line truncates before it collides, and the socials stay reachable, which is the point on a phone.
+
+`BrandLogo`'s root is `flex`, not `inline-flex`. As an atomic inline box the emblem would sit on
+a text baseline, which parks a few pixels of descender beneath it and lifts the logo out of the
+row's vertical centre — 3.5px of visible misalignment against controls that are centred.
+
+Social glyphs are the platform marks themselves, keyed off the lowercased platform name in
+`SiteInfoSocials`'s `BRAND_ICONS`. A generic outline is not a brand: at 16px the silhouette is
+the whole recognition, which is why TikTok is the TikTok note and not a music icon. Unknown
+platforms still fall back to the globe with their name as the label.
+
+`BRAND_ICONS` values are path data, and path data that is merely *long* is not path data that
+*works* — one truncated `C` argument in the youtube entry made the parser abort after the first
+arc, so the glyph rendered as a 1.4px speck while still being a single filled `path` in a 16px
+box. Copy these strings from a source, never by hand, and note that the only assertion that
+catches this class of bug is painted area: the harness checks each mark's `getBBox()` covers at
+least half the 24-unit viewBox. Element existence proves nothing.
 
 ### The verification harness (`scripts/verify-ui.mjs`)
 
 `bun run build` never starts the app, so the tuned numbers above and the admin write path have no
 automated protection. `bun run verify` closes that gap: it serves `.output`, drives headless Chrome
 over raw CDP, and asserts geometry, animation state and the exact `(method, path, query, body)`
-tuple of every Supabase call — including login, add, image upload, save/update, cancel, delete and
-logout, the site-info editor (seed, field edits, link add/toggle/reorder/remove, the singleton
-upsert body and the public header reflecting it), which it reaches by answering `/rest/v1`,
-`/auth/v1` and `/storage/v1` from `scripts/fixtures.json` inside the browser. **No real project is
-contacted and nothing can be written.** Fixtures are synthetic and shaped exactly like the
-`PRODUCT_SELECT` / `CATEGORY_SELECT` embeds and the `SITE_INFO_SELECT` row, so the harness also
-fails loudly if a select string changes shape.
+tuple of every Supabase call — including the masthead's two levels at five widths (emblem height,
+contact line above the brand row, phone and location on their own margins, socials stacked under
+the utility line, no collision, icon-only socials), login, add, image upload, save/update,
+cancel, delete and logout, the site-info editor (seed, field edits, link
+add/toggle/reorder/remove, the singleton upsert body and the public header reflecting it), which
+it reaches by answering `/rest/v1`, `/auth/v1` and `/storage/v1` from `scripts/fixtures.json`
+inside the browser. **No real project is contacted and nothing can be written.** Fixtures are
+synthetic and shaped exactly like the `PRODUCT_SELECT` / `CATEGORY_SELECT` embeds and the
+`SITE_INFO_SELECT` row, so the harness also fails loudly if a select string changes shape.
 
 When a refactor must be proven behaviour-preserving, run it twice — once against a worktree built
 from the nearest `backup/*` tag — and diff the `PASS`/`FAIL` lines including the recorded request
@@ -248,6 +292,13 @@ breakpoint. Note: `app.config.ts` currently emits 3 pre-existing `tsc` errors (i
 key belongs under `slots.base` in Nuxt UI 4) — known, unfixed, do not "fix" it as a
 drive-by; verify the pill styling still measures correctly if you touch it.
 
+The dark surface scale has exactly two rungs, and they are not interchangeable. `zinc-950`
+(`#09090b` — `main.css`'s `.dark body`, and the field the dark emblem artwork is drawn on) is
+the page *and* any panel meant to disappear into it; Nuxt UI's `--ui-bg` (`zinc-900`) is what
+sits **on** that surface, which is why inputs read as fields there and flatten into the card if
+the card is moved up to `zinc-900` too. Reach for `zinc-950` rather than `bg-black` when a
+surface should match the logo.
+
 ## Cross-component contracts to preserve
 
 - `[data-search-anchor]` — `SearchDock` measures this element to decide when to collapse.
@@ -262,8 +313,9 @@ drive-by; verify the pill styling still measures correctly if you touch it.
 - New read of catalog data → extend `useCatalog` (and its derived row type).
 - New read or write of public site info → extend `useSiteInfo` (reads and jsonb shapes) or
   `useAdminSiteInfoEditor` (editor behaviour). Never a third copy of the row's shape.
-- A new social platform → data only: a row in the Site Info editor. The header renders known
-  icons and a globe fallback for anything else.
+- A new social platform → data only: a row in the Site Info editor. The header renders a known
+  mark or a globe fallback for anything else; making the fallback a real mark is one entry in
+  `SiteInfoSocials`'s `BRAND_ICONS`, never a schema or composable change.
 - New rendering of stored specifications → consume `parseSpecificationPairs`; widen it, never
   re-parse the column at the call site.
 - New filter/sort/selection state → `useCatalogBrowse`.
@@ -305,8 +357,8 @@ drive-by; verify the pill styling still measures correctly if you touch it.
   it alone.
 - **Three hand-rolled headers** (`index.vue`, `products/[id].vue`, `admin/login.vue`) compose
   the same logo + theme + language controls with different sizes. Only the home masthead carries
-  `SiteInfoLinks`; giving it to the detail page is one prop, but at the detail header's sticky
-  `min-h-16` rhythm the cluster has not been measured there yet.
+  Site Info; giving it to the detail page is two props, but at the detail header's sticky
+  `min-h-16` rhythm neither level has been measured there yet.
 - **Dead code:** `app/types/product.ts`, `app/types/database.types.ts`, the `ProductCategory`
   union (the schema stores categories as rows, not an enum), `TemplateMenu.vue`, `AppLogo.vue`.
 - **No `server/api` tier.** `createSupabaseAdminClient()` has zero callers and the

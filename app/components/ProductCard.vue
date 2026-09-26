@@ -22,10 +22,13 @@ const { t } = useI18n()
             {{ t('noImage') }}
           </div>
         </NuxtLink>
+        <!-- Always visible, not reveal-on-hover: this button only exists in admin mode, so the
+             hover gate bought nothing for its entire audience and cost the affordance itself —
+             an `opacity-0` element is still clickable, which reads as a dead spot that works. -->
         <button
           v-if="isAdmin"
           type="button"
-          class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-800 dark:text-zinc-200 shadow-sm border border-zinc-200/60 dark:border-zinc-700/60 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-105 cursor-pointer"
+          class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-800 dark:text-zinc-200 shadow-sm border border-zinc-200/60 dark:border-zinc-700/60 transition-all duration-200 hover:scale-105 hover:bg-white dark:hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white cursor-pointer"
           aria-label="Edit product"
           @click.stop="emit('edit', product)"
         >
