@@ -187,7 +187,8 @@ const handleTouchEnd = () => {
 // ==========================================
 const mobileNavRef = ref<HTMLElement | null>(null)
 const mobileItemRefs = ref<(HTMLElement | null)[]>([])
-const isMobileNavVisible = ref(true)
+// Hide/show follows the shared scroll-direction rule; translating the bar is mobile-only.
+const { visible: isMobileNavVisible } = useScrollReveal()
 
 const setMobileItemRef = (el: any, index: number) => {
   if (el) {
@@ -242,35 +243,6 @@ const scrollActiveMobileItemIntoView = () => {
 }
 
 // ==========================================
-// Mobile: Scroll Direction Detection
-// ==========================================
-let lastScrollY = 0
-let isScrollingTicking = false
-
-const handleWindowScroll = () => {
-  if (isScrollingTicking) return
-  isScrollingTicking = true
-
-  requestAnimationFrame(() => {
-    const currentScrollY = typeof window !== 'undefined' ? (window.scrollY || document.documentElement.scrollTop) : 0
-
-    if (currentScrollY < 60) {
-      isMobileNavVisible.value = true
-    } else {
-      const scrollDiff = currentScrollY - lastScrollY
-      if (scrollDiff > 6) {
-        isMobileNavVisible.value = false
-      } else if (scrollDiff < -6) {
-        isMobileNavVisible.value = true
-      }
-    }
-
-    lastScrollY = Math.max(0, currentScrollY)
-    isScrollingTicking = false
-  })
-}
-
-// ==========================================
 // Lifecycle & Observers
 // ==========================================
 let resizeObserver: ResizeObserver | null = null
@@ -281,7 +253,6 @@ onMounted(() => {
   })
 
   window.addEventListener('resize', updateMobileIndicator)
-  window.addEventListener('scroll', handleWindowScroll, { passive: true })
 
   if (mobileNavRef.value) {
     mobileNavRef.value.addEventListener('scroll', updateMobileIndicator, { passive: true })
@@ -312,7 +283,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', updateMobileIndicator)
-  window.removeEventListener('scroll', handleWindowScroll)
   if (mobileNavRef.value) {
     mobileNavRef.value.removeEventListener('scroll', updateMobileIndicator)
     mobileNavRef.value.removeEventListener('touchstart', handleTouchStart)
