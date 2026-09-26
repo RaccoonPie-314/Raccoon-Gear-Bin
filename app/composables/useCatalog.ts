@@ -1,5 +1,5 @@
 import type { Database } from '~/types/database'
-import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
+import type { CatalogCategory, CatalogProduct, CatalogSpecification } from '~/types/catalog'
 
 // The select strings have to stay inline literals: supabase-js infers the result type by
 // parsing the query text, so building one at runtime (join/concat/template) degrades every
@@ -8,6 +8,18 @@ const PRODUCT_SELECT = 'id, category_id, slug, sku, price, currency, stock_quant
 const CATEGORY_SELECT = 'id, slug, category_translations(id, locale, name)'
 
 const FALLBACK_LOCALE = 'en'
+
+type SpecificationsColumn = Database['public']['Tables']['product_translations']['Row']['specifications']
+
+/**
+ * The editor's shorthand: one `label: value` pair per line. Shared by both directions of the
+ * specifications conversion so the syntax can never be understood differently on the way in
+ * than on the way out — a page used to keep its own copy of these four lines.
+ */
+const specLinesToPairs = (value: string): CatalogSpecification[] => value.split('\n').filter(Boolean).map((line) => {
+  const [label = '', ...rest] = line.split(':')
+  return { label: label.trim(), value: rest.join(':').trim() }
+})
 
 export const useCatalog = () => {
   const supabase = useSupabaseClient<Database>()
@@ -69,22 +81,39 @@ export const useCatalog = () => {
   })
 
   /** Editor-facing: JSON, or one `label: value` pair per line, into the stored jsonb shape. */
-  function parseSpecifications(value: string): Database['public']['Tables']['product_translations']['Row']['specifications'] {
+  function parseSpecifications(value: string): SpecificationsColumn {
     if (!value.trim()) return []
     try {
-      return JSON.parse(value) as Database['public']['Tables']['product_translations']['Row']['specifications']
+      return JSON.parse(value) as SpecificationsColumn
     } catch {
-      return value.split('\n').filter(Boolean).map((line) => {
-        const [label = '', ...rest] = line.split(':')
-        return { label: label.trim(), value: rest.join(':').trim() }
-      })
+      return specLinesToPairs(value)
     }
   }
 
   /** Row-facing: the stored jsonb shape back into the textarea the editor shows. */
-  function formatSpecifications(value: Database['public']['Tables']['product_translations']['Row']['specifications'] | null | undefined): string {
+  function formatSpecifications(value: SpecificationsColumn | null | undefined): string {
     if (typeof value === 'string') return value
     return value ? JSON.stringify(value, null, 2) : ''
+  }
+
+  /**
+   * View-facing: whatever `formatSpecifications` produced — pretty JSON, a stored object, or
+   * the raw `label: value` shorthand — back into the pairs a template renders. The detail page
+   * used to carry its own copy of this, storage shapes and all, which is how the line syntax
+   * came to be parsed in two places with two subtly different rules.
+   */
+  function parseSpecificationPairs(value: string | null | undefined): CatalogSpecification[] {
+    if (!value) return []
+    const raw = value.trim()
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (Array.isArray(parsed)) return parsed.filter((item) => item && (item.label || item.value))
+      if (typeof parsed === 'object' && parsed !== null) {
+        return Object.entries(parsed).map(([label, specValue]) => ({ label, value: String(specValue) }))
+      }
+    } catch {}
+    return specLinesToPairs(raw).filter((item) => item.label || item.value)
   }
 
   const fetchProducts = async () => {
@@ -111,5 +140,5 @@ export const useCatalog = () => {
     return { products, categories }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, formatSpecifications }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, formatSpecifications, parseSpecificationPairs }
 }

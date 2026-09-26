@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const route = useRoute()
-const { fetchProduct } = useCatalog()
+const { fetchProduct, parseSpecificationPairs } = useCatalog()
 const { t } = useI18n()
 const product = ref<Awaited<ReturnType<typeof fetchProduct>>>(null)
 const selectedImageIndex = ref(0)
@@ -19,28 +19,9 @@ const loadProduct = async () => {
   }
 }
 
-const parsedSpecs = computed(() => {
-  if (!product.value?.specifications) return []
-  const raw = product.value.specifications.trim()
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) {
-      return parsed.filter((item) => item && (item.label || item.value))
-    }
-    if (typeof parsed === 'object' && parsed !== null) {
-      return Object.entries(parsed).map(([label, value]) => ({ label, value: String(value) }))
-    }
-  } catch {}
-  return raw
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const [label = '', ...rest] = line.split(':')
-      return { label: label.trim(), value: rest.join(':').trim() }
-    })
-    .filter((item) => item.label || item.value)
-})
+// The specifications value arrives in whatever shape the editor stored, and only the catalog
+// data layer knows how to read it; this page just renders the pairs it is handed.
+const parsedSpecs = computed(() => parseSpecificationPairs(product.value?.specifications))
 
 await loadProduct()
 useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}` : `${t('products')} | ${t('appName')}` }))
