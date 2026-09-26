@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import type { Database, Json } from '~/types/database'
+import type { Database, ProductStatus } from '~/types/database'
 import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
 
-type ProductStatus = 'draft' | 'published' | 'archived'
 type EditorForm = {
   id?: string
   categoryId: string
@@ -18,9 +17,10 @@ type EditorForm = {
   imagePaths: string
 }
 
-const supabase = useSupabaseClient<Database>() as any
+const supabase = useSupabaseClient<Database>()
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
+const { fetchCatalog, parseSpecifications } = useCatalog()
 const { locale, t } = useI18n()
 
 const products = ref<CatalogProduct[]>([])
@@ -31,89 +31,25 @@ const isSaving = ref(false)
 const isSigningOut = ref(false)
 const loadError = ref('')
 const actionError = ref('')
-const search = ref('')
-const selectedCategory = ref('all')
-const sortOrder = ref('newest')
 const editorOpen = ref(false)
 const deleteTarget = ref<CatalogProduct | null>(null)
 const imageFiles = ref<File[]>([])
 const editorForm = ref<EditorForm>(emptyForm())
 
+// Browsing state lives in its own composable; the page only reads what it renders.
+const { search, selectedCategory, sortOrder, filteredProducts } = useCatalogBrowse(products)
+
 function emptyForm(): EditorForm {
   return { categoryId: categories.value[0]?.id || '', sku: '', slug: '', price: 0, stockQuantity: 0, status: 'published', name: '', shortDescription: '', description: '', specifications: '', imagePaths: '' }
-}
-
-const filteredProducts = computed(() => {
-  const query = search.value.trim().toLowerCase()
-  const filtered = products.value.filter((product) => {
-    const categoryMatch = selectedCategory.value === 'all' ||
-      product.categoryId === selectedCategory.value ||
-      product.categorySlug === selectedCategory.value ||
-      product.categoryName?.toLowerCase() === selectedCategory.value.toLowerCase()
-    const queryMatch = !query || [product.name, product.sku, product.shortDescription].some((value) => value.toLowerCase().includes(query))
-    return categoryMatch && queryMatch
-  })
-
-  return [...filtered].sort((first, second) => {
-    if (sortOrder.value === 'price-low') return first.price - second.price
-    if (sortOrder.value === 'price-high') return second.price - first.price
-    if (sortOrder.value === 'name') return first.name.localeCompare(second.name)
-    return 0
-  })
-})
-
-const publicImageUrl = (storagePath: string) => {
-  if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath
-  return supabase.storage.from('product-images').getPublicUrl(storagePath).data.publicUrl
-}
-
-const parseSpecifications = (value: string): Json => {
-  if (!value.trim()) return []
-  try { return JSON.parse(value) } catch {
-    return value.split('\n').filter(Boolean).map((line) => { const [label = '', ...rest] = line.split(':'); return { label: label.trim(), value: rest.join(':').trim() } })
-  }
-}
-
-const formatSpecifications = (value: unknown) => typeof value === 'string' ? value : value ? JSON.stringify(value, null, 2) : ''
-
-const mapProduct = (product: any): CatalogProduct => {
-  const translation = product.product_translations?.find((item: any) => item.locale === locale.value) || product.product_translations?.find((item: any) => item.locale === 'en') || product.product_translations?.[0]
-  const category = product.categories
-  return {
-    id: product.id,
-    categoryId: product.category_id,
-    categoryName: category?.category_translations?.find((item: any) => item.locale === locale.value)?.name || category?.category_translations?.find((item: any) => item.locale === 'en')?.name || category?.slug || 'Uncategorized',
-    categorySlug: category?.slug,
-    slug: product.slug,
-    sku: product.sku,
-    price: Number(product.price),
-    currency: product.currency,
-    stockQuantity: product.stock_quantity,
-    status: product.status,
-    name: translation?.name || product.sku,
-    shortDescription: translation?.short_description || '',
-    description: translation?.description || '',
-    specifications: formatSpecifications(translation?.specifications),
-    images: [...(product.product_images || [])].sort((a, b) => a.sort_order - b.sort_order).map((image) => ({ id: image.id, storagePath: image.storage_path, altText: image.alt_text, url: publicImageUrl(image.storage_path) }))
-  }
 }
 
 const loadCatalog = async () => {
   isLoading.value = true
   loadError.value = ''
   try {
-    const [{ data: categoryData, error: categoryError }, { data: productData, error: productError }] = await Promise.all([
-      supabase.from('categories').select('id, slug, category_translations(id, locale, name)').eq('is_active', true).order('sort_order'),
-      supabase.from('products').select('id, category_id, sku, price, currency, stock_quantity, product_translations(id, locale, name, short_description, description, specifications), product_images(id, storage_path, alt_text, sort_order), categories(id, slug, category_translations(id, locale, name))').eq('status', 'published').order('created_at', { ascending: false })
-    ])
-    if (categoryError) throw categoryError
-    if (productError) throw productError
-    categories.value = (categoryData || []).map((category: any) => ({
-      id: category.id,
-      name: category.category_translations?.find((item: any) => item.locale === 'en')?.name || category.slug,
-      slug: category.slug
-    }))
-    products.value = (productData || []).map(mapProduct)
+    const catalog = await fetchCatalog()
+    products.value = catalog.products
+    categories.value = catalog.categories
   } catch (error: any) {
     loadError.value = error?.message || t('catalogLoadError')
   } finally { isLoading.value = false }
