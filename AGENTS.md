@@ -50,8 +50,22 @@ Exact numbers worth not breaking are tabulated in ARCHITECTURE.md → *Interacti
 ```bash
 bun install
 bun run build                                                # what CI runs — the only gate
+bun run verify                                               # scripts/verify-ui.mjs — 52 UI checks
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only
 ```
+
+- **`bun run verify` exists so you do not rebuild a test harness.** It serves `.output`, drives
+  headless Chrome over CDP, and asserts the tuned interactions (category drag, indicator snap and
+  260ms curve, magnification profile, scroll reveal, spotlight morph, no overflow at five widths)
+  plus the **entire admin flow** — login, add, image upload, save/update, cancel, delete, logout —
+  against a stubbed Supabase in `scripts/fixtures.json`. No real project is contacted and nothing
+  is written. Build first; add `--only=guest|admin` while iterating.
+- To prove a refactor is behaviour-preserving, run it against the pre-change build too (worktree
+  from the nearest `backup/*` tag) and diff the `PASS`/`FAIL` lines, including the recorded
+  `(method, path, query, body)` write sequence. Phases 3–5 each found real regressions and real
+  probe bugs this way — a check that fails on the *unmodified* build is a broken check.
+- If Chrome fails to start with `Operation not permitted`, the command is running inside a
+  restrictive sandbox; run it from a normal terminal.
 
 - **There is no test suite and no typecheck in CI.** `build` succeeding means it compiled, not
   that it works.

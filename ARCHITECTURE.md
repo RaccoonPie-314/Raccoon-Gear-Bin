@@ -36,6 +36,9 @@ app/
 ├── middleware/       admin-auth.global.ts — guards /admin/*
 ├── types/            database.ts (schema mirror), catalog.ts (view models)
 └── assets/css/main.css   theme + the select-morph keyframes
+scripts/
+├── verify-ui.mjs     CDP regression harness: tuned interactions + the whole admin flow
+└── fixtures.json     synthetic Supabase-shaped rows the harness serves instead of the project
 server/utils/supabase.ts  unused (see Known gaps)
 ```
 
@@ -184,23 +187,36 @@ and none of them are visible to the compiler or to `build`.
 popping beside it. The exit uses an accelerating curve on purpose: a decelerating collapse
 leaves an opaque remnant motionless under the pill, which reads as a hang.
 
-### Verifying an admin flow without a real account
+### The verification harness (`scripts/verify-ui.mjs`)
 
-The editor is reachable only with an `admin_users` row, so its save/delete path is normally
-unverifiable. It can be driven safely by installing a `fetch` stub with CDP
-`Page.addScriptToEvaluateOnNewDocument` and answering `/rest/v1/*`, `/auth/v1/*` and
-`/storage/v1/*` locally from fixtures: the browser then never contacts the project, nothing is
-written, and the outgoing `(method, path, query, body)` tuple per request can be recorded and
-diffed between two builds — which is the equality proof for a move like Phase 5's. Three traps:
+`bun run build` never starts the app, so the tuned numbers above and the admin write path have no
+automated protection. `bun run verify` closes that gap: it serves `.output`, drives headless Chrome
+over raw CDP, and asserts geometry, animation state and the exact `(method, path, query, body)`
+tuple of every Supabase call — including login, add, image upload, save/update, cancel, delete and
+logout, which it reaches by answering `/rest/v1`, `/auth/v1` and `/storage/v1` from
+`scripts/fixtures.json` inside the browser. **No real project is contacted and nothing can be
+written.** Fixtures are synthetic and shaped exactly like the `PRODUCT_SELECT` / `CATEGORY_SELECT`
+embeds, so the harness also fails loudly if a select string changes shape.
 
-- The stub only exists in the **browser**. Nuxt's SSR fetches run on the server, un-stubbed, so a
-  hard reload into a fake session yields a real hydration mismatch and unverifiable reads.
+When a refactor must be proven behaviour-preserving, run it twice — once against a worktree built
+from the nearest `backup/*` tag — and diff the `PASS`/`FAIL` lines including the recorded request
+sequence. Phases 3–5 each caught real probe bugs that way: a check that fails on the *unmodified*
+build is a broken check, not a regression.
+
+Four traps when extending it, all paid for once already:
+
+- The stub exists only in the **browser**. Nuxt's SSR fetches run on the server, un-stubbed, so a
+  hard reload into a fake session yields a genuine hydration mismatch and unverifiable reads.
   Log in, then stay in the SPA (`navigateTo`, not `Page.navigate`).
-- Assert async state by **polling**, never by a fixed sleep: `isAdminMode` resolves after two
-  round-trips and a scheduled tab activation takes seconds, not frames.
-- `innerText` cannot see `hidden sm:inline-flex` affordances, and a modal's footer button is
+- Assert async state by **polling**, never a fixed sleep: `isAdminMode` resolves after two
+  round-trips, and a scheduled tab activation costs seconds, not frames.
+- `innerText` cannot see `hidden sm:inline-flex` affordances, and a modal's footer button sits
   below its own scroll fold: use `textContent` for visibility-independent assertions and
-  `scrollIntoView()` before reading a click target's rect.
+  `scrollIntoView()` before reading a click target's rect. Touch points sent below the viewport are
+  silently dropped, so a translated-off-screen dock must be brought back before it is aimed at.
+- CDP responses all wrap their payload in `result`, and `Runtime.evaluate` with
+  `returnByValue: true` only serialises JSON-safe values — a `Set` arrives as `{}`, so return
+  `Array.from(...)`. Both mistakes read as "element not found".
 
 ## Control language
 
@@ -247,9 +263,10 @@ drive-by; verify the pill styling still measures correctly if you touch it.
   modals and the `＋ Add product` affordance. Moving that markup into a component is coupled to
   adopting a `features/admin/` folder, which needs an `imports.dirs` decision first (Nuxt
   auto-import does not reach outside `app/composables/`). Left as its own phase.
-- **No admin flow is covered by CI.** `bun run build` does not run the app, so the save/delete
-  path has no automated protection at all. It *can* be exercised without credentials — see
-  *Verifying a change*.
+- **Nothing runs the harness automatically.** `scripts/verify-ui.mjs` covers the admin flow and
+  the tuned interactions, but CI still only builds — `bun run verify` needs a Chrome binary and a
+  browser, which the CI job has neither configured nor permission-checked. Until that is solved,
+  the harness is a *pre-push habit*, not a gate.
 - **The specifications view model round-trips through a string.** `mapProduct` stores
   `formatSpecifications(jsonb)` on `CatalogProduct.specifications` so the editor textarea can
   bind straight to it, and the detail page then calls `parseSpecificationPairs` to undo that.
@@ -282,6 +299,7 @@ drive-by; verify the pill styling still measures correctly if you touch it.
 
 ```bash
 bun run build                                            # what CI runs
+bun run verify                                           # scripts/verify-ui.mjs (needs Chrome)
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only; .vue needs vue-tsc
 ```
 
