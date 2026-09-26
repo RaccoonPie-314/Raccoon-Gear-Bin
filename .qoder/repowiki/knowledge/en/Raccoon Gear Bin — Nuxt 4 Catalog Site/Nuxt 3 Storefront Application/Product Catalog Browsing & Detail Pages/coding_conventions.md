@@ -1,4 +1,0 @@
-- Locale-aware entity resolution follows a three-tier fallback: current `locale.value`, then `'en'`, then the first available record.
-- Product images are normalized through a local `publicImageUrl` helper that returns raw URLs unchanged if they already start with `http://` or `https://`, otherwise resolving them via Supabase Storage's `getPublicUrl`.
-- Data fetching in composables throws on Supabase errors rather than returning error objects, letting callers wrap calls in try/catch blocks.
-- All user-facing strings go through `useI18n().t()` instead of inline literals, including headings, buttons, and placeholder messages.

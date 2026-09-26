@@ -1,1 +1,0 @@
-Nuxt 4 + Vue 3 runtime; `@nuxtjs/supabase` client (anon + service role keys) connecting to the Supabase backend; Tailwind CSS v4 via `@tailwindcss/vite`; Bun lockfile (`bun.lock`).

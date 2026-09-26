@@ -25,3 +25,8 @@ logs
 
 # Supabase CLI local state
 supabase/.temp
+
+# Qoder-generated repo wiki: derived from the code, rewritten wholesale on
+# regeneration, and hand edits to it are lost. Treat it as a local cache.
+# The hand-maintained source of truth is ARCHITECTURE.md (see also AGENTS.md).
+.qoder/

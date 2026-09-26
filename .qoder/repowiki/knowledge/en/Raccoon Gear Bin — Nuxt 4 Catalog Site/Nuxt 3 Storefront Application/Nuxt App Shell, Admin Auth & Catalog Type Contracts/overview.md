@@ -1,1 +1,0 @@
-Nuxt 3 application root providing the global admin route guard, admin authentication composable, and strongly-typed Supabase schema contracts that power the storefront catalog pages.

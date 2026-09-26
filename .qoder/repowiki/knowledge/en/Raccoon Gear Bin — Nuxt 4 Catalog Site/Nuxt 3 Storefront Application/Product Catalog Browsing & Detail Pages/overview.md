@@ -1,1 +1,0 @@
-Nuxt pages and a reusable card component for browsing published products, viewing product details with an image gallery, and parsing structured specifications.

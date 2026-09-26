@@ -1,1 +1,0 @@
-Nuxt 3 (Vue 3 Composition API), Tailwind CSS for styling, Supabase client types consumed via generated `database.types.ts`.

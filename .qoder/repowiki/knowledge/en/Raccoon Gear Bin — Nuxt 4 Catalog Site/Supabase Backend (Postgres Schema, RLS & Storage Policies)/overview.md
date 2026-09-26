@@ -1,1 +1,0 @@
-Defines the Supabase Postgres schema, row-level security policies, and storage rules for a product catalog with categories, products, translations, images, and admin users.

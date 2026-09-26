@@ -1,1 +1,0 @@
-Reusable Vue 3 presentation components for catalog navigation, product cards, search dock, and theme switchers, plus the global Tailwind v4 CSS theme.

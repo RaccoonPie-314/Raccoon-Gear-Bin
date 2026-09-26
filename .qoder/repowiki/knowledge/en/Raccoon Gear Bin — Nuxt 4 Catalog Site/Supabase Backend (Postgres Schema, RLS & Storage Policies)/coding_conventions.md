@@ -1,5 +1,0 @@
-- Each table includes `id uuid primary key default gen_random_uuid()` plus `created_at` / `updated_at timestamptz` columns managed by a shared `handle_updated_at()` trigger.
-- Text enum-like columns use `check (...)` constraints (e.g. `status in ('draft','published','archived')`, `role in ('admin','super_admin')`) instead of separate lookup tables.
-- Row-level security policies are created per table and grouped by access level: public read policies gated by business state (`is_active`, `status = 'published'`) and admin write policies gated by membership in `public.admin_users` checked against `auth.uid()`.
-- Storage access is enforced via policies scoped to the `product-images` bucket, separating public select from admin-only insert/update/delete.
-- Migrations are named with an ISO timestamp prefix followed by a descriptive slug, and each migration is idempotent using `create ... if not exists` / `create or replace function`.
