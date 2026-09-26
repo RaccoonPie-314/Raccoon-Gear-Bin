@@ -1,47 +1,20 @@
 <script setup lang="ts">
-import type { Database, ProductStatus } from '~/types/database'
 import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
 
-type EditorForm = {
-  id?: string
-  categoryId: string
-  sku: string
-  slug: string
-  price: number
-  stockQuantity: number
-  status: ProductStatus
-  name: string
-  shortDescription: string
-  description: string
-  specifications: string
-  imagePaths: string
-}
-
-const supabase = useSupabaseClient<Database>()
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
-const { fetchCatalog, parseSpecifications } = useCatalog()
+const { fetchCatalog } = useCatalog()
 const { locale, t } = useI18n()
 
 const products = ref<CatalogProduct[]>([])
 const categories = ref<CatalogCategory[]>([])
 const isAdminMode = ref(false)
 const isLoading = ref(true)
-const isSaving = ref(false)
 const isSigningOut = ref(false)
 const loadError = ref('')
-const actionError = ref('')
-const editorOpen = ref(false)
-const deleteTarget = ref<CatalogProduct | null>(null)
-const imageFiles = ref<File[]>([])
-const editorForm = ref<EditorForm>(emptyForm())
 
 // Browsing state lives in its own composable; the page only reads what it renders.
 const { search, selectedCategory, sortOrder, filteredProducts } = useCatalogBrowse(products)
-
-function emptyForm(): EditorForm {
-  return { categoryId: categories.value[0]?.id || '', sku: '', slug: '', price: 0, stockQuantity: 0, status: 'published', name: '', shortDescription: '', description: '', specifications: '', imagePaths: '' }
-}
 
 const loadCatalog = async () => {
   isLoading.value = true
@@ -56,67 +29,26 @@ const loadCatalog = async () => {
 }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
-const openAddEditor = () => { actionError.value = ''; editorForm.value = emptyForm(); editorOpen.value = true }
-const openEditEditor = (product: CatalogProduct) => {
-  actionError.value = ''
-  editorForm.value = { id: product.id, categoryId: product.categoryId, sku: product.sku, slug: product.sku.toLowerCase().replace(/[^a-z0-9]+/g, '-'), price: product.price, stockQuantity: product.stockQuantity, status: 'published', name: product.name, shortDescription: product.shortDescription, description: product.description, specifications: product.specifications, imagePaths: product.images.map((image) => image.storagePath).join('\n') }
-  editorOpen.value = true
-}
-const handleImageSelection = (event: Event) => {
-  const input = event.target as HTMLInputElement
-  imageFiles.value = Array.from(input.files || [])
-}
-
-const saveProduct = async () => {
-  if (!isAdminMode.value) return
-  isSaving.value = true
-  actionError.value = ''
-  try {
-    if (!editorForm.value.categoryId) throw new Error(t('requiredCategory'))
-    const productPayload = { category_id: editorForm.value.categoryId, sku: editorForm.value.sku.trim(), slug: editorForm.value.slug.trim(), price: Number(editorForm.value.price), stock_quantity: Number(editorForm.value.stockQuantity), status: editorForm.value.status }
-    let productId = editorForm.value.id
-    if (productId) {
-      const { error } = await supabase.from('products').update(productPayload).eq('id', productId)
-      if (error) throw error
-      const { error: translationError } = await supabase.from('product_translations').update({ name: editorForm.value.name.trim(), short_description: editorForm.value.shortDescription.trim(), description: editorForm.value.description.trim(), specifications: parseSpecifications(editorForm.value.specifications) }).eq('product_id', productId).eq('locale', 'en')
-      if (translationError) throw translationError
-    } else {
-      const { data, error } = await supabase.from('products').insert(productPayload).select('id').single()
-      if (error) throw error
-      productId = data.id
-      const { error: translationError } = await supabase.from('product_translations').insert({ product_id: productId, locale: 'en', name: editorForm.value.name.trim(), short_description: editorForm.value.shortDescription.trim(), description: editorForm.value.description.trim(), specifications: parseSpecifications(editorForm.value.specifications) })
-      if (translationError) throw translationError
-    }
-    if (!productId) throw new Error('The product could not be identified after saving.')
-    const imagePaths = editorForm.value.imagePaths.split('\n').map((path) => path.trim()).filter(Boolean)
-    for (const file of imageFiles.value) {
-      const storagePath = `products/${productId}/${crypto.randomUUID()}-${file.name}`
-      const { error } = await supabase.storage.from('product-images').upload(storagePath, file, { upsert: false })
-      if (error) throw error
-      imagePaths.push(storagePath)
-    }
-    const { error: deleteImagesError } = await supabase.from('product_images').delete().eq('product_id', productId)
-    if (deleteImagesError) throw deleteImagesError
-    if (imagePaths.length) {
-      const { error } = await supabase.from('product_images').insert(imagePaths.map((storagePath, index) => ({ product_id: productId, storage_path: storagePath, sort_order: index, is_primary: index === 0 })))
-      if (error) throw error
-    }
-    editorOpen.value = false
-    imageFiles.value = []
-    await loadCatalog()
-  } catch (error: any) { actionError.value = error?.message || t('productSaveError') } finally { isSaving.value = false }
-}
-
-const confirmDelete = async () => {
-  if (!deleteTarget.value || !isAdminMode.value) return
-  isSaving.value = true
-  try {
-    const { error } = await supabase.from('products').delete().eq('id', deleteTarget.value.id)
-    if (error) throw error
-    deleteTarget.value = null
-    await loadCatalog()
-  } catch (error: any) { actionError.value = error?.message || t('productDeleteError') } finally { isSaving.value = false }
-}
+// The product editor owns its form, save and delete flow. The page keeps catalog loading,
+// browse state and admin identity, and lends the editor the two things it must not own: the
+// category list for defaults, and the reload that refreshes what the grid shows. Authorisation
+// stays where it always was - row-level security in Postgres.
+const {
+  editorForm,
+  editorOpen,
+  deleteTarget,
+  isSaving,
+  actionError,
+  openAddEditor,
+  openEditEditor,
+  handleImageSelection,
+  saveProduct,
+  confirmDelete
+} = useAdminProductEditor({
+  categories,
+  canMutate: () => isAdminMode.value,
+  onMutated: () => { void loadCatalog() }
+})
 
 const logout = async () => { isSigningOut.value = true; try { await signOut(); isAdminMode.value = false } finally { isSigningOut.value = false } }
 watch(user, () => { void refreshAdminMode() }, { immediate: true })
