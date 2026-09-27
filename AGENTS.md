@@ -50,7 +50,7 @@ Exact numbers worth not breaking are tabulated in ARCHITECTURE.md → *Interacti
 ```bash
 bun install
 bun run build                                                # what CI runs — the only gate
-bun run verify                                               # scripts/verify-ui.mjs — 128 UI checks
+bun run verify                                               # scripts/verify-ui.mjs — 152 UI checks
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only
 ```
 
@@ -59,7 +59,8 @@ bun run verify                                               # scripts/verify-ui
   260ms curve, magnification profile, scroll reveal, spotlight morph, the scroll-collapse
   field↔launcher flight in both directions including a mid-flight reversal, the masthead's two
   levels and emblem height step at five widths, no overflow at five widths, the detail-page photo
-  carousel — bounded strip window, one-slot advance on adjacent selection, wrapping arrows — and
+  carousel — bounded strip window, one-slot advance on adjacent selection, wrapping arrows,
+  hover-gated arrows, and the shared-state lightbox — and
   the detail-page header search) plus the
   **entire admin flow** — login, add, image upload, save/update, cancel, delete, the site-info
   editor, logout — against a stubbed Supabase in `scripts/fixtures.json`. No real project is
