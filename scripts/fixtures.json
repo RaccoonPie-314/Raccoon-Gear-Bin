@@ -245,6 +245,29 @@
     "cards": 6,
     "priceLowToHigh": ["39.00", "45.00", "59.00", "89.00", "123.45", "149.00"],
     "stockSequence": ["in", "low", "out", "in", "in", "low"],
+    "conversion": {
+      "_comment": "The Phase 1 customer-facing contract, stated here so a message line, a CTA label or a channel list can only be changed deliberately. The strings are the English values of the keys in i18n.config.ts and the hrefs are built from the site_settings row above; the harness compares what the app actually produced against this, so drifting one side fails loudly instead of quietly re-wording the flow. `lines` is the composition policy itself: five lines, in this order.",
+      "cta": { "in": "Contact to order", "low": "Contact to order", "out": "Ask about availability" },
+      "ask": {
+        "in": "Is it available? I would like to order one.",
+        "low": "Stock looks low — can I still order one?",
+        "out": "I can see it is out of stock. Could you let me know when it can be restocked?"
+      },
+      "bands": { "in": "In Stock", "low": "Low Stock", "out": "Out of Stock" },
+      "lines": ["I am interested in {name}.", "Price: {currency} {price}", "SKU: {sku}", "{ask}", "{url}"],
+      "feedback": {
+        "copied": "Message copied.",
+        "blocked": "Your browser blocked the copy — copy the link yourself.",
+        "link": "Product link copied."
+      },
+      "appName": "Raccoon Gear Bin",
+      "titleSuffix": " | Raccoon Gear Bin",
+      "channelLabels": ["Phone", "facebook", "telegram"],
+      "channelHrefs": ["tel:+85512345678", "https://facebook.com/raccoongearbin", "https://t.me/raccoongearbin"],
+      "savedChannelLabels": ["Phone", "youtube", "tiktok"],
+      "savedChannelHrefs": ["tel:+85599888777", "https://youtube.com/@raccoongearbin", "https://tiktok.com/@raccoongearbin.hidden"],
+      "sticky": { "controlHeight": 44, "minPadding": 12, "lightboxZ": 70 }
+    },
     "stockBands": {
       "_comment": "The fixture quantities are 7, 3, 0, 12, 25, 4 against LOW_STOCK_THRESHOLD 5, so all three bands appear twice and the boundary is tested on both sides (4 and 5 would be low, 7 is not). The band now comes from app/utils/product-stock.ts instead of being re-derived inside the badge, so the check asserts the band, its label and its colour together — that is what proves the shared rule did not move a threshold or a class.",
       "in": { "label": "In Stock", "text": "text-zinc-400", "dot": "bg-zinc-400" },

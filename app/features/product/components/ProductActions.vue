@@ -30,6 +30,7 @@ const { t } = useI18n()
 const panelId = useId()
 const messageId = useId()
 const isOpen = ref(false)
+const ctaBtn = ref<HTMLElement | null>(null)
 
 // Out of stock must not read as "buy now": the same action, worded as the question it actually is.
 const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability') : t('contactToOrder'))
@@ -37,8 +38,13 @@ const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability'
 const toggle = () => { isOpen.value = !isOpen.value }
 
 // Escape belongs to the panel only while focus is inside it, so it can never intercept the
-// gallery's document-wide Escape handler.
-const close = () => { isOpen.value = false }
+// gallery's document-wide Escape handler. It then hands focus back to the control that opened the
+// panel: the dismiss removes whatever was focused inside it, and a visitor left on `<body>` loses
+// their place in the tab order entirely.
+const close = (returnFocus = false) => {
+  isOpen.value = false
+  if (returnFocus) void nextTick(() => ctaBtn.value?.focus())
+}
 
 // The share payload is composed from props, which is all a presentational component is allowed to
 // use: the name, the line the shop already shows under it, and the canonical link.
@@ -52,7 +58,7 @@ const shareProduct = () => {
     data-product-actions
     class="min-w-0"
     :class="compact ? 'relative w-full' : 'w-full'"
-    @keydown.esc="close"
+    @keydown.esc="close(true)"
   >
     <!-- The row stays a row at every width: `min-w-0` plus a truncating label is what keeps a long
          Khmer string from widening the page. Share is a secondary at the same height and shape, so
@@ -60,6 +66,7 @@ const shareProduct = () => {
     <div class="flex min-w-0 gap-2 sm:gap-3">
       <button
         v-if="channels.length"
+        ref="ctaBtn"
         type="button"
         data-contact-cta
         :aria-expanded="isOpen"
@@ -90,6 +97,10 @@ const shareProduct = () => {
     <!-- Anchored above itself in the sticky variant (the bar sits at the viewport edge, so the
          panel has nowhere to go but up) and in normal flow inline. `max-h` + `overflow-y-auto`
          keeps a long channel list inside the screen instead of pushing the page wider or taller.
+         The surface is set once per variant rather than base-plus-override: two background
+         utilities in the same class list are one layer apart in the stylesheet, so the translucent
+         inline wash used to win over the solid one this variant needs — and a see-through panel
+         floats over the product photo, which is the one place a backdrop must not be transparent.
 
          The order is the sequence it asks for: read the message, copy it, then open a channel.
          A channel row is a plain link and deliberately copies nothing on its way out — an
@@ -103,11 +114,15 @@ const shareProduct = () => {
       data-contact-panel
       role="group"
       :aria-label="ctaLabel"
-      class="min-w-0 max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-zinc-50/80 p-4 shadow-xs dark:border-zinc-800/80 dark:bg-zinc-900/70"
-      :class="compact ? 'absolute inset-x-0 bottom-full mb-2 bg-white dark:bg-zinc-900' : 'mt-3'"
+      class="min-w-0 max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs dark:border-zinc-800/80"
+      :class="compact ? 'absolute inset-x-0 bottom-full mb-2 bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 bg-zinc-50/80 dark:bg-zinc-900/70'"
     >
       <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
-           a browser that refuses the clipboard still leaves them something to select. -->
+           a browser that refuses the clipboard still leaves them something to select. The field
+           sizes to its own content, because the message is four sentences plus a URL: at a phone
+           width the link wraps, and a fixed five rows clipped the one line a visitor most needs to
+           check. `rows` stays as the fallback where `field-sizing` is unsupported, and the cap keeps
+           a pathologically long product name from turning the panel into a wall of text. -->
       <label
         :for="messageId"
         class="block text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-400 dark:text-zinc-500"
@@ -120,7 +135,7 @@ const shareProduct = () => {
         rows="5"
         data-contact-message
         :value="message"
-        class="no-scrollbar w-full min-w-0 resize-none rounded-xl border border-zinc-200/80 bg-white p-3 text-xs leading-relaxed text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-950 dark:text-zinc-300 dark:focus-visible:ring-white"
+        class="no-scrollbar field-sizing-content max-h-44 w-full min-w-0 resize-none rounded-xl border border-zinc-200/80 bg-white p-3 text-xs leading-relaxed text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-950 dark:text-zinc-300 dark:focus-visible:ring-white"
       />
 
       <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">

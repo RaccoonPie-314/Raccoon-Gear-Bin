@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { CatalogProduct } from '~/types/catalog'
+import type { SiteInfo } from '~/types/site-info'
 
 const route = useRoute()
 const { fetchProduct, fetchProducts, parseSpecificationPairs } = useCatalog()
+const { fetchSiteInfo } = useSiteInfo()
 const { t } = useI18n()
 const product = ref<Awaited<ReturnType<typeof fetchProduct>>>(null)
 const isLoading = ref(true)
@@ -53,8 +55,54 @@ watch(() => route.params.id, () => { void loadProduct() })
 // data layer knows how to read it; this page just renders the pairs it is handed.
 const parsedSpecs = computed(() => parseSpecificationPairs(product.value?.specifications))
 
+// Site info is what tells the product feature which channels the shop actually runs. It is read
+// after mount, not from the product's setup-await path, for the reason the home page already
+// applies to this same row: a failed auxiliary read should cost the visitor the contact options,
+// not the product page — so it logs and leaves `siteInfo` null rather than setting `loadError`.
+// `useSiteInfo` stays the only reader of `site_settings`; this page holds no query and no shape of
+// its own, and a detail→detail navigation keeps the loaded row instead of fetching it twice.
+const siteInfo = ref<SiteInfo | null>(null)
+const loadSiteInfo = async () => {
+  try { siteInfo.value = await fetchSiteInfo() } catch (error) { console.error('Site info load failed:', error) }
+}
+
+onMounted(() => { void loadSiteInfo() })
+
 await loadProduct()
-useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}` : `${t('products')} | ${t('appName')}` }))
+
+// The canonical address of this page is the page. Built from the reactive route rather than from
+// `useRequestURL()`, because on the client that composable reads `window.location.href` once at
+// setup and never updates: a canonical taken from it would keep pointing at the previous product
+// after the header search moved detail → detail. The origin is the address the request arrived at.
+const requestUrl = useRequestURL()
+const canonicalUrl = computed(() => new URL(route.path, requestUrl.origin).href)
+
+// One `useHead` for the page, fed by the loaded product only — no second SEO layer, and every
+// value degrades with the data it comes from: a product with no photo publishes no `og:image`
+// (an empty content is a broken preview card, and the gallery renders its own "No image" frame for
+// the same absence), and a product with no summary publishes no description at all.
+useHead(() => {
+  const current = product.value
+  const summary = current?.shortDescription || current?.description || ''
+  const photo = current?.images[0]
+  const tags: Array<{ name?: string, property?: string, content: string }> = [
+    { property: 'og:type', content: 'product' },
+    { property: 'og:site_name', content: t('appName') },
+    { property: 'og:title', content: current?.name || t('products') },
+    { property: 'og:url', content: canonicalUrl.value }
+  ]
+  if (summary) {
+    tags.push({ name: 'description', content: summary }, { property: 'og:description', content: summary })
+  }
+  if (photo) {
+    tags.push({ property: 'og:image', content: photo.url }, { property: 'og:image:alt', content: photo.altText || current?.name || t('appName') })
+  }
+  return {
+    title: current ? `${current.name} | ${t('appName')}` : `${t('products')} | ${t('appName')}`,
+    meta: tags,
+    link: [{ rel: 'canonical', href: canonicalUrl.value }]
+  }
+})
 </script>
 
 <template>
@@ -90,7 +138,12 @@ useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}
       </UContainer>
     </header>
 
-    <UContainer class="py-10 sm:py-16">
+    <!-- The bottom padding is clearance for the sticky bar the product feature teleports: the bar
+         is roughly 96px tall (12 + a 44px control + 8 + a 20px status line + 12), and it only
+         exists below `lg`, so the page only reserves room for it there. Same idiom the home page
+         uses for its own teleported category dock — a fixed control that overlaps the end of the
+         document is paid for with padding, never with a scroll trick. -->
+    <UContainer class="pt-10 pb-28 sm:pt-16 sm:pb-32 lg:pb-16">
       <div v-if="isLoading" class="grid gap-10 lg:grid-cols-2">
         <div class="aspect-square rounded-3xl animate-pulse bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800/60" />
         <div class="space-y-6">
@@ -116,8 +169,11 @@ useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}
              component; the page only hands it the catalog-mapped images. -->
         <ProductGallery :images="product.images" :name="product.name" />
 
-        <!-- Product Summary & Specs Column -->
-        <div class="lg:sticky lg:top-24 self-start">
+        <!-- Product Summary & Specs Column. `min-w-0` is load-bearing at the narrowest phones: a
+             grid item's default `min-width:auto` lets the conversion row's intrinsic width (pill
+             padding + label + icons) stretch the whole page instead of letting the label truncate —
+             measured at 320px it was 5px of horizontal scroll before this was added. -->
+        <div class="min-w-0 lg:sticky lg:top-24 self-start">
           <p class="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
             {{ product.categoryName }}
           </p>
@@ -157,6 +213,15 @@ useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}
               {{ t('specs') }}
             </h2>
             <pre class="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-500">{{ product.specifications }}</pre>
+          </div>
+
+          <!-- Conversion, after the product's own content. The page hands over the two models it
+               loaded and nothing else: no channel list, no message construction, no clipboard or
+               share code exists in this file. `ProductConversion` mounts the inline block here and
+               teleports the mobile sticky bar itself, which is why this page needs no knowledge of
+               either. -->
+          <div class="mt-10">
+            <ProductConversion :product="product" :site-info="siteInfo" />
           </div>
         </div>
       </section>

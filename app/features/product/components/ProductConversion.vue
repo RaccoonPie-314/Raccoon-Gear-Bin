@@ -81,12 +81,15 @@ const handleShare = async (payload: ProductSharePayload) => {
        be composed. `z-50` deliberately sits below the lightbox's `z-[70]`, so a full-screen photo
        always paints over this bar — and no state is read from the gallery to arrange it.
        Nothing renders at all when the shop has configured no channel: an empty bar would be a
-       permanent strip covering the product for an action that does not exist. -->
+       permanent strip covering the product for an action that does not exist. The dark surface is
+       `zinc-900`, not the page's own `zinc-950`: the storefront has exactly two dark rungs and a
+       bar that sits *on* the page belongs to the upper one, or in dark mode it is a hairline with
+       a button floating in nowhere. -->
   <Teleport to="body">
     <div
       v-if="channels.length"
       data-sticky-cta
-      class="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200/80 bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md lg:hidden dark:border-zinc-800/80 dark:bg-zinc-950/85"
+      class="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200/80 bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md lg:hidden dark:border-zinc-800/80 dark:bg-zinc-900/85"
     >
       <ProductActions
         compact

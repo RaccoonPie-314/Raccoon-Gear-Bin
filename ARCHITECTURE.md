@@ -22,7 +22,7 @@ generated wiki page describes it.
 app/
 ├── pages/            layout + composition only — no queries, no row mapping, no mutations
 │   ├── index.vue     catalog home: grid, sidebar, control row, header site info, the editor's host
-│   ├── products/[id].vue   detail page (uses useCatalog)
+│   ├── products/[id].vue   detail page: useCatalog + useSiteInfo, the head, and the product feature
 │   ├── products/index.vue  redirect shim to /  (note: NOT app/pages/index.vue)
 │   └── admin/
 │       ├── login.vue
@@ -169,6 +169,37 @@ Form state and the writes are deliberately *not* split. `saveProduct` reads `edi
 `actionError` with it. Separating them would produce two modules that only work together, which
 is more coupling, not less.
 
+## The conversion seam
+
+`app/features/product/` is the product detail page's conversion section, in the same shape as the
+editor seam above: the page hands over what it owns and keeps none of the rules.
+
+| Direction | What |
+|---|---|
+| page → feature (props) | `product` (the `useCatalog` model), `siteInfo` (the `useSiteInfo` model, `null` until it resolves) |
+| inside the feature | `useProductContact` resolves the channels, the stock band and the prepared message; `useProductShare` runs the sheet and the clipboard fallback; `ProductConversion` owns the confirmation and mounts the UI twice |
+| leaf | `ProductActions` — props in, `copy` / `share` out, no composable |
+| page keeps | route param, the product fetch and its loading/error state, the site-info read, `useHead`, and the grid the section sits in |
+
+The page's whole contribution is `<ProductConversion :product="product" :site-info="siteInfo" />`.
+Adding a channel, re-wording the message or changing what copying does must not touch `[id].vue`.
+
+Two details in there are contracts rather than style:
+
+- **Two mounts, one behaviour.** The inline block and the teleported sticky bar are the same
+  component with a `compact` flag, so `verify` can demand that both offer the same channels and the
+  same message. The confirmation lives in `ProductConversion` and records *which* mount spoke,
+  because two `aria-live` regions bound to one string would announce every copy twice.
+- **The sticky bar is below the lightbox by stacking, not by knowledge.** It is `z-50`; the
+  lightbox is `z-[70]`; nothing in the feature reads or owns gallery state, and the harness proves
+  the ordering with `elementFromPoint` over the bar's own centre while the lightbox is open.
+
+The canonical URL is a page fact and a feature fact at once: `useHead` publishes
+`route.path` against the request origin (not `useRequestURL()`, which on the client is read once and
+would keep pointing at the previous product after a detail→detail navigation), and the feature
+builds the same address from the product id for the message and the share. The harness asserts they
+are equal rather than trusting the two builders to agree.
+
 ## The Supabase typing contract — two rules that fail silently
 
 `useSupabaseClient<Database>()` is deliberately **not** cast to `any`. The cast was removed
@@ -213,6 +244,22 @@ index.vue → useCatalog().fetchCatalog()
 ```
 
 `'newest'` sort is not a client sort — it is the server's `created_at desc` order, untouched.
+
+## Data flow (product detail)
+
+```
+[id].vue → useCatalog().fetchProduct(id)     setup await — this is the page's loading/error state
+         → useSiteInfo().fetchSiteInfo()     on mount — auxiliary, silent when it fails
+         → <ProductConversion :product :site-info>
+              └─ useProductContact(product, siteInfo) → { stock, url, channels, message, copyMessage }
+              └─ useProductShare()                    → share({ title, text?, url }) → outcome
+         → useHead(...)                       title, description, canonical and og:* off the product
+```
+
+Two reads, two policies: a failed product load *is* the page's error state, while a failed
+site-info read costs the visitor the contact channels and nothing else — the same division the home
+page already draws between its catalog and its masthead. The feature consumes both models and issues
+neither request; `app/utils/product-stock.ts` supplies the band the CTA is worded from.
 
 ## Desktop vs mobile: what must stay separate
 
@@ -444,15 +491,10 @@ surface should match the logo.
   stringify/parse pair, but it changes the editor's data path — admin scope, so Phase 4 left
   it alone.
 - **Three hand-rolled headers** (`index.vue`, `products/[id].vue`, `admin/login.vue`) compose
-  the same logo + theme + language controls with different sizes. Only the home masthead carries
-  Site Info; giving it to the detail page is two props, but at the detail header's sticky
-  `min-h-16` rhythm neither level has been measured there yet.
-- **The product feature is not mounted yet.** `app/features/product/` compiles and is registered
-  for auto-import, but `products/[id].vue` renders none of it: no visitor sees the contact CTA, the
-  channel panel, the share button or the mobile sticky bar, and the detail page does not yet read
-  `useSiteInfo` to feed the channels. Until the page composes `ProductConversion`, the harness has
-  no way to reach those controls — `bun run build` does not even put them in the graph, so the
-  stock-band check in `verify` is the only part of this area that is measured today.
+  the same logo + theme + language controls with different sizes. Only the home masthead
+  *displays* Site Info; the detail page now reads the same row through `useSiteInfo` to resolve its
+  contact channels, but shows none of it in its header — giving it to the detail header is two
+  props, and at that sticky `min-h-16` rhythm neither level has been measured there yet.
 - **The `tel:` digit rule has two owners.** `SiteInfoContact.vue` and
   `app/features/product/composables/useProductContact.ts` each keep their own
   `phone.replace(/[^\d+]/g, '')`. It was left duplicated on purpose: the masthead's contact line is

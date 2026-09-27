@@ -103,6 +103,14 @@ const stubSource = [
   '  var user = { id: FIXED_USER, aud: "authenticated", role: "authenticated", email: "verify@example.test", phone: null, user_metadata: {}, app_metadata: { provider: "email", providers: ["email"] }, identities: [], created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(), last_sign_in_at: new Date(0).toISOString() };',
   '  var session = { access_token: jwt, token_type: "bearer", expires_in: 3600, refresh_token: "verify-refresh", expires_at: iat + 3600, user: user };',
   '  window.__W = [];',
+  // Aliases for the two fixture collections the stub answers from. They are handed out on purpose:
+  // a test that needs a *different* shop configuration — no contact channels at all, a product with
+  // no photos, a name full of punctuation — mutates these from a document script registered before
+  // the app runs, then removes it again. That keeps those cases honest (the app reads them through
+  // the same REST stub as everything else) without adding a seventh product row that every card and
+  // price count in this file would then have to chase.
+  '  window.__PRODUCTS = PRODUCTS;',
+  '  window.__SITE = SITE;',
   '  function json(body, status) { return new Response(body === null ? null : JSON.stringify(body), { status: status, headers: { "content-type": "application/json" } }) }',
   '  var orig = window.fetch.bind(window);',
   '  window.fetch = function (input, init) {',
@@ -294,6 +302,51 @@ const run = async () => {
   const resetW = () => ev('window.__W = []; true')
   const norm = s => (typeof s === 'string' ? s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>') : s)
   const seqOf = list => list.map(w => `${w.method} ${w.p}${w.q ? '?' + w.q : ''}`)
+
+  // ---- the capabilities the conversion flow depends on -----------------------------------------
+  // The clipboard and the share sheet are things the rig has to decide about, and both have to be
+  // installed *after* the navigation that re-injected the stub: the app reads `navigator.clipboard`
+  // and `navigator.share` when the button is pressed, not when the page loads. `reject` and
+  // `absent` deliberately record nothing, so "the copy happened" and "the copy was attempted" stay
+  // distinguishable in the assertions.
+  const CLIPBOARD = {
+    ok: '{ writeText: function (t) { window.__COPIES.push(String(t)); return Promise.resolve(); } }',
+    reject: '{ writeText: function () { return Promise.reject(new Error("NotAllowedError")); } }',
+    missing: 'undefined'
+  }
+  const SHARE = {
+    ok: 'function (data) { window.__SHARES.push(data || {}); return Promise.resolve(); }',
+    abort: 'function () { var e = new Error("dismissed"); e.name = "AbortError"; return Promise.reject(e); }',
+    absent: 'undefined'
+  }
+  const armClipboard = mode => ev('(() => { window.__COPIES = []; Object.defineProperty(navigator, "clipboard", { configurable: true, value: ' + CLIPBOARD[mode] + ' }); return true })()')
+  const armShare = mode => ev('(() => { window.__SHARES = []; Object.defineProperty(navigator, "share", { configurable: true, value: ' + SHARE[mode] + ' }); return true })()')
+  const copies = async () => await ev('window.__COPIES || []')
+  const shares = async () => await ev('window.__SHARES || []')
+  // Stop a channel link from actually leaving the page so the click can still be observed. The
+  // listener captures on the document and only cancels the default, which leaves the app's own
+  // handlers running — the way to ask "did tapping a channel pretend to copy something?".
+  const holdChannelLinks = () => ev('(() => { window.__BLOCKED = 0; document.addEventListener("click", function (e) { var link = e.target && e.target.closest ? e.target.closest("[data-contact-channel]") : null; if (link) { e.preventDefault(); window.__BLOCKED++; } }, true); return true })()')
+  // A shop or a product that the fixtures do not contain: mutate the stub's own collections before
+  // the app boots, run the navigation, then remove the script so no later check inherits it.
+  const forNextDocument = async source => (await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source })).identifier
+  const stopForNextDocument = identifier => cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {})
+  // Both mounts of the conversion UI in one read: the inline block and the teleported sticky bar
+  // are the same component twice, so every assertion below asks the same question of each and the
+  // answers are what prove the two cannot drift apart.
+  const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => ({ href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel") })) }) } return out })()'
+  const mounts = async () => await ev(MOUNTS)
+  // The message the page must produce, assembled from the fixture row and the contract in
+  // `expectations.conversion` — never read back out of the app.
+  const expectedMessage = (row, ask, url) => EXP.conversion.lines
+    .map(line => line
+      .replace('{name}', row.product_translations[0].name)
+      .replace('{currency}', row.currency)
+      .replace('{price}', Number(row.price).toFixed(2))
+      .replace('{sku}', row.sku)
+      .replace('{ask}', ask)
+      .replace('{url}', url))
+    .join('\n')
   const consoleErrors = []
   cdp.events.length = 0
   const collectErrors = () => {
@@ -305,6 +358,9 @@ const run = async () => {
   }
 
   const EXP = FIXTURES.expectations
+  // The fixture row behind a product id, for assertions that have to name what the page was given
+  // (message lines, og:image, the CTA's stock band) without reading it back out of the app.
+  const row = id => FIXTURES.products.find(p => p.id === id)
   const DIALOG = '[role="dialog"]'
   const ALERT = '[role="alertdialog"]'
   const EDIT_BTN = 'main article button[aria-label="Edit product"]'
@@ -867,6 +923,297 @@ const run = async () => {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Enter', key: 'Enter', windowsVirtualKeyCode: 13 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Enter', key: 'Enter' })
     check('Enter selects the first search result', await waitFor(pathnameIs(G.controllerId)) && await waitFor(`(document.querySelector('main h1')?.textContent || '').trim() === 'Verify Controller'`))
+
+    // ============================== PRODUCT CONVERSION (Phase 1) ==============================
+    // Everything below runs against the mounted feature on the real product page — the two new
+    // components are only in the build graph because `[id].vue` composes them, which is the point:
+    // a check that reached them only through an isolated mount would prove nothing about the page.
+    const C = EXP.conversion
+    const canonical = id => new URL('/products/' + id, appUrl).href
+    // A missing mount must read as a failed check, not as a TypeError that aborts the run: these
+    // defaults are the shape of "nothing rendered", so every assertion below still gets a value.
+    const NO_MOUNT = { where: null, visible: false, tag: null, type: null, ctaText: null, expanded: null, controls: null, panelOpen: false, panelLabel: null, panelControls: null, message: '', feedback: null, live: null, role: null, labelFor: null, fieldId: null, labelText: null, shareTag: null, channels: [] }
+    const inlineMount = async () => (await mounts()).find(m => m.where === 'inline') || { ...NO_MOUNT }
+    const stickyMount = async () => (await mounts()).find(m => m.where === 'sticky') || { ...NO_MOUNT }
+    // The prepared message, its label and the channel list only exist while the panel is open, so
+    // anything that asserts them opens the panel first. A probe that reads them shut is measuring
+    // its own timing, not the page.
+    const openInlinePanel = async () => {
+      if (!await ev('!!document.querySelector("[data-product-actions] [data-contact-panel]")')) await clickSelector('[data-contact-cta]', '!!document.querySelector(\'[data-contact-panel]\')')
+      return await inlineMount()
+    }
+
+    await nav(detailUrl(G.manyId))
+    if (!await waitFor('!!document.querySelector(\'[data-contact-cta]\')')) check('the product page mounts the conversion feature', false)
+    const mounted = await mounts()
+    check('the conversion feature mounts on the product page', !!mounted.find(m => m.where === 'inline'), { mounts: mounted.map(m => m.where) })
+    check('the conversion block composes after the product information and specifications', await ev('(() => { const dl = document.querySelector("main dl"); const act = document.querySelectorAll("[data-product-actions]")[0]; return !!dl && !!act && !!(dl.compareDocumentPosition(act) & Node.DOCUMENT_POSITION_FOLLOWING) })()'))
+
+    // A primary action must be a button: the requirement outlives the implementation.
+    const first = mounted.find(m => m.where === 'inline') || { ...NO_MOUNT }
+    check('the contact action is a real button with an accessible name, not a clickable div', first.tag === 'BUTTON' && first.type === 'button' && first.ctaText === C.cta.in, { tag: first.tag, type: first.type, text: first.ctaText })
+    check('the confirmation region is a polite status live region', first.live === 'polite' && first.role === 'status', { live: first.live, role: first.role })
+
+    // In stock: the order action, and the message assembled from the product the page is about.
+    const wantIn = expectedMessage(row(G.manyId), C.ask.in, canonical(G.manyId))
+    const opened = await openInlinePanel()
+    check('the CTA opens the channel panel and announces that it did', opened.expanded === 'true' && opened.panelOpen && opened.controls === opened.panelControls, { expanded: opened.expanded, controls: opened.controls, panelId: opened.panelControls })
+    check('an in-stock product offers the order action and a five-line message built from the product', opened.ctaText === C.cta.in && opened.message === wantIn && opened.message.split('\n').length === C.lines.length, { cta: opened.ctaText, message: norm(opened.message) })
+    check('the message field is a textarea associated with its own label', !!opened.labelFor && opened.labelFor === opened.fieldId && !!opened.labelText, { labelFor: opened.labelFor, fieldId: opened.fieldId, labelText: opened.labelText })
+
+    // The channels are the shop's configured contacts and nothing else: the stored number as a
+    // tel: link, then the enabled social links in their stored order. A invented handle, a guessed
+    // compose endpoint or a disabled platform showing up fails these three.
+    check('the channel list is exactly the configured contacts, in stored order', JSON.stringify(opened.channels.map(c => c.href)) === JSON.stringify(C.channelHrefs), { hrefs: opened.channels.map(c => c.href) })
+    check('the phone channel shows the stored number and web channels are named by platform', opened.channels[0].text.includes(EXP.siteInfo.phoneText) && opened.channels.slice(1).every((c, i) => c.text.trim().startsWith(C.channelLabels[i + 1])), { texts: opened.channels.map(c => c.text) })
+    check('a disabled social link is not offered as a contact channel', !(await ev('document.body.innerHTML.includes(' + JSON.stringify(EXP.siteInfo.hiddenSocialUrl) + ')')))
+    check('a web channel opens in a new tab with a safe rel, the phone stays a plain link', opened.channels.slice(1).every(c => c.target === '_blank' && /noopener/.test(c.rel || '') && /noreferrer/.test(c.rel || '')) && opened.channels[0].target === null, opened.channels.map(c => [c.target, c.rel]))
+
+    // The determinism rule: leaving for a channel must not leave a "copied" claim behind. The
+    // capture listener cancels only the navigation, so the app's own click path still runs.
+    await holdChannelLinks()
+    await armClipboard('ok')
+    // Bring the row into the viewport before measuring it: the panel hangs under a long summary
+    // column, and a click aimed below the fold is silently dropped — which looks exactly like a
+    // handler that never ran.
+    await ev('(() => { const links = document.querySelectorAll("[data-contact-panel] [data-contact-channel]"); if (links[1]) links[1].scrollIntoView({ block: "center" }); return true })()')
+    await sleep(300)
+    const channelBox = (await ev(boxesExpr('[data-contact-panel] [data-contact-channel]')))[1]
+    await clickAt(channelBox.x, channelBox.y)
+    await sleep(300)
+    const afterChannel = await inlineMount()
+    const blocked = await ev('window.__BLOCKED')
+    check('tapping a channel does not pretend the message was copied', blocked >= 1 && (await copies()).length === 0 && afterChannel.feedback === '', { blocked, copies: await copies(), feedback: afterChannel.feedback, clicked: channelBox })
+
+    // ---- the copy is claimed only when it actually happened -------------------------------------
+    // Each case has to start from a silent region, or the previous case's sentence would satisfy
+    // the wait expression before the click ever landed. Waiting it out is also the only way to prove
+    // the confirmation clears itself.
+    const expectFeedback = value => '((document.querySelectorAll("[data-product-actions]")[0].querySelector("[data-contact-feedback]") || {}).textContent || "").trim() === ' + value
+    const cleared = expectFeedback('""')
+    const clearFeedback = async () => await waitFor(cleared, 7000)
+    const HEAD = '(() => { const map = {}; for (const m of document.querySelectorAll("meta")) { const k = m.getAttribute("property") || m.getAttribute("name"); if (k) map[k] = m.getAttribute("content"); } const l = document.querySelector("link[rel=canonical]"); return { title: document.title, canonical: l ? l.getAttribute("href") : null, desc: map.description || null, ogType: map["og:type"] || null, ogSite: map["og:site_name"] || null, ogTitle: map["og:title"] || null, ogDesc: map["og:description"] || null, ogUrl: map["og:url"] || null, ogImage: map["og:image"] || null, ogImageAlt: map["og:image:alt"] || null } })()'
+
+    await armClipboard('ok')
+    await clickSelector('[data-copy-message]', expectFeedback(JSON.stringify(C.feedback.copied)))
+    const okCopies = await copies()
+    check('a successful copy writes the exact message and only then says so', okCopies.length === 1 && okCopies[0] === wantIn && (await inlineMount()).feedback === C.feedback.copied, { copied: norm(okCopies[0] || ''), feedback: (await inlineMount()).feedback })
+
+    await armClipboard('missing')
+    await clickSelector('[data-copy-message]', expectFeedback(JSON.stringify(C.feedback.blocked)))
+    const refused = await inlineMount()
+    check('an unavailable clipboard is reported as a failure, never as copied', (await copies()).length === 0 && refused.feedback === C.feedback.blocked && refused.feedback !== C.feedback.copied, { feedback: refused.feedback })
+    check('a refused clipboard still leaves the whole message on screen to select by hand', refused.message === wantIn && refused.message.length > 40, { length: (refused.message || '').length })
+
+    check('the confirmation clears itself', await waitFor(cleared, 7000))
+    await armClipboard('reject')
+    await clickSelector('[data-copy-message]', expectFeedback(JSON.stringify(C.feedback.blocked)))
+    const rejected = await inlineMount()
+    check('a clipboard write that rejects is reported as a failure, not a success', (await copies()).length === 0 && rejected.feedback === C.feedback.blocked, { feedback: rejected.feedback, copies: await copies() })
+
+    // ---- sharing ------------------------------------------------------------------------------
+    await clearFeedback()
+    await armShare('ok')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', 'true')
+    await sleep(300)
+    const shared = await shares()
+    const shareRow = row(G.manyId).product_translations[0]
+    check('share goes through the Web Share API with the product name, its summary and the canonical URL', shared.length === 1 && shared[0].title === shareRow.name && shared[0].text === shareRow.short_description && shared[0].url === canonical(G.manyId), { shared })
+    check('a share that opened its sheet claims nothing behind it', (await copies()).length === 0 && (await inlineMount()).feedback === '', { copies: await copies(), feedback: (await inlineMount()).feedback })
+
+    await armShare('abort')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', 'true')
+    await sleep(300)
+    check('a dismissed share sheet is treated as a decision, not a failure', (await inlineMount()).feedback === '' && (await copies()).length === 0, { feedback: (await inlineMount()).feedback })
+
+    await armShare('absent')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
+    const fallbackCopies = await copies()
+    check('with no share sheet, share falls back to copying the canonical URL and says so', fallbackCopies.length === 1 && fallbackCopies[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: fallbackCopies })
+
+    // ---- metadata -----------------------------------------------------------------------------
+    const head = await ev(HEAD)
+    const headRow = row(G.manyId).product_translations[0]
+    check('the page publishes a title, description and canonical for the current product', head.title === headRow.name + C.titleSuffix && head.desc === headRow.short_description && head.canonical === canonical(G.manyId), { title: head.title, desc: head.desc, canonical: head.canonical })
+    const gallerySrc = await ev('(() => { const i = document.querySelector("[data-gallery-main]"); return i ? i.src : null })()')
+    check('Open Graph carries the product, and its image is the same catalog-mapped photo the gallery shows', head.ogType === 'product' && head.ogSite === C.appName && head.ogTitle === headRow.name && head.ogDesc === headRow.short_description && head.ogUrl === canonical(G.manyId) && head.ogImage === gallerySrc && head.ogImageAlt === row(G.manyId).product_images[0].alt_text, { ogType: head.ogType, ogImage: head.ogImage, gallerySrc, ogImageAlt: head.ogImageAlt })
+    check('the canonical in the head is the URL the message and the share both carried', head.canonical === wantIn.split('\n').pop() && head.canonical === fallbackCopies[0], { canonical: head.canonical })
+
+    // ---- low stock and out of stock, reached by an in-app navigation ----------------------------
+    // Using the page's own header search rather than a fresh load is deliberate: it is the
+    // detail→detail path, where a canonical built from a one-shot request URL would go stale.
+    const searchTo = async (term, label, id) => {
+      const box = (await ev(boxesExpr(SB_INPUT)))[0]
+      await clickAt(box.x, box.y)
+      await cdp.send('Input.insertText', { text: term })
+      return await clickByText(`${SB} a`, label, pathnameIs(id))
+    }
+    const bandState = async () => await ev('(() => { const el = document.querySelector("[data-stock-status]"); return el ? el.getAttribute("data-stock-state") : null })()')
+
+    check('navigating detail→detail through the search works', await searchTo('mouse', 'Verify Mouse', G.twoId))
+    await waitFor(`(document.querySelector('main h1')?.textContent || '').trim() === 'Verify Mouse'`)
+    const lowMount = await openInlinePanel()
+    check('a low-stock product keeps the order action and asks about the remaining stock', lowMount.ctaText === C.cta.low && lowMount.message === expectedMessage(row(G.twoId), C.ask.low, canonical(G.twoId)), { cta: lowMount.ctaText, message: norm(lowMount.message) })
+    check('the badge and the CTA agree on the band because one rule answers for both', await bandState() === 'low' && lowMount.ctaText === C.cta.low, { band: await bandState(), cta: lowMount.ctaText })
+    const headLow = await ev(HEAD)
+    check('a detail→detail navigation re-points the canonical and the Open Graph title', headLow.canonical === canonical(G.twoId) && headLow.ogTitle === row(G.twoId).product_translations[0].name, { canonical: headLow.canonical, ogTitle: headLow.ogTitle })
+
+    await searchTo('headphones', 'Verify Headphones', G.singleId)
+    await waitFor(`(document.querySelector('main h1')?.textContent || '').trim() === 'Verify Headphones'`)
+    const outMount = await openInlinePanel()
+    const wantOut = expectedMessage(row(G.singleId), C.ask.out, canonical(G.singleId))
+    check('an out-of-stock product asks about availability instead of offering to sell', outMount.ctaText === C.cta.out && outMount.message === wantOut && await bandState() === 'out', { cta: outMount.ctaText, band: await bandState(), message: norm(outMount.message) })
+    check('the out-of-stock message asks for a restock and never claims the item can be ordered now', /out of stock/.test(outMount.message) && /restocked/.test(outMount.message) && !/I would like to order/i.test(outMount.message), { message: norm(outMount.message) })
+
+    // ---- shops and products the fixtures do not contain ----------------------------------------
+    // A document script mutates the stub's own collections before the app boots, so the app reads
+    // this data through exactly the same REST path as any other: the alternative is a seventh
+    // product row that every card and price count in this file would then have to chase.
+    const press = async (code, key, vk, text) => { await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code, key, windowsVirtualKeyCode: vk, text: text }); await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code, key }) }
+
+    const odd = 'Rüç “Koï” 100% <b> & € ✦ Keyboard'
+    const oddScript = await forNextDocument('window.__PRODUCTS[0].product_translations[0].name = ' + JSON.stringify(odd) + ';')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-contact-cta]\')')
+    const oddMount = await openInlinePanel()
+    const wantOdd = expectedMessage({ ...row(G.manyId), product_translations: [{ name: odd }] }, C.ask.in, canonical(G.manyId))
+    check('a name full of punctuation, quotes and non-Latin characters survives the message intact', oddMount.message === wantOdd && oddMount.message.includes(odd) && oddMount.message.split('\n').length === C.lines.length, { message: norm(oddMount.message) })
+    check('and it stays text: no markup from a product name is ever interpreted', await ev('(() => { const h = document.querySelector("main h1"); return !!h && h.textContent.includes(' + JSON.stringify(odd) + ') && h.querySelector("b") === null })()'))
+    await stopForNextDocument(oddScript)
+
+    const bareScript = await forNextDocument('window.__SITE.phone = ""; window.__SITE.social_links = [];')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-share-cta]\')')
+    const bare = await mounts()
+    check('a shop with no configured contact offers no contact action and no sticky bar', !(await ev('!!document.querySelector("[data-contact-cta]")')) && !(await ev('!!document.querySelector("[data-sticky-cta]")')) && !!bare.find(m => m.where === 'inline'), { mounts: bare.map(m => m.where + ':' + m.visible) })
+    check('nothing is invented in the missing channel’s place', !(await ev('document.body.innerHTML.includes("tel:")')) && !(await ev('document.body.innerText.includes("example.com")')) && (await ev('document.querySelector("main h1") ? (document.querySelector("main h1").textContent || "").trim() : ""')) === row(G.manyId).product_translations[0].name)
+    await armShare('absent')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
+    check('sharing still works when there is no contact channel to configure', (await copies()).length === 1 && (await copies())[0] === canonical(G.manyId), { copied: await copies() })
+    await stopForNextDocument(bareScript)
+
+    const noPhotoScript = await forNextDocument('window.__PRODUCTS[0].product_images = [];')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
+    const bareHead = await ev(HEAD)
+    check('a product with no photos publishes no og:image rather than an empty one', bareHead.ogImage === null && bareHead.ogImageAlt === null && bareHead.canonical === canonical(G.manyId) && bareHead.ogTitle === row(G.manyId).product_translations[0].name, { ogImage: bareHead.ogImage, ogTitle: bareHead.ogTitle })
+    const noPhotoMount = await openInlinePanel()
+    // `innerText` reports what is painted, and the no-image frame is uppercased by the eyebrow
+    // style — matching it case-insensitively is the difference between testing the text and
+    // testing the CSS.
+    check('the gallery shows its own no-image frame while the conversion still carries the product', await ev('/no image/i.test(document.body.innerText)') && noPhotoMount.message === wantIn, { message: norm(noPhotoMount.message) })
+    await stopForNextDocument(noPhotoScript)
+
+    // ---- the mobile sticky bar -----------------------------------------------------------------
+    await metrics(390, 844, true)
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-contact-cta]\')')
+    const geo = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const r = bar.getBoundingClientRect(); const c = getComputedStyle(bar); const inner = bar.querySelector("[data-product-actions]").getBoundingClientRect(); const ctl = bar.querySelector("[data-contact-cta]").getBoundingClientRect(); return { display: c.display, position: c.position, z: c.zIndex, pb: c.paddingBottom, top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height, vh: innerHeight, vw: innerWidth, insetLeft: Math.round(inner.left - r.left), insetRight: Math.round(r.right - inner.right), ctlH: Math.round(ctl.height), ctlW: Math.round(ctl.width), hasShare: !!bar.querySelector("[data-share-cta]"), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    check('the sticky bar is a fixed bottom row that stays inside the viewport', geo.position === 'fixed' && geo.display !== 'none' && Math.abs(geo.bottom - geo.vh) <= 1 && geo.left === 0 && geo.right === geo.vw, geo)
+    check('the sticky bar does not widen the page, keeps the 44px control and its symmetric inset', geo.overflow <= 1 && geo.ctlH === C.sticky.controlHeight && geo.insetLeft === geo.insetRight && geo.ctlW + geo.insetLeft * 2 <= geo.vw, geo)
+    check('the sticky bar reserves room for the home-indicator safe area', parseFloat(geo.pb) >= C.sticky.minPadding, { paddingBottom: geo.pb })
+    check('the sticky bar carries the primary action alone', geo.hasShare === false, { carriesShare: geo.hasShare })
+
+    await ev('window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }); true')
+    await sleep(450)
+    const clearance = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const act = document.querySelectorAll("[data-product-actions]")[0]; const b = bar.getBoundingClientRect(); const a = act.getBoundingClientRect(); return { atEnd: window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2, barTop: Math.round(b.top), actBottom: Math.round(a.bottom), gap: Math.round(b.top - a.bottom) } })()')
+    check('at the end of the page the sticky bar leaves the product content clear of itself', clearance.atEnd && clearance.actBottom <= clearance.barTop + 1, clearance)
+
+    await ev('window.scrollTo({ top: 0, behavior: "instant" }); true')
+    await sleep(350)
+    const zoomMobile = (await ev(boxesExpr('[data-gallery-zoom]')))[0]
+    await clickAt(zoomMobile.x, zoomMobile.y)
+    await waitFor('!!document.querySelector("[data-lightbox]")')
+    const stacked = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const lb = document.querySelector("[data-lightbox]"); const r = bar.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { barZ: getComputedStyle(bar).zIndex, lbZ: getComputedStyle(lb).zIndex, covered: !!lb && lb.contains(hit), hit: hit ? hit.tagName : null } })()')
+    check('the sticky CTA never paints above the gallery lightbox', stacked.covered && Number(stacked.barZ) < Number(stacked.lbZ), stacked)
+    await press('Escape', 'Escape', 27)
+    check('Escape still closes the lightbox with the sticky bar on screen', await waitFor('!document.querySelector("[data-lightbox]")'))
+
+    // Same action, not a second implementation of it: the sticky panel must offer what the inline
+    // block offers and its copy must go through the same code path.
+    const inlineNow = await openInlinePanel()
+    await armClipboard('ok')
+    await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
+    const stickyOpen = await stickyMount()
+    check('the sticky panel offers the same channels and the same message as the inline block', JSON.stringify(stickyOpen.channels.map(c => c.href)) === JSON.stringify(inlineNow.channels.map(c => c.href)) && stickyOpen.message === inlineNow.message && stickyOpen.ctaText === inlineNow.ctaText, { channels: stickyOpen.channels.map(c => c.href), cta: stickyOpen.ctaText })
+    // Two things the desktop-only geometry checks could not see, both found by looking at the page:
+    // the floating panel must be opaque (a translucent wash over the product photo is unreadable,
+    // and two background utilities in one class list resolve by stylesheet order, not by intent),
+    // and the prepared message must fit its own field (the URL wraps at a phone width).
+    const surface = await ev('(() => { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (!p) return null; const c = getComputedStyle(p); const f = p.querySelector("[data-contact-message]"); const r = p.getBoundingClientRect(); return { bg: c.backgroundColor, fieldClip: f ? f.scrollHeight - f.clientHeight : null, fieldH: f ? Math.round(f.getBoundingClientRect().height) : 0, top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight } })()')
+    check('the floating mobile panel is opaque rather than a translucent wash', !!surface && !/\/\s*0\./.test(surface.bg), surface)
+    check('the mobile panel shows the whole prepared message and stays entirely on screen', !!surface && surface.fieldClip <= 1 && surface.top >= 0 && surface.bottom <= surface.vh + 1, surface)
+    const beforeStickyCopy = (await copies()).length
+    const expectStickyFeedback = value => '((document.querySelector("[data-sticky-cta] [data-contact-feedback]") || {}).textContent || "").trim() === ' + value
+    await clickSelector('[data-sticky-cta] [data-copy-message]', expectStickyFeedback(JSON.stringify(C.feedback.copied)))
+    const afterStickyCopy = await copies()
+    check('the sticky copy runs the shared action and writes the same message', afterStickyCopy.length === beforeStickyCopy + 1 && afterStickyCopy[afterStickyCopy.length - 1] === inlineNow.message, { added: afterStickyCopy.length - beforeStickyCopy, copied: norm(afterStickyCopy[afterStickyCopy.length - 1] || '') })
+    const speakers = await mounts()
+    const stickySpeaker = speakers.find(m => m.where === 'sticky') || { ...NO_MOUNT }
+    const inlineSpeaker = speakers.find(m => m.where === 'inline') || { ...NO_MOUNT }
+    check('only the mount the visitor used announces the copy', stickySpeaker.feedback === C.feedback.copied && inlineSpeaker.feedback === '', speakers.map(m => [m.where, m.feedback]))
+
+    await press('Escape', 'Escape', 27)
+    check('Escape closes the sticky panel and leaves focus on the control', !(await ev('!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')) && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'))
+    // Escape has to hand focus back to the control that opened the panel rather than dropping the
+    // visitor at the top of the tab order. It is also the only way to make the bar reachable from
+    // the page: while the inline panel is open its own field is the next tab stop.
+    await ev('(() => { const el = document.querySelector("[data-product-actions] [data-contact-message]"); if (el) el.focus(); return true })()')
+    await press('Escape', 'Escape', 27)
+    check('Escape closes the inline panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null && !document.querySelector("[data-product-actions] [data-contact-panel]") })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
+    await ev('(() => { const el = document.querySelector("[data-share-cta]"); if (el) el.focus(); return true })()')
+    await press('Tab', 'Tab', 9)
+    const focused = await ev('(() => { const el = document.activeElement; const c = getComputedStyle(el); return { inSticky: !!(el.closest && el.closest("[data-sticky-cta]")), isCta: el.getAttribute("data-contact-cta") !== null, tag: el.tagName, shadow: c.boxShadow, outline: c.outlineWidth + " " + c.outlineStyle } })()')
+    check('Tab reaches the sticky CTA from the page and it shows a visible focus ring', focused.inSticky && focused.isCta && (focused.shadow !== 'none' || !/^0px none/.test(focused.outline)), focused)
+    // A `keydown` carrying no `text` produces no `keypress`, and it is the keypress that activates
+    // a native button in Blink — without it Enter lands on the control and nothing happens.
+    await press('Enter', 'Enter', 13, '\r')
+    const entered = await stickyMount()
+    check('the keyboard opens the sticky channel panel', entered.panelOpen, { expanded: entered.expanded, panel: entered.panelOpen, mount: entered.where, panels: await ev('document.querySelectorAll("[data-contact-panel]").length'), active: await ev('(() => { const el = document.activeElement; return el ? el.tagName + " sticky:" + !!(el.closest && el.closest("[data-sticky-cta]")) : null })()') })
+    await press('Escape', 'Escape', 27)
+    await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-copy-message]") || document.querySelector("[data-sticky-cta] [data-contact-cta]"); if (el) el.focus(); return true })()')
+    let leftBar = false
+    for (let i = 0; i < 3 && !leftBar; i++) { await press('Tab', 'Tab', 9); leftBar = await ev('(() => { const el = document.activeElement; return !el || !el.closest || !el.closest("[data-sticky-cta]") })()') }
+    check('the sticky bar does not trap keyboard focus', leftBar)
+
+    // ---- six widths, both colour schemes -------------------------------------------------------
+    // One check per viewport that names what went wrong, in the style of the masthead sweep: the
+    // breakpoint, the control height, the overflow and the theme are four separate regressions that
+    // all read as "the page looks wrong" in a screenshot and as nothing at all in a build.
+    // 320 is in the list because the browser pass found 5px of sideways scroll there and nowhere
+    // else: a grid item's intrinsic width, which no wider viewport is short enough to reveal.
+    await metrics(1440, 900, false)
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-contact-cta]\')')
+    const surfaces = {}
+    for (const [w, h] of [[1440, 900], [1280, 900], [1024, 900], [834, 1112], [640, 960], [390, 844], [320, 700]]) {
+      for (const scheme of ['light', 'dark']) {
+        await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] })
+        await metrics(w, h, w < 500)
+        await sleep(600)
+        const r = await ev('(() => { const dark = document.documentElement.classList.contains("dark"); const bar = document.querySelector("[data-sticky-cta]"); const cta = document.querySelector("[data-contact-cta]"); const share = document.querySelector("[data-share-cta]"); const cr = cta ? cta.getBoundingClientRect() : null; const cc = cta ? getComputedStyle(cta) : null; const sc = share ? getComputedStyle(share) : null; const bc = bar ? getComputedStyle(bar) : null; const br = bar ? bar.getBoundingClientRect() : null; return { dark, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, ctaH: cr ? Math.round(cr.height) : 0, ctaW: cr ? Math.round(cr.width) : 0, ctaBg: cc ? cc.backgroundColor : null, ctaFg: cc ? cc.color : null, shareBg: sc ? sc.backgroundColor : null, barShown: !!bar && br.width > 0 && bc.display !== "none", barBg: bc ? bc.backgroundColor : null, pageBg: getComputedStyle(document.body).backgroundColor, ctaText: cta ? (cta.textContent || "").trim() : null } })()')
+        if (!surfaces[scheme]) surfaces[scheme] = { bar: r.barBg, cta: r.ctaBg, share: r.shareBg, page: r.pageBg }
+        const faults = []
+        if (r.overflow > 1) faults.push(`${r.overflow}px of horizontal overflow`)
+        if (r.ctaH !== C.sticky.controlHeight) faults.push(`the CTA is ${r.ctaH}px, a storefront control is ${C.sticky.controlHeight}px`)
+        if (r.ctaW > r.vw - 32) faults.push(`the CTA is ${r.ctaW}px inside a ${r.vw}px viewport`)
+        if (!r.ctaText) faults.push('the primary action has no name')
+        if (r.ctaBg === r.ctaFg) faults.push('the primary action is invisible: fill equals its own text colour')
+        if (r.barShown !== (w < 1024)) faults.push(`the sticky bar is ${r.barShown ? 'shown' : 'hidden'} at ${w}px`)
+        // The two-rung rule: a bar that sits on the page may not be the page's own colour, or in
+        // dark mode it is a hairline with a button floating in nowhere.
+        if (r.barShown && r.barBg === r.pageBg) faults.push('the sticky bar is the same surface as the page it sits on')
+        if ((scheme === 'dark') !== r.dark) faults.push(`a ${scheme} colour scheme did not reach the theme`)
+        check(`the conversion UI fits, keeps its hierarchy and obeys its breakpoint @${w} ${scheme}`, faults.length === 0, faults.length ? faults : { ctaH: r.ctaH, ctaW: r.ctaW, barShown: r.barShown })
+      }
+    }
+    check('the sticky bar and both controls change surface between light and dark', !!surfaces.light && !!surfaces.dark && surfaces.light.bar !== surfaces.dark.bar && surfaces.light.cta !== surfaces.dark.cta && surfaces.light.share !== surfaces.dark.share, surfaces)
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'no-preference' }] })
+    await metrics(1440, 900, false)
     collectErrors()
   }
 
@@ -1024,7 +1371,32 @@ const run = async () => {
     check('every enabled platform paints its mark, none is a blank', Object.values(marks).every(g => g.ink[0] >= 12 && g.ink[1] >= 12), inkOf())
     check('youtube and tiktok are both on screen, as distinct marks', !!marks.youtube && !!marks.tiktok && marks.youtube.d !== marks.tiktok.d, inkOf())
 
+    // The site-info save has to reach the product page's contact channels. Reached by an in-app
+    // navigation, not a reload: the stub's site row lives inside the document, so a fresh load
+    // would reset it to the fixture values and prove nothing about the edit. This is also the only
+    // check that can prove the channel list is consumed from configuration rather than invented.
+    // The card's title link is the route into a product; picked by structure because a selector
+    // carrying quoted quotes inside this file's single-quoted expressions is how the previous
+    // attempt produced an invalid selector instead of a click.
+    await ev('(() => { const card = document.querySelector("main article h2 a"); if (card) card.click(); return true })()')
+    check('a product page reached from the catalog mounts the conversion feature', await waitFor('!!document.querySelector(\'[data-contact-cta]\')', 10000))
+    await clickSelector('[data-contact-cta]', '!!document.querySelector("[data-contact-panel]")')
+    const afterSave = (await mounts()).find(m => m.where === 'inline') || { channels: [], message: '' }
+    const hrefsNow = afterSave.channels.map(c => c.href)
+    check('the product page offers exactly the channels the shop just configured', JSON.stringify(hrefsNow) === JSON.stringify(EXP.conversion.savedChannelHrefs), { hrefsNow })
+    check('and it withdraws the channel the shop just disabled', !hrefsNow.some(h => h.includes('t.me')), { telegramOffered: hrefsNow.some(h => h.includes('t.me')) })
+    const here = await ev('location.origin + location.pathname')
+    const headingNow = await ev('(document.querySelector("main h1") || {}).textContent?.trim()')
+    const canonicalHere = await ev('(() => { const l = document.querySelector("link[rel=canonical]"); return l ? l.getAttribute("href") : null })()')
+    check('the prepared message names this product and ends at this page’s canonical address', !!headingNow && (afterSave.message || '').includes(headingNow) && (afterSave.message || '').split('\n').pop() === here && canonicalHere === here, { headingNow, here, canonicalHere, message: norm(afterSave.message) })
+
     // --- logout ---
+    // Back to the catalog through the detail page's own control first: the logout button lives in
+    // the home header, and a product page has never carried one. (The last anchor in the detail
+    // header is the back link; naming it by structure avoids a quoted attribute selector inside
+    // this file's single-quoted expressions.)
+    await ev('(() => { const links = document.querySelectorAll("header a"); if (links.length) links[links.length - 1].click(); return true })()')
+    await waitFor('location.pathname === "/"', 10000)
     check('logout clears admin mode', await clickByText('header button', 'Log out', `document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length === 0`))
     collectErrors()
   }
