@@ -653,7 +653,11 @@ const run = async () => {
     const SEL_IDX = `(() => { const t = document.querySelector('${THUMB}[data-selected]'); return t ? +t.getAttribute('data-index') : -1 })()`
     const WINDOW = `(() => [...document.querySelectorAll('${THUMB}')].map(b => +b.getAttribute('data-index')))()`
     const CENTRE = `(() => { const s = document.querySelector('[data-gallery-strip]'); const t = document.querySelector('${THUMB}[data-selected]'); if (!s || !t) return null; const sc = s.getBoundingClientRect(), tc = t.getBoundingClientRect(); return Math.abs((sc.left + sc.width / 2) - (tc.left + tc.width / 2)) })()`
-    const MAIN_SRC = '(() => { const i = document.querySelector("[data-gallery-main]"); return i ? i.getAttribute("src") : null })()'
+    // The authoritative main image during a swap: the entering/current one, never a layer the
+    // directional transition is still sliding out (a plain querySelector can catch mid-flight).
+    const MAIN_SRC = '(() => { const is = [...document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\')]; const cur = is.find(i => !/leave-(from|active|to)/.test(i.className)) || is[is.length - 1]; return cur ? cur.getAttribute(\'src\') : null })()'
+    const LB = '[data-lightbox]'
+    const SAME_SRC = `(() => { const l = document.querySelector('${LB} [data-lightbox-main]'); const m = document.querySelector('[data-gallery-main]'); return !!l && !!m && l.getAttribute('src') === m.getAttribute('src') })()`
     const winJson = () => ev(WINDOW).then(w => JSON.stringify(w))
     const detailUrl = id => new URL('/products/' + id, appUrl).href
     const pathnameIs = id => `location.pathname === '/products/${id}'`
@@ -670,11 +674,14 @@ const run = async () => {
       await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 2`)
       check('arrows never navigate the page', await ev(pathnameIs(G.manyId)))
       // [0..4] window, selection 2 → clicking the adjacent thumb (3) must slide the window to
-      // [1..5], not leave it at [0..4] with a moved highlight.
-      await clickSelector(`${THUMB}[data-index="3"]`, `(${SEL_IDX}) === 3`)
+      // [1..5], not leave it at [0..4] with a moved highlight — and the slide must actually run.
+      const t3 = (await ev(boxesExpr(`${THUMB}[data-index="3"]`)))[0]
+      await clickAt(t3.x, t3.y)
+      const midSlide = await ev('(() => { const s = document.querySelector(\'[data-gallery-strip]\'); return { anims: s ? s.getAnimations().length : 0, tr: s ? getComputedStyle(s).transform : null } })()')
       const fwdSel = await ev(SEL_IDX)
       const fwdWindow = await winJson()
       check('adjacent-thumb selection advances the strip one slot', fwdSel === 3 && fwdWindow === JSON.stringify([1, 2, 3, 4, 5]), { fwdSel, fwdWindow })
+      check('the filmstrip slide actually runs when the window advances', midSlide.anims >= 1 || (!!midSlide.tr && midSlide.tr !== 'none'), { midSlide })
       await sleep(350) // let the one-slot slide settle before measuring centring
       const fwdCentre = await ev(CENTRE)
       check('selected thumb is highlighted and centred', fwdCentre !== null && fwdCentre < 2, { fwdCentre })
@@ -699,14 +706,100 @@ const run = async () => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowRight', key: 'ArrowRight' })
       check('keyboard arrow drives the selection when the gallery is focused', await waitFor(`(${SEL_IDX}) === 1`))
+
+      // ---- arrows that wait for hover, and a swap that travels instead of teleporting ----
+      await ev('(() => { const a = document.activeElement; if (a && a.getAttribute(\'data-product-gallery\') !== null) a.blur(); return true })()')
+      await park()
+      const hoverCapable = await ev('window.matchMedia(\'(hover: hover)\').matches')
+      const arrowOpa = 'Number(getComputedStyle(document.querySelector(\'[data-gallery-next]\')).opacity)'
+      const restOpa = await ev(arrowOpa)
+      if (hoverCapable) check('arrows rest invisible to a hovering pointer', restOpa === 0, { restOpa })
+      else check('arrows stay painted for a non-hovering pointer', restOpa === 1, { restOpa })
+      const zoomBox = (await ev(boxesExpr('[data-gallery-zoom]')))[0]
+      await mouse('mouseMoved', zoomBox.x, zoomBox.y)
+      await sleep(250)
+      check('hovering the photo raises the arrows', (await ev(arrowOpa)) === 1)
+
+      const nextBtn = (await ev(boxesExpr('[data-gallery-next]')))[0]
+      await mouse('mouseMoved', nextBtn.x, nextBtn.y)
+      await sleep(120)
+      await mouse('mousePressed', nextBtn.x, nextBtn.y, 1)
+      await mouse('mouseReleased', nextBtn.x, nextBtn.y)
+      const midSwap = await ev('(() => { const f = document.querySelector(\'[data-gallery-zoom]\'); const is = [...document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\')]; return { layers: is.length, anims: is.reduce((n, i) => n + i.getAnimations().length, 0), travel: is.some(i => getComputedStyle(i).transform !== \'none\'), widths: is.map(i => Math.round(i.getBoundingClientRect().width)), box: Math.round(f.getBoundingClientRect().width) } })()')
+      check('the swap travels: a second layer mid-flight carrying an actual transform', midSwap.layers >= 2 && (midSwap.anims >= 1 || midSwap.travel) && await waitFor(`(${SEL_IDX}) === 2`), { midSwap })
+      // The enlargement-flash regression: the outgoing layer once sized to the padded
+      // frame's padding box (~17% wider than the photo box) and read as a split-second
+      // zoom. Both layers must occupy the identical box mid-swap. Broken fixture images
+      // paint nothing but still lay out, so this is measurable here.
+      check('no swap layer outgrows the photo box mid-flight', midSwap.layers >= 2 && midSwap.widths.every(w => Math.abs(w - midSwap.box) <= 2), { midSwap })
+      // the reported regression: a mouse click leaves focus on the arrow it hit, and that must
+      // NOT pin the arrows lit — only a keyboard focus may. Pointer off the photo ⇒ faded out,
+      // while the arrow stays focused and therefore still tab-operable.
+      await park()
+      if (hoverCapable) {
+        const afterClickAway = await ev('(() => { const b = document.querySelector(\'[data-gallery-next]\'); return { opa: Number(getComputedStyle(b).opacity), focused: document.activeElement === b } })()')
+        check('a clicked arrow fades out when the pointer leaves (mouse focus does not pin it)', afterClickAway.opa === 0 && afterClickAway.focused, { afterClickAway })
+      }
+      await sleep(400)
+      check('the swap settles to a single image layer', (await ev('document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\').length')) === 1)
+
+      // ---- lightbox: no index of its own, it renders the gallery's selection ----
+      await clickAt(zoomBox.x, zoomBox.y)
+      check('clicking the photo opens the lightbox', await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`))
+      check('the lightbox shows the shared selected image', await ev(SAME_SRC))
+      check('focus moved into the lightbox', await ev(`(() => { const d = document.querySelector(${JSON.stringify(LB)}); return !!d && d.contains(document.activeElement) })()`))
+      await clickSelector('[data-lightbox-next]', `(${SEL_IDX}) === 3`)
+      check('lightbox next moves the one shared selection', await waitFor(`(${SEL_IDX}) === 3`) && (await ev(`(document.querySelector('${THUMB}[data-selected]') || {}).getAttribute && document.querySelector('${THUMB}[data-selected]').getAttribute('data-index')`)) === '3')
+      const lbImg = (await ev(boxesExpr(`${LB} [data-lightbox-main]`)))[0]
+      await clickAt(lbImg.x, lbImg.y)
+      await sleep(160)
+      check('clicking the enlarged image keeps the lightbox open', await ev(`!!document.querySelector(${JSON.stringify(LB)})`))
+      await clickAt(12, 12)
+      check('backdrop click closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
+      check('closing hands focus back to the photo', await waitFor('document.activeElement === document.querySelector(\'[data-gallery-zoom]\')', 2500))
+      check('the page scroll lock is released on close', await ev('document.documentElement.style.overflow === \'\''))
+      await clickAt(zoomBox.x, zoomBox.y)
+      await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`)
+      check('reopening starts at the current selection', await ev(SAME_SRC) && (await ev(SEL_IDX)) === 3)
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowRight', key: 'ArrowRight' })
+      check('arrow keys navigate inside the lightbox', await waitFor(`(${SEL_IDX}) === 4`))
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
+      check('Escape closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
+
+      // ---- a burst of clicks must settle on the latest photo, never stack layers ----
+      const beforeBurst = await ev(SEL_IDX)
+      const rb = (await ev(boxesExpr('[data-gallery-next]')))[0]
+      await mouse('mouseMoved', rb.x, rb.y)
+      await sleep(120)
+      for (let i = 0; i < 3; i++) { await mouse('mousePressed', rb.x, rb.y, 1); await mouse('mouseReleased', rb.x, rb.y); await sleep(40) }
+      await sleep(650)
+      const settled = await ev('(() => { const t = document.querySelector(\'[data-gallery-thumb][data-selected]\'); return { sel: t ? +t.getAttribute(\'data-index\') : -1, layers: document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\').length, stuck: document.querySelectorAll(\'.gallery-next-leave-active, .gallery-previous-leave-active, .gallery-next-enter-active, .gallery-previous-enter-active\').length } })()')
+      check('rapid next clicks wrap and settle on the latest photo with no stuck layers', settled.sel === (beforeBurst + 3) % G.manyImages && settled.layers === 1 && settled.stuck === 0, { beforeBurst, settled })
+
+      // ---- reduced motion: the swap is softened, never frozen ----
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+      const beforeReduce = await ev(SEL_IDX)
+      const rbtn = (await ev(boxesExpr('[data-gallery-next]')))[0]
+      await mouse('mouseMoved', rbtn.x, rbtn.y)
+      await sleep(120)
+      await mouse('mousePressed', rbtn.x, rbtn.y, 1)
+      await mouse('mouseReleased', rbtn.x, rbtn.y)
+      const midReduce = await ev('(() => { const is = [...document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\')]; return { layers: is.length, anims: is.reduce((n, i) => n + i.getAnimations().length, 0), travel: is.some(i => getComputedStyle(i).transform !== \'none\') } })()')
+      await sleep(500)
+      check('reduced motion still swaps with a real transition to the next photo', midReduce.layers >= 2 && (midReduce.anims >= 1 || midReduce.travel) && (await waitFor(`(${SEL_IDX}) === ${(beforeReduce + 1) % G.manyImages}`)) && (await ev('document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\').length')) === 1, { beforeReduce, midReduce })
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
     }
 
     await nav(detailUrl(G.twoId))
     await waitFor('!!document.querySelector(\'[data-gallery-strip]\')')
     const twoWindow = await winJson()
     check('two-photo product shows both thumbs unwindowed', twoWindow === JSON.stringify([0, 1]), { twoWindow })
-    await clickSelector(`${THUMB}[data-index="1"]`, `(${SEL_IDX}) === 1`)
-    check('small sets do not slide: the strip stays put on selection', (await ev(SEL_IDX)) === 1 && (await winJson()) === JSON.stringify([0, 1]))
+    const t1box = (await ev(boxesExpr(`${THUMB}[data-index="1"]`)))[0]
+    await clickAt(t1box.x, t1box.y)
+    const twoAnims = await ev('(() => { const s = document.querySelector(\'[data-gallery-strip]\'); return s ? s.getAnimations().length : -1 })()')
+    check('small sets do not slide: the strip stays put on selection', (await waitFor(`(${SEL_IDX}) === 1`)) && (await winJson()) === JSON.stringify([0, 1]) && twoAnims === 0, { twoAnims })
     await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 0`)
     check('two-photo arrows wrap', await waitFor(`(${SEL_IDX}) === 0`))
 
@@ -719,6 +812,18 @@ const run = async () => {
     await waitFor(`document.querySelectorAll('${THUMB}').length === ${G.window}`)
     await sleep(300)
     check('mobile gallery does not overflow horizontally', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+    const mNext = (await ev(boxesExpr('[data-gallery-next]')))[0]
+    await clickAt(mNext.x, mNext.y)
+    check('touch taps reach the gallery arrows without hovering', await waitFor(`(${SEL_IDX}) === 1`))
+    const mZoom = (await ev(boxesExpr('[data-gallery-zoom]')))[0]
+    await clickAt(mZoom.x, mZoom.y)
+    const mOpen = await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`)
+    const mFit = await ev('(() => { const d = document.querySelector(\'[data-lightbox-main]\'); if (!d) return null; const r = d.getBoundingClientRect(); return { fits: r.left >= -1 && r.right <= innerWidth + 1 && r.width >= innerWidth * 0.7, w: Math.round(r.width) } })()')
+    check('lightbox on touch: opens from the photo and fills the viewport without overflow', mOpen && !!mFit && mFit.fits, { mFit })
+    check('no horizontal overflow with the lightbox open @390', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
+    check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
     await metrics(1440, 900, false)
 
     // ---- product-detail header search: one lazy catalog fetch per visit, filtered locally ----
