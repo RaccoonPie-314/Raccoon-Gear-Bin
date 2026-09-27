@@ -50,7 +50,7 @@ Exact numbers worth not breaking are tabulated in ARCHITECTURE.md → *Interacti
 ```bash
 bun install
 bun run build                                                # what CI runs — the only gate
-bun run verify                                               # scripts/verify-ui.mjs — 105 UI checks
+bun run verify                                               # scripts/verify-ui.mjs — 128 UI checks
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only
 ```
 
@@ -58,7 +58,9 @@ bun run verify                                               # scripts/verify-ui
   headless Chrome over CDP, and asserts the tuned interactions (category drag, indicator snap and
   260ms curve, magnification profile, scroll reveal, spotlight morph, the scroll-collapse
   field↔launcher flight in both directions including a mid-flight reversal, the masthead's two
-  levels and emblem height step at five widths, no overflow at five widths) plus the
+  levels and emblem height step at five widths, no overflow at five widths, the detail-page photo
+  carousel — bounded strip window, one-slot advance on adjacent selection, wrapping arrows — and
+  the detail-page header search) plus the
   **entire admin flow** — login, add, image upload, save/update, cancel, delete, the site-info
   editor, logout — against a stubbed Supabase in `scripts/fixtures.json`. No real project is
   contacted and nothing is written. The count above is the full run; `--only=guest` or
@@ -107,3 +109,7 @@ embedded selects collapse to `never`.
 
 Update `ARCHITECTURE.md` in the same change. It is hand-maintained precisely because generated
 docs cannot be trusted to carry intent.
+
+## Localhost use for testing
+
+Prefer the local development server and existing local verification harness for validation. Use Browser Agent against localhost when visual/browser interaction is required. Do not use cloud-hosted application environments for routine UI verification when the local workspace and dev server are available.
