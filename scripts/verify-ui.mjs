@@ -473,6 +473,91 @@ const run = async () => {
     }
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(400)
 
+    // ---- scroll-collapse field↔icon morph (SearchDock) ----
+    // The morph animates the LAUNCHER button's own box (fixed position + width/height), no
+    // separate [data-collapse-morph] layer and no non-uniform scale. Read the one dialog button
+    // that has a box (desktop at ≥1024, mobile below): its inline width/height are live during
+    // the morph, so getBoundingClientRect reports the current pill-vs-circle box — a wide pill
+    // mid-morph, a ~44px circle at rest. That width is the discriminator, and it is the same
+    // element throughout (which is the whole point of the correction).
+    const LAUNCH = '(() => { const el = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }); if (!el) return { present: false }; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return { present: true, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: +cs.opacity, pe: cs.pointerEvents, inlineWidth: el.style.width || \'\', anims: el.getAnimations().filter(a => a.playState === \'running\').length } })()'
+    const NO_PILL_LAYER = '!document.querySelector(\'[data-collapse-morph]\')'
+    const scrollCollapse = '(() => { const a = document.querySelector(\'[data-search-anchor]\'); const top = a.getBoundingClientRect().top + window.scrollY; window.scrollTo({ top: top + a.offsetHeight + 160, behavior: "instant" }); return true })()'
+    const scrollTop = '(() => { window.scrollTo({ top: 0, behavior: "instant" }); return true })()'
+    await ev(scrollTop); await sleep(450)
+    const fieldAtTop = await ev('(() => { const r = document.querySelector(\'[data-search-anchor]\').getBoundingClientRect(); return { x: r.left + r.width / 2, w: r.width } })()')
+
+    // 1 + 3 + 5. collapse starts FROM the launcher, on the field's wide geometry, and no separate layer exists
+    await ev(scrollCollapse); await sleep(45)
+    const early = await ev(LAUNCH)
+    check('desktop collapse morphs the launcher box (wide pill, constant height, live)', early.present && early.anims >= 1 && early.w > 120 && early.h > 40 && early.h < 50 && early.pe === 'none', early)
+    check('collapse first frame inherits the field geometry (launcher is on the field side, wide)', early.present && early.w > 120 && early.x > (fieldAtTop.x - fieldAtTop.w) && NO_PILL_LAYER, { earlyX: early.x, fieldX: fieldAtTop.x })
+    check('no separate [data-collapse-morph] traveling layer exists', await ev(NO_PILL_LAYER))
+
+    // 4. reaches resting icon geometry
+    await sleep(520)
+    const restLaunch = await ev(LAUNCH)
+    check('desktop collapse settles to the launcher\'s resting icon geometry', restLaunch.present && restLaunch.w >= 40 && restLaunch.w <= 50 && restLaunch.anims === 0 && restLaunch.pe === 'auto' && restLaunch.opacity > 0.9, restLaunch)
+
+    // 12. no horizontal overflow while the morph runs
+    await ev(scrollTop); await sleep(450)
+    await ev(scrollCollapse); await sleep(60)
+    check('no horizontal overflow while the field→icon morph runs', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+    await sleep(520)
+
+    // 5 + 6. restore starts from the launcher and EXPANDS toward the field (not a field fade-in)
+    // Sample later than the collapse: a restore begins at the 44px circle, so it needs to run
+    // past the double-rAF commit before it has visibly grown toward the wide field geometry.
+    await ev(scrollTop); await sleep(160)
+    const restoring = await ev(LAUNCH)
+    check('desktop restore expands the launcher toward the field (visible, wide, live)', restoring.present && restoring.anims >= 1 && restoring.w > 120 && restoring.opacity > 0.5, restoring)
+    await sleep(520)
+    const afterRestore = await ev(LAUNCH)
+    check('restore hands off to the real field and leaves no stale transform', afterRestore.present && afterRestore.anims === 0 && afterRestore.opacity < 0.05 && afterRestore.w >= 40 && afterRestore.w <= 50, afterRestore)
+
+    // 7. reversal mid-flight stays continuous (never snaps, never two elements)
+    await ev(scrollTop); await sleep(450)
+    await ev(scrollCollapse); await sleep(70)
+    await ev(scrollTop)
+    await sleep(120)
+    const reversed = await ev(LAUNCH)
+    check('reversal stays continuous: launcher resumes from live geometry, never teleports', reversed.present && reversed.anims >= 1 && reversed.w > 60 && await ev(NO_PILL_LAYER), reversed)
+    await sleep(520)
+    const afterReverse = await ev(LAUNCH)
+    check('reversal settles cleanly with no stale visible morph', afterReverse.anims === 0 && (afterReverse.opacity < 0.05 || (afterReverse.w >= 40 && afterReverse.w <= 50)), afterReverse)
+
+    // 8. exactly one interactive search control at each stage; the morph itself is not clickable
+    await ev(scrollTop); await sleep(450)
+    await ev(scrollCollapse); await sleep(60)
+    const dup = await ev('(() => { const inputs = [...document.querySelectorAll(\'[data-search-anchor] input\')].filter(i => i.getBoundingClientRect().width > 0 && getComputedStyle(i).pointerEvents !== \'none\').length; const pill = !!document.querySelector(\'[data-collapse-morph]\'); const btns = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].filter(b => b.getBoundingClientRect().width > 0 && getComputedStyle(b).pointerEvents === \'auto\').length; return { inputs, pill, btns } })()')
+    check('morph never adds a second interactive search control', dup.inputs === 1 && !dup.pill && dup.btns <= 1, dup)
+
+    // 9. the overlay morph still works after the collapse morph has owned the launcher
+    await sleep(520)
+    const launch2 = await ev(LAUNCH)
+    if (!launch2.present) check('launcher present for the overlay check', false)
+    else {
+      await clickAt(launch2.x, launch2.y)
+      const opened = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
+      const closed = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')')
+      const restClean = await ev(LAUNCH)
+      check('launcher→overlay morph stays intact after a collapse', opened && closed && restClean.anims === 0, { opened, closed })
+    }
+
+    // 10 + 11. desktop stable, mobile restrained: no cross-screen travelling pill
+    await metrics(390, 844, true)
+    await ev(scrollTop); await sleep(500)
+    await ev(scrollCollapse); await sleep(80)
+    const mobileCollapse = await ev(LAUNCH)
+    check('mobile collapse does not expand a travelling pill (stays the icon reveal)', mobileCollapse.present && mobileCollapse.w < 60, mobileCollapse)
+    await ev(scrollTop); await sleep(50)
+    const mobileRestore = await ev(LAUNCH)
+    check('mobile restore stays local (bounded pill, never a full-width flight)', mobileRestore.present && mobileRestore.w < 200, mobileRestore)
+    await metrics(1440, 900, false)
+    await ev(scrollTop); await sleep(450)
+
     for (const [w, h] of [[1440, 900], [1024, 900], [834, 1112], [640, 960], [390, 844]]) {
       await metrics(w, h, w < 500)
       await sleep(600)

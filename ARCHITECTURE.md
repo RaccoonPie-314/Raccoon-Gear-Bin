@@ -194,6 +194,7 @@ and none of them are visible to the compiler or to `build`.
 | Constant | Value | Where |
 |---|---|---|
 | Spotlight open / close morph | 420ms / 380ms, `cubic-bezier(0.33, 1, 0.68, 1)` | `SearchDock.vue` |
+| Scroll-collapse field↔icon morph | 280ms, same ease; edge-triggered; the **launcher button itself** is the FLIP element (per-axis scale + radius pre-compensation + inverse-scaled child icon), never a separate traveling layer; desktop morphs the launcher between the field's last-visible rect and its circular rest, mobile keeps a bounded local expand | `SearchDock.vue` |
 | Backdrop in / out, content in / out / delay | 260/200ms, 220/140ms/150ms | `SearchDock.vue` |
 | Search-field collapse hysteresis | gone at `0`, back at `24` | `SearchDock.vue` |
 | Dock reveal threshold / direction delta | `60` / `6` | `useScrollReveal.ts` (one copy), `SearchDock.vue` (still its own) |
@@ -301,9 +302,14 @@ surface should match the logo.
 
 ## Cross-component contracts to preserve
 
-- `[data-search-anchor]` — `SearchDock` measures this element to decide when to collapse.
-  It is a string contract with no type checking: rename or move the element in the same
-  commit as the change, never across two.
+- `[data-search-anchor]` — `SearchDock` measures this element to decide when to collapse, and
+  (since the scroll-collapse morph) to read the field's last-visible rect as the morph's target
+  geometry. SearchDock owns **both** morphs and each uses one real element: the overlay morph
+  animates the spotlight panel, the scroll morph animates the **launcher button itself** — during
+  a collapse the launcher is placed on the field's rect and FLIPs to its circular rest (its child
+  icon counter-scaled to stay a circle). The real `<input>` never moves, fades, or duplicates, and
+  no separate traveling morph element exists. It is a string contract with no type checking:
+  rename or move the element in the same commit as the change, never across two.
 - `SearchDock`'s desktop launcher is absolutely positioned against the `<aside>`; it only
   centres correctly because that element is `relative`.
 - `CategoryMobile` teleports itself to `body`, so DOM order ≠ visual order.

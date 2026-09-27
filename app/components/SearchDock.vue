@@ -14,6 +14,12 @@ const DOCK_DIRECTION_DELTA = 6
 
 const OPEN_MORPH_MS = 420
 const CLOSE_MORPH_MS = 380
+// The scroll-collapse morph is shorter than the overlay morphs: it sits under the user's
+// flick, so anything longer starts to feel like the page is lagging behind the scroll.
+const COLLAPSE_MORPH_MS = 280
+// Mobile restore keeps the same state machine but gates the travel to a local contraction;
+// a cross-screen flight from the bottom dock would read as an object, not as the field.
+const MOBILE_COLLAPSE_TRAVEL = 120
 // Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
 // Ease-out-cubic spreads the same motion across the whole duration.
 const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
@@ -28,6 +34,18 @@ const SCROLL_KEYS = new Set([' ', 'PageUp', 'PageDown', 'Home', 'End', 'ArrowUp'
 
 const isCollapsed = ref(false)
 const isDockVisible = ref(true)
+
+// Scroll-collapse morph state. The morph drives the LAUNCHER button itself, by animating its
+// box geometry (position / size), never a separate traveling element. Geometry (not a
+// non-uniform transform scale) is what keeps the pill a pill and the child icon a true circle at
+// every frame — a scaled circle is an ellipse mid-flight. It stays separate from the overlay's
+// `morphing` token: two different interactions (scroll vs click) never arbitrate over one machine.
+const collapseMorph = ref<'toIcon' | 'toField' | null>(null)
+// Which launcher the running morph owns. Set imperatively (client-side) so the style
+// computeds never call matchMedia during SSR render.
+const collapseTarget = ref<'desktop' | 'mobile' | ''>('')
+const lRect = ref<CollapseRect | null>(null)
+const lTransition = ref('none')
 
 const overlayMounted = ref(false)
 const overlayActive = ref(false)
@@ -59,6 +77,8 @@ const panelStartTransform = ref('none')
 const flyerStartTransform = ref('none')
 const flyerColor = ref('')
 
+type CollapseRect = { left: number, top: number, width: number, height: number }
+
 let searchFieldEl: HTMLElement | null = null
 let launcherGlyphColor = ''
 let panelGlyphColor = ''
@@ -67,27 +87,70 @@ let restingRadius = ''
 let originClickEvent: Event | null = null
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
+let collapseTimer: ReturnType<typeof setTimeout> | null = null
+let collapseFrame = 0
+let collapseRestoreFrame = 0
 let settleOn: 'open' | 'close' | null = null
 let restoreFrame = 0
+let wasCollapsed = false
+let lastVisibleFieldRect: CollapseRect | null = null
+let collapseToRect: CollapseRect | null = null
 let scrollTicking = false
 let lastScrollY = 0
 let scrollLocked = false
 let lockedScrollY = 0
 
-const desktopLauncherStyle = computed(() => ({
-  opacity: isCollapsed.value && !launcherTaken.value ? 1 : 0,
-  transform: isCollapsed.value && !launcherTaken.value ? 'scale(1)' : 'scale(0.92)',
-  transition: launcherTaken.value || suppressLauncherMotion.value ? 'none' : LAUNCHER_MOTION,
-  pointerEvents: isCollapsed.value && !launcherTaken.value ? 'auto' : 'none'
-}))
+// While a collapse morph is running it owns the launcher's box (fixed position + animated size),
+// so the travelling representation IS the launcher — no separate element, and `rounded-full`
+// keeps a true pill→circle with an undistorted child icon every frame. Both branches keep the
+// same key set so the `:style` binding stays a single CSSProperties shape.
+const morphLauncherStyle = {
+  position: 'fixed' as const,
+  margin: '0',
+  transform: 'none',
+  opacity: 1,
+  zIndex: 50,
+  pointerEvents: 'none' as const,
+  willChange: 'left, top, width, height'
+}
+
+const desktopLauncherStyle = computed(() => {
+  if (collapseMorph.value && collapseTarget.value === 'desktop' && lRect.value) {
+    return {
+      ...morphLauncherStyle,
+      left: `${lRect.value.left}px`,
+      top: `${lRect.value.top}px`,
+      width: `${lRect.value.width}px`,
+      height: `${lRect.value.height}px`,
+      transition: lTransition.value
+    }
+  }
+  const visible = isCollapsed.value && !launcherTaken.value
+  return {
+    opacity: visible ? 1 : 0,
+    transform: visible ? 'scale(1)' : 'scale(0.92)',
+    transition: launcherTaken.value || suppressLauncherMotion.value ? 'none' : LAUNCHER_MOTION,
+    pointerEvents: visible ? 'auto' as const : 'none' as const
+  }
+})
 
 const mobileLauncherStyle = computed(() => {
+  if (collapseMorph.value && collapseTarget.value === 'mobile' && lRect.value) {
+    return {
+      ...morphLauncherStyle,
+      left: `${lRect.value.left}px`,
+      top: `${lRect.value.top}px`,
+      width: `${lRect.value.width}px`,
+      height: `${lRect.value.height}px`,
+      transition: lTransition.value
+    }
+  }
   const visible = isCollapsed.value && isDockVisible.value && !launcherTaken.value
   return {
     opacity: visible ? 1 : 0,
     transform: visible ? 'translateY(0px) scale(1)' : 'translateY(18px) scale(0.92)',
     transition: launcherTaken.value || suppressLauncherMotion.value ? 'none' : LAUNCHER_MOTION,
-    pointerEvents: visible ? 'auto' : 'none'
+    pointerEvents: visible ? 'auto' as const : 'none' as const
   }
 })
 
@@ -106,12 +169,26 @@ const fieldIsOffScreen = () => {
   return field.getBoundingClientRect().bottom <= limit
 }
 
+const readRect = (el: HTMLElement): CollapseRect => {
+  const r = el.getBoundingClientRect()
+  return { left: r.left, top: r.top, width: r.width, height: r.height }
+}
+
 const handleScroll = () => {
   if (scrollTicking) return
   scrollTicking = true
   requestAnimationFrame(() => {
     const currentY = readScrollY()
-    isCollapsed.value = fieldIsOffScreen()
+    const field = searchField()
+    // Remember the last geometry the user actually saw: the collapse morph starts the launcher
+    // from it, so frame 0 continues the field instead of introducing a new element. A rect taken
+    // with the field clipped under the top edge would start the morph off-screen.
+    if (field) {
+      const rect = readRect(field)
+      if (rect.width && rect.top >= 0 && rect.top < window.innerHeight) lastVisibleFieldRect = rect
+    }
+    const collapsed = fieldIsOffScreen()
+    isCollapsed.value = collapsed
 
     if (currentY < DOCK_REVEAL_AT) {
       isDockVisible.value = true
@@ -120,10 +197,146 @@ const handleScroll = () => {
       if (delta > DOCK_DIRECTION_DELTA) isDockVisible.value = false
       else if (delta < -DOCK_DIRECTION_DELTA) isDockVisible.value = true
     }
+    // lastScrollY only advances when no edge fired: a jump that crossed the whole hysteresis
+    // band in one frame still has its previous position available for the reversal case.
+    if (collapsed === wasCollapsed) lastScrollY = Math.max(0, currentY)
 
-    lastScrollY = Math.max(0, currentY)
+    // The morph is edge-triggered — never per frame. A reversal (down-then-up inside the
+    // hysteresis band) is just another edge: startCollapseMorph retargets from the launcher's
+    // live geometry instead of restarting, so it keeps its current position mid-flight.
+    if (collapsed !== wasCollapsed) {
+      startCollapseMorph(collapsed ? 'toIcon' : 'toField')
+      wasCollapsed = collapsed
+    }
     scrollTicking = false
   })
+}
+
+// ---------------------------------------------------------------- scroll-collapse morph
+// Same orchestration as the overlay morph — resting rect, target rect, double-rAF commit,
+// settle token with a watchdog — but it animates the launcher button's own BOX (fixed position
+// + width/height) instead of a non-uniform transform scale. `rounded-full` then renders a true
+// pill→circle at every frame and the centred child icon never distorts. The field can't travel
+// (it is bound to the scroll), so a collapse places the launcher on the field's last-visible
+// rect and morphs it to its circular rest; restore is the same path reversed. No flyer, no pill.
+
+// The launcher's layout rect (viewport coords): neutralise the motion transform first so the
+// resting spot is measured, not the scaled-down hidden one.
+const collapseRestRect = (): CollapseRect | null => {
+  const el = activeLauncherEl()
+  if (!el) return null
+  const previousTransform = el.style.transform
+  const previousTransition = el.style.transition
+  el.style.transition = 'none'
+  el.style.transform = 'none'
+  const rect = readRect(el)
+  el.style.transform = previousTransform
+  el.style.transition = previousTransition
+  return rect.width ? rect : null
+}
+
+// The launcher's current box mid-flight (getBoundingClientRect already reflects the animated
+// left/top/width/height), so a reversal resumes from exactly where it is instead of teleporting.
+const currentLauncherRect = (base: CollapseRect): CollapseRect => {
+  const rect = activeLauncherEl()?.getBoundingClientRect()
+  if (!rect || !rect.width) return { ...base }
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+}
+
+const startCollapseMorph = (direction: 'toIcon' | 'toField') => {
+  if (collapseMorph.value === direction) return
+  const desktop = window.matchMedia(DESKTOP_QUERY).matches
+  // Mobile collapses keep the existing launcher reveal as the primary behaviour; the mobile
+  // restore runs the same machine with its travel gated to a local contraction.
+  if (direction === 'toIcon' && !desktop) return
+  const field = searchField()
+  if (!field) { finishCollapseMorph(); return }
+
+  const base = collapseRestRect()
+  if (!base) { finishCollapseMorph(); return }
+
+  const fieldGeom = direction === 'toIcon'
+    ? (lastVisibleFieldRect ?? readRect(field))
+    : readRect(field)
+  const targetRect = desktop ? fieldGeom : collapseMobileTarget(fieldGeom, base)
+
+  // A fresh collapse runs field → rest; a fresh restore runs rest → field. A reversal (an edge
+  // while one is already running) resumes from the launcher's live box and re-aims.
+  const retarget = collapseMorph.value !== null
+  const fromRect = retarget ? currentLauncherRect(base) : (direction === 'toIcon' ? targetRect : base)
+  const toRect = direction === 'toIcon' ? base : targetRect
+
+  collapseTimerClear()
+  if (collapseFrame) { cancelAnimationFrame(collapseFrame); collapseFrame = 0 }
+
+  collapseTarget.value = desktop ? 'desktop' : 'mobile'
+  lTransition.value = 'none'
+  lRect.value = fromRect
+  collapseMorph.value = direction
+  collapseToRect = toRect
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (collapseMorph.value !== direction) return
+    lTransition.value = `left ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, top ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, width ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, height ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}`
+    lRect.value = collapseToRect
+    collapseTimer = setTimeout(onCollapseSettled, COLLAPSE_MORPH_MS + 120)
+  }))
+}
+
+// Mobile geometry stays local and subtle: the restore expands the launcher only to a short
+// pill (a couple of icon widths, never the full field width) and shifts its centre a bounded
+// distance toward the field. The "same control" read survives without a cross-screen flight.
+const collapseMobileTarget = (field: CollapseRect, base: CollapseRect): CollapseRect => {
+  const width = Math.min(field.width, base.width * 2.4)
+  const cx = base.left + base.width / 2
+  const cy = base.top + base.height / 2
+  const dx = (field.left + field.width / 2) - cx
+  const dy = (field.top + field.height / 2) - cy
+  const distance = Math.hypot(dx, dy)
+  const k = distance > MOBILE_COLLAPSE_TRAVEL ? MOBILE_COLLAPSE_TRAVEL / distance : 1
+  return { left: cx + dx * k - width / 2, top: cy + dy * k - base.height / 2, width, height: base.height }
+}
+
+// Whichever collapse morph armed the watchdog gets to settle; an interrupted one never reports
+// in — same arbitration as the overlay's `settleOn` token.
+const onCollapseSettled = (event?: TransitionEvent) => {
+  if (event) {
+    if (!collapseMorph.value) return
+    if (event.target !== activeLauncherEl()) return
+    if (!['left', 'top', 'width', 'height'].includes(event.propertyName)) return
+    if (lTransition.value === 'none') return
+  }
+  if (!collapseMorph.value) return
+  finishCollapseMorph()
+}
+
+// Release the launcher: drop the fixed morph box and let the normal rules drive it. Releasing is
+// seamless for a collapse (its endpoint was already the resting rect); for a restore the launcher
+// hands off to the real field, so it drops without replaying its own fade.
+const finishCollapseMorph = () => {
+  collapseTimerClear()
+  if (collapseFrame) { cancelAnimationFrame(collapseFrame); collapseFrame = 0 }
+  collapseMorph.value = null
+  collapseTarget.value = ''
+  lTransition.value = 'none'
+  lRect.value = null
+  collapseToRect = null
+  suppressLauncherMotion.value = true
+  collapseRestoreFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
+    suppressLauncherMotion.value = false
+    collapseRestoreFrame = 0
+  }))
+}
+
+// Hard stop used when the overlay, a resize, or an unmount takes over: release the launcher and
+// let the normal (non-morph) visibility rules drive it rather than animate to stale geometry.
+const cancelCollapseMorph = () => {
+  if (!collapseMorph.value) return
+  finishCollapseMorph()
+}
+
+const collapseTimerClear = () => {
+  if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null }
 }
 
 const activeLauncherEl = () => {
@@ -292,6 +505,11 @@ const openOverlay = async (event: MouseEvent) => {
 
   originClickEvent = event
   overlayMounted.value = true
+  // The overlay morph owns the launcher's slot from here on; a pill still in flight would
+  // capture from (and cover) geometry the panel is about to take over. Cancelled after
+  // `overlayMounted` so the launcher hands over to the overlay (transition: none) instead of
+  // reappearing with its fade curve mid-morph.
+  cancelCollapseMorph()
   overlayActive.value = false
   overlayClosing.value = false
   morphing.value = true
@@ -420,6 +638,10 @@ const closeOverlay = async () => {
 }
 
 const handleResize = () => {
+  // Crossing the desktop/mobile boundary invalidates both endpoints of a running collapse
+  // morph (different launcher, different gating) — drop it and let the normal fade rules
+  // take over rather than animate to stale geometry.
+  cancelCollapseMorph()
   if (!overlayMounted.value) return
   const launcherEl = activeLauncherEl()
   if (!launcherEl || !launcherEl.getBoundingClientRect().width) return
@@ -428,6 +650,7 @@ const handleResize = () => {
 
 onMounted(() => {
   lastScrollY = readScrollY()
+  wasCollapsed = fieldIsOffScreen()
   handleScroll()
   window.addEventListener('scroll', handleScroll, { passive: true })
   window.addEventListener('resize', handleResize)
@@ -441,6 +664,9 @@ onUnmounted(() => {
   if (openTimer) clearTimeout(openTimer)
   if (closeTimer) clearTimeout(closeTimer)
   if (restoreFrame) cancelAnimationFrame(restoreFrame)
+  collapseTimerClear()
+  if (collapseFrame) cancelAnimationFrame(collapseFrame)
+  if (collapseRestoreFrame) cancelAnimationFrame(collapseRestoreFrame)
   unlockScroll()
 })
 </script>
@@ -457,6 +683,7 @@ onUnmounted(() => {
       :aria-expanded="overlayMounted"
       aria-haspopup="dialog"
       @click="openOverlay"
+      @transitionend="onCollapseSettled"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -486,6 +713,7 @@ onUnmounted(() => {
       :aria-expanded="overlayMounted"
       aria-haspopup="dialog"
       @click="openOverlay"
+      @transitionend="onCollapseSettled"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
