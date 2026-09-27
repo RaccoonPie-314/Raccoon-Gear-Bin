@@ -473,31 +473,36 @@ const run = async () => {
     }
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(400)
 
-    // ---- scroll-collapse field↔icon morph (SearchDock) ----
-    // The morph animates the LAUNCHER button's own box (fixed position + width/height), no
-    // separate [data-collapse-morph] layer and no non-uniform scale. Read the one dialog button
-    // that has a box (desktop at ≥1024, mobile below): its inline width/height are live during
-    // the morph, so getBoundingClientRect reports the current pill-vs-circle box — a wide pill
-    // mid-morph, a ~44px circle at rest. That width is the discriminator, and it is the same
-    // element throughout (which is the whole point of the correction).
-    const LAUNCH = '(() => { const el = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }); if (!el) return { present: false }; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return { present: true, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: +cs.opacity, pe: cs.pointerEvents, inlineWidth: el.style.width || \'\', anims: el.getAnimations().filter(a => a.playState === \'running\').length } })()'
+    // ---- scroll-collapse field<->icon morph (SearchDock) ----
+    // Both directions are a one-shot FLIP of the real LAUNCHER button between the field's top rect
+    // and its sidebar slot (no separate [data-collapse-morph] layer). LAUNCH reads the dialog
+    // button's live box + running animations. On the collapse it flies down to the sidebar; on the
+    // restore it flies back up into the field slot while the real field is hidden, then expands.
+    const LAUNCH = '(() => { const el = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }); if (!el) return { present: false }; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return { present: true, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: +cs.opacity, pe: cs.pointerEvents, pos: cs.position, transform: el.style.transform || \'\', anims: el.getAnimations().filter(a => a.playState === \'running\').length } })()'
     const NO_PILL_LAYER = '!document.querySelector(\'[data-collapse-morph]\')'
     const scrollCollapse = '(() => { const a = document.querySelector(\'[data-search-anchor]\'); const top = a.getBoundingClientRect().top + window.scrollY; window.scrollTo({ top: top + a.offsetHeight + 160, behavior: "instant" }); return true })()'
     const scrollTop = '(() => { window.scrollTo({ top: 0, behavior: "instant" }); return true })()'
     await ev(scrollTop); await sleep(450)
     const fieldAtTop = await ev('(() => { const r = document.querySelector(\'[data-search-anchor]\').getBoundingClientRect(); return { x: r.left + r.width / 2, w: r.width } })()')
 
-    // 1 + 3 + 5. collapse starts FROM the launcher, on the field's wide geometry, and no separate layer exists
-    await ev(scrollCollapse); await sleep(45)
-    const early = await ev(LAUNCH)
-    check('desktop collapse morphs the launcher box (wide pill, constant height, live)', early.present && early.anims >= 1 && early.w > 120 && early.h > 40 && early.h < 50 && early.pe === 'none', early)
-    check('collapse first frame inherits the field geometry (launcher is on the field side, wide)', early.present && early.w > 120 && early.x > (fieldAtTop.x - fieldAtTop.w) && NO_PILL_LAYER, { earlyX: early.x, fieldX: fieldAtTop.x })
+    // The field's width is a function of scroll (in place). FIELD reads the search field's live
+    // width, its distance from the top edge, inline width and overflow.
+    const FIELD = '(() => { const a = document.querySelector(\'[data-search-anchor]\'); if (!a) return { present: false }; const r = a.getBoundingClientRect(); const cs = getComputedStyle(a); return { present: true, w: Math.round(r.width), top: Math.round(r.top), inlineWidth: a.style.width || \'\', overflow: cs.overflow, visibility: cs.visibility } })()'
+    // Hold the field's top at a chosen viewport offset so it rests mid-scrub, fully on screen.
+    const holdTop = px => '(() => { const a = document.querySelector(\'[data-search-anchor]\'); const docTop = a.getBoundingClientRect().top + window.scrollY; window.scrollTo({ top: Math.max(0, docTop - ' + px + '), behavior: "instant" }); return true })()'
+    await ev(scrollTop); await sleep(450)
+    const fieldTop = (await ev(FIELD)).w
+    const atTop = await ev(FIELD)
+    check('at the top the field is full width with no inline override', atTop.present && atTop.w >= fieldTop - 4 && atTop.inlineWidth === '' && atTop.overflow !== 'hidden', atTop)
+    // The field morphs its OWN width in place as it approaches the top edge; the flying box only
+    // carries the icon↔circle travel. So held mid-band, the field width is genuinely in-between.
+    await ev(holdTop(90)); await sleep(55)
+    const mid = await ev(FIELD)
+    check('scroll-linked: held mid-band the field width is in-between and still in place', mid.present && mid.w > 60 && mid.w < fieldTop - 20 && Math.abs(mid.top - 90) < 45, mid)
+    await ev(scrollCollapse); await sleep(320)
+    const collapsed = await ev(FIELD)
+    check('scrolled past, the field pins to the icon footprint (clipped)', collapsed.present && collapsed.w < 70 && collapsed.overflow === 'hidden', collapsed)
     check('no separate [data-collapse-morph] traveling layer exists', await ev(NO_PILL_LAYER))
-
-    // 4. reaches resting icon geometry
-    await sleep(520)
-    const restLaunch = await ev(LAUNCH)
-    check('desktop collapse settles to the launcher\'s resting icon geometry', restLaunch.present && restLaunch.w >= 40 && restLaunch.w <= 50 && restLaunch.anims === 0 && restLaunch.pe === 'auto' && restLaunch.opacity > 0.9, restLaunch)
 
     // 12. no horizontal overflow while the morph runs
     await ev(scrollTop); await sleep(450)
@@ -505,32 +510,73 @@ const run = async () => {
     check('no horizontal overflow while the field→icon morph runs', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
     await sleep(520)
 
-    // 5 + 6. restore starts from the launcher and EXPANDS toward the field (not a field fade-in)
-    // Sample later than the collapse: a restore begins at the 44px circle, so it needs to run
-    // past the double-rAF commit before it has visibly grown toward the wide field geometry.
-    await ev(scrollTop); await sleep(160)
-    const restoring = await ev(LAUNCH)
-    check('desktop restore expands the launcher toward the field (visible, wide, live)', restoring.present && restoring.anims >= 1 && restoring.w > 120 && restoring.opacity > 0.5, restoring)
-    await sleep(520)
-    const afterRestore = await ev(LAUNCH)
-    check('restore hands off to the real field and leaves no stale transform', afterRestore.present && afterRestore.anims === 0 && afterRestore.opacity < 0.05 && afterRestore.w >= 40 && afterRestore.w <= 50, afterRestore)
+    // Reverse flight: scroll-up flies the launcher back to the field slot while the real field is
+    // hidden (so the two never show as a duplicate bar), then the field expands to full width.
+    await ev(scrollTop); await sleep(140)
+    const upMid = await ev(LAUNCH)
+    const upField = await ev(FIELD)
+    check('scroll-up flies the launcher back up (fixed drift-free box, not yet clickable)', upMid.present && upMid.pos === 'fixed' && upMid.pe === 'none' && upMid.opacity > 0.9 && !(upMid.x < 80 && upMid.y < 80), upMid)
+    check('the real field is hidden while the icon flies back up (no duplicate bar)', upField.present && upField.visibility === 'hidden', upField)
+    // Poll across the whole flight + hand-off: the top field must NEVER be visible while the sidebar
+    // icon is still painted on screen (the "appears before it arrives / two icons" regression). It
+    // may only appear once the flying launcher has already been released (opacity ~0).
+    const BOTH = '(() => { const a = document.querySelector(\'[data-search-anchor]\'); const fv = a ? getComputedStyle(a).visibility : \'none\'; const el = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }); const op = el ? +getComputedStyle(el).opacity : 0; return { fv, op } })()'
+    let bothSeen = null
+    for (let i = 0; i < 14 && !bothSeen; i++) {
+      const s = await ev(BOTH)
+      if (s.fv === 'visible' && s.op > 0.5) bothSeen = s
+      await sleep(70)
+    }
+    check('the top field never appears while the sidebar icon is still visible (one at a time)', bothSeen === null, bothSeen)
+    const restored = await ev(FIELD)
+    check('returning to the top expands the field to full width, visible and unclipped', restored.present && restored.visibility === 'visible' && restored.w >= fieldTop - 4 && restored.inlineWidth === '' && restored.overflow !== 'hidden', restored)
 
-    // 7. reversal mid-flight stays continuous (never snaps, never two elements)
-    await ev(scrollTop); await sleep(450)
+    // Interruption (the reported "interrupt the fly-up by scrolling down quickly" bug): collapse and
+    // let it settle, start the fly-up, then reverse mid-flight. The launcher must keep flying from
+    // where it is (a continuous fixed box — never teleporting back to the sidebar), the field stays
+    // hidden, and it settles cleanly as the collapsed circle. Then return home for the next check.
+    await ev(scrollCollapse); await sleep(700)
+    await ev(scrollTop); await sleep(150)
+    const intMid = await ev(LAUNCH)
     await ev(scrollCollapse); await sleep(70)
-    await ev(scrollTop)
-    await sleep(120)
-    const reversed = await ev(LAUNCH)
-    check('reversal stays continuous: launcher resumes from live geometry, never teleports', reversed.present && reversed.anims >= 1 && reversed.w > 60 && await ev(NO_PILL_LAYER), reversed)
-    await sleep(520)
-    const afterReverse = await ev(LAUNCH)
-    check('reversal settles cleanly with no stale visible morph', afterReverse.anims === 0 && (afterReverse.opacity < 0.05 || (afterReverse.w >= 40 && afterReverse.w <= 50)), afterReverse)
+    const intRev = await ev(LAUNCH)
+    const intField = await ev(FIELD)
+    check('interrupting the fly-up re-aims from the live box (continuous fixed, field hidden)', intMid.pos === 'fixed' && intRev.present && intRev.pos === 'fixed' && intRev.pe === 'none' && intField.visibility === 'hidden', { intMid, intRev, intVis: intField.visibility })
+    await sleep(700)
+    const intSettle = await ev(LAUNCH)
+    check('an interrupted fly-up settles cleanly to the collapsed sidebar circle', intSettle.present && intSettle.pe === 'auto' && intSettle.w >= 40 && intSettle.w <= 50, intSettle)
+    await ev(scrollTop); await sleep(900)
 
-    // 8. exactly one interactive search control at each stage; the morph itself is not clickable
+    // Scroll-idle settle: stop mid-band and the field width glides to the nearer endpoint rather
+    // than resting half-open.
+    await ev(holdTop(150)); await sleep(60)
+    const preSettle = await ev(FIELD)
+    await sleep(460)
+    const settled = await ev(FIELD)
+    check('stopping mid-scrub settles to an endpoint (not left half-open)', settled.present && settled.w >= fieldTop - 4 && Math.abs(settled.w - preSettle.w) >= 4, { preSettle, settled })
+    await ev(scrollTop); await sleep(200)
+
+    // Rapid reversals leave no stuck width, clip, or hidden field.
+    await ev(scrollCollapse); await sleep(40)
+    await ev(holdTop(90)); await sleep(40)
+    await ev(scrollCollapse); await sleep(40)
+    await ev(scrollTop); await sleep(1050)
+    const rev = await ev(FIELD)
+    check('rapid reversals resolve cleanly (full width, visible, no leftover clip)', rev.present && rev.visibility === 'visible' && rev.w >= fieldTop - 4 && rev.overflow !== 'hidden', rev)
+
+    // 8. The desktop sidebar icon plays a pill→circle ARRIVAL cue when the field collapses (the
+    // visual link that "the search became this icon"), then rests as the interactive circle. The
+    // whole time, no more than one interactive search control exists and no pill layer appears.
     await ev(scrollTop); await sleep(450)
+    const restPos = await ev(LAUNCH)
     await ev(scrollCollapse); await sleep(60)
-    const dup = await ev('(() => { const inputs = [...document.querySelectorAll(\'[data-search-anchor] input\')].filter(i => i.getBoundingClientRect().width > 0 && getComputedStyle(i).pointerEvents !== \'none\').length; const pill = !!document.querySelector(\'[data-collapse-morph]\'); const btns = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].filter(b => b.getBoundingClientRect().width > 0 && getComputedStyle(b).pointerEvents === \'auto\').length; return { inputs, pill, btns } })()')
-    check('morph never adds a second interactive search control', dup.inputs === 1 && !dup.pill && dup.btns <= 1, dup)
+    const flyMid = await ev(LAUNCH)
+    const dupMid = await ev('(() => { const inputs = [...document.querySelectorAll(\'[data-search-anchor] input\')].filter(i => i.getBoundingClientRect().width > 0 && getComputedStyle(i).pointerEvents !== \'none\').length; const pill = !!document.querySelector(\'[data-collapse-morph]\'); const btns = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].filter(b => b.getBoundingClientRect().width > 0 && getComputedStyle(b).pointerEvents === \'auto\').length; return { inputs, pill, btns } })()')
+    check('collapse flies the sidebar icon from the field (fixed drift-free box, not a fade)', flyMid.present && flyMid.pos === 'fixed' && flyMid.pe === 'none' && flyMid.opacity > 0.5 && !(flyMid.x < 80 && flyMid.y < 80) && (Math.abs(flyMid.y - restPos.y) > 30 || Math.abs(flyMid.x - restPos.x) > 30), flyMid)
+    check('never more than one interactive search control (input + launcher, no pill layer)', dupMid.pill === false && dupMid.inputs + dupMid.btns <= 1, dupMid)
+    await sleep(650)
+    const flyEnd = await ev(LAUNCH)
+    check('the flight lands as the interactive sidebar circle (pointer-events restored, 44px)', flyEnd.present && flyEnd.pe === 'auto' && flyEnd.w >= 40 && flyEnd.w <= 50, flyEnd)
 
     // 9. the overlay morph still works after the collapse morph has owned the launcher
     await sleep(520)

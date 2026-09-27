@@ -14,12 +14,15 @@ const DOCK_DIRECTION_DELTA = 6
 
 const OPEN_MORPH_MS = 420
 const CLOSE_MORPH_MS = 380
-// The scroll-collapse morph is shorter than the overlay morphs: it sits under the user's
-// flick, so anything longer starts to feel like the page is lagging behind the scroll.
-const COLLAPSE_MORPH_MS = 280
-// Mobile restore keeps the same state machine but gates the travel to a local contraction;
-// a cross-screen flight from the bottom dock would read as an object, not as the field.
-const MOBILE_COLLAPSE_TRAVEL = 120
+// The top field morphs IN PLACE: its width is a function of scroll over the last FIELD_SCRUB_W px
+// before it reaches the top edge (full ↔ FIELD_ICON_MIN), with a short settle when the scroll stops
+// mid-way. This gives the genuine expanding animation (and the real field's own leading glyph, so
+// no mis-centred icon). The launcher then only carries the icon↔circle TRAVEL (narrow, anchored to
+// the field), not the width. FIELD_FLY_MS governs that travel. Desktop only.
+const FIELD_SCRUB_W = 180
+const FIELD_MORPH_MS = 260
+const FIELD_ICON_MIN = 52
+const FIELD_FLY_MS = 500
 // Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
 // Ease-out-cubic spreads the same motion across the whole duration.
 const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
@@ -35,17 +38,17 @@ const SCROLL_KEYS = new Set([' ', 'PageUp', 'PageDown', 'Home', 'End', 'ArrowUp'
 const isCollapsed = ref(false)
 const isDockVisible = ref(true)
 
-// Scroll-collapse morph state. The morph drives the LAUNCHER button itself, by animating its
-// box geometry (position / size), never a separate traveling element. Geometry (not a
-// non-uniform transform scale) is what keeps the pill a pill and the child icon a true circle at
-// every frame — a scaled circle is an ellipse mid-flight. It stays separate from the overlay's
-// `morphing` token: two different interactions (scroll vs click) never arbitrate over one machine.
-const collapseMorph = ref<'toIcon' | 'toField' | null>(null)
-// Which launcher the running morph owns. Set imperatively (client-side) so the style
-// computeds never call matchMedia during SSR render.
-const collapseTarget = ref<'desktop' | 'mobile' | ''>('')
-const lRect = ref<CollapseRect | null>(null)
-const lTransition = ref('none')
+// Sidebar-icon flight refs (see FIELD_FLY_MS). Both directions animate the real launcher as a
+// `position: fixed` box at flyLeft/Top/W/H — an absolute viewport position, so the sticky sidebar's
+// layout drift (which a transform inherits) can never misplace it, and the flex-centred glyph needs
+// no transform so it never distorts. Only ever live on the desktop launcher while `flying`.
+const flying = ref(false)
+const flyTransition = ref('none')
+const flyRadius = ref('')
+const flyLeft = ref(0)
+const flyTop = ref(0)
+const flyW = ref(44)
+const flyH = ref(44)
 
 const overlayMounted = ref(false)
 const overlayActive = ref(false)
@@ -77,8 +80,6 @@ const panelStartTransform = ref('none')
 const flyerStartTransform = ref('none')
 const flyerColor = ref('')
 
-type CollapseRect = { left: number, top: number, width: number, height: number }
-
 let searchFieldEl: HTMLElement | null = null
 let launcherGlyphColor = ''
 let panelGlyphColor = ''
@@ -87,42 +88,58 @@ let restingRadius = ''
 let originClickEvent: Event | null = null
 let openTimer: ReturnType<typeof setTimeout> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
-let collapseTimer: ReturnType<typeof setTimeout> | null = null
-let collapseFrame = 0
-let collapseRestoreFrame = 0
 let settleOn: 'open' | 'close' | null = null
 let restoreFrame = 0
-let wasCollapsed = false
-let lastVisibleFieldRect: CollapseRect | null = null
-let collapseToRect: CollapseRect | null = null
+// Unified launcher flight (BOTH directions): one drift-free `position:fixed` rAF engine lerping the
+// real launcher between the field's live rect and the sidebar slot. `flyTarget` is where it is
+// heading; `flyFrom` is its box at (re)start; `flySidebar` is the launcher's static slot, refreshed
+// while idle. Because a reversal re-aims from the CURRENT visual box (`flyFrom` when already flying)
+// instead of restarting from an endpoint, interrupting a fly-up by scrolling down no longer teleports
+// or displaces it — the root of the last two bug reports.
+type FlyRect = { left: number, top: number, width: number, height: number }
+let flyFrame = 0
+let flyT0 = 0
+let flyTarget: 'field' | 'sidebar' = 'sidebar'
+let flyFrom: FlyRect | null = null
+let flySidebar: FlyRect | null = null
+// The field's last on-screen rect — a fresh collapse flight's origin.
+let lastVisibleFieldRect: FlyRect | null = null
+// Restore-specific: whether the launcher is mid up-flight, the real field hidden while it flies in,
+// and whether the post-landing in-place expand still owns the width.
+let upFlying = false
+let returnTimer: ReturnType<typeof setTimeout> | null = null
+let returnActive = false
+let collapseFieldEl: HTMLElement | null = null
+let collapseFieldWasFocused = false
+// Scroll-linked field-width scrub state: fieldIdleTimer settles a mid-band width once the scroll
+// stops; fieldNaturalW caches the class-driven full width so the scrub need not measure each frame.
+let fieldIdleTimer: ReturnType<typeof setTimeout> | null = null
+let fieldNaturalW = 0
 let scrollTicking = false
 let lastScrollY = 0
 let scrollLocked = false
 let lockedScrollY = 0
 
-// While a collapse morph is running it owns the launcher's box (fixed position + animated size),
-// so the travelling representation IS the launcher — no separate element, and `rounded-full`
-// keeps a true pill→circle with an undistorted child icon every frame. Both branches keep the
-// same key set so the `:style` binding stays a single CSSProperties shape.
-const morphLauncherStyle = {
-  position: 'fixed' as const,
-  margin: '0',
-  transform: 'none',
-  opacity: 1,
-  zIndex: 50,
-  pointerEvents: 'none' as const,
-  willChange: 'left, top, width, height'
-}
-
+// The launchers fade in/out (isCollapsed). The scroll morph: the top FIELD animates its own width in
+// place (updateFieldMorph), and the desktop launcher flies as a narrow fixed box between the field's
+// icon footprint and the sidebar slot (startFly).
 const desktopLauncherStyle = computed(() => {
-  if (collapseMorph.value && collapseTarget.value === 'desktop' && lRect.value) {
+  if (flying.value) {
+    // A fixed box at an absolute viewport position (drift-free), flex-centred glyph → no transform,
+    // no distortion, and a reversal re-aims from wherever it currently is.
     return {
-      ...morphLauncherStyle,
-      left: `${lRect.value.left}px`,
-      top: `${lRect.value.top}px`,
-      width: `${lRect.value.width}px`,
-      height: `${lRect.value.height}px`,
-      transition: lTransition.value
+      position: 'fixed' as const,
+      margin: '0',
+      left: `${flyLeft.value.toFixed(2)}px`,
+      top: `${flyTop.value.toFixed(2)}px`,
+      width: `${flyW.value.toFixed(2)}px`,
+      height: `${flyH.value.toFixed(2)}px`,
+      borderRadius: flyRadius.value,
+      transform: 'none',
+      opacity: 1,
+      transition: flyTransition.value,
+      pointerEvents: 'none' as const,
+      willChange: 'left, top, width, height'
     }
   }
   const visible = isCollapsed.value && !launcherTaken.value
@@ -130,21 +147,13 @@ const desktopLauncherStyle = computed(() => {
     opacity: visible ? 1 : 0,
     transform: visible ? 'scale(1)' : 'scale(0.92)',
     transition: launcherTaken.value || suppressLauncherMotion.value ? 'none' : LAUNCHER_MOTION,
+    borderRadius: '',
+    transformOrigin: '',
     pointerEvents: visible ? 'auto' as const : 'none' as const
   }
 })
 
 const mobileLauncherStyle = computed(() => {
-  if (collapseMorph.value && collapseTarget.value === 'mobile' && lRect.value) {
-    return {
-      ...morphLauncherStyle,
-      left: `${lRect.value.left}px`,
-      top: `${lRect.value.top}px`,
-      width: `${lRect.value.width}px`,
-      height: `${lRect.value.height}px`,
-      transition: lTransition.value
-    }
-  }
   const visible = isCollapsed.value && isDockVisible.value && !launcherTaken.value
   return {
     opacity: visible ? 1 : 0,
@@ -169,26 +178,22 @@ const fieldIsOffScreen = () => {
   return field.getBoundingClientRect().bottom <= limit
 }
 
-const readRect = (el: HTMLElement): CollapseRect => {
-  const r = el.getBoundingClientRect()
-  return { left: r.left, top: r.top, width: r.width, height: r.height }
-}
-
 const handleScroll = () => {
   if (scrollTicking) return
   scrollTicking = true
   requestAnimationFrame(() => {
     const currentY = readScrollY()
+    const wasCollapsed = isCollapsed.value
+    isCollapsed.value = fieldIsOffScreen()
+
+    // Keep the field's last on-screen rect — the collapse flight's origin (once it has scrolled
+    // past the top its live rect is off-screen, so remember where the user last saw it).
     const field = searchField()
-    // Remember the last geometry the user actually saw: the collapse morph starts the launcher
-    // from it, so frame 0 continues the field instead of introducing a new element. A rect taken
-    // with the field clipped under the top edge would start the morph off-screen.
     if (field) {
-      const rect = readRect(field)
-      if (rect.width && rect.top >= 0 && rect.top < window.innerHeight) lastVisibleFieldRect = rect
+      const r = field.getBoundingClientRect()
+      if (r.width && r.top >= 0 && r.top < window.innerHeight)
+        lastVisibleFieldRect = { left: r.left, top: r.top, width: r.width, height: r.height }
     }
-    const collapsed = fieldIsOffScreen()
-    isCollapsed.value = collapsed
 
     if (currentY < DOCK_REVEAL_AT) {
       isDockVisible.value = true
@@ -197,147 +202,302 @@ const handleScroll = () => {
       if (delta > DOCK_DIRECTION_DELTA) isDockVisible.value = false
       else if (delta < -DOCK_DIRECTION_DELTA) isDockVisible.value = true
     }
-    // lastScrollY only advances when no edge fired: a jump that crossed the whole hysteresis
-    // band in one frame still has its previous position available for the reversal case.
-    if (collapsed === wasCollapsed) lastScrollY = Math.max(0, currentY)
+    lastScrollY = Math.max(0, currentY)
 
-    // The morph is edge-triggered — never per frame. A reversal (down-then-up inside the
-    // hysteresis band) is just another edge: startCollapseMorph retargets from the launcher's
-    // live geometry instead of restarting, so it keeps its current position mid-flight.
-    if (collapsed !== wasCollapsed) {
-      startCollapseMorph(collapsed ? 'toIcon' : 'toField')
-      wasCollapsed = collapsed
+    // Desktop only, one flight engine both ways. A fresh edge flies field↔sidebar; an edge that
+    // lands while a flight is already running (a fast/snappy scroll reversal) re-aims from the
+    // launcher's live box, so it never teleports. `flySidebar` is the settled slot, refreshed while
+    // the launcher is static so a collapse has an accurate destination.
+    if (window.matchMedia(DESKTOP_QUERY).matches) {
+      if (!flying.value) flySidebar = launcherRestRect()
+      if (isCollapsed.value && !wasCollapsed) startFly('sidebar')
+      else if (!isCollapsed.value && wasCollapsed) startFly('field')
     }
+
+    // Recompute the field's in-place width from scroll (the expanding animation), then a short
+    // debounce settles a mid-morph width to the nearer endpoint once the scroll stops.
+    updateFieldMorph()
+    fieldIdleClear()
+    if (window.matchMedia(DESKTOP_QUERY).matches)
+      fieldIdleTimer = setTimeout(settleField, 120)
+
     scrollTicking = false
   })
 }
 
-// ---------------------------------------------------------------- scroll-collapse morph
-// Same orchestration as the overlay morph — resting rect, target rect, double-rAF commit,
-// settle token with a watchdog — but it animates the launcher button's own BOX (fixed position
-// + width/height) instead of a non-uniform transform scale. `rounded-full` then renders a true
-// pill→circle at every frame and the centred child icon never distorts. The field can't travel
-// (it is bound to the scroll), so a collapse places the launcher on the field's last-visible
-// rect and morphs it to its circular rest; restore is the same path reversed. No flyer, no pill.
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
+const smooth = (t: number) => t * t * (3 - 2 * t)
 
-// The launcher's layout rect (viewport coords): neutralise the motion transform first so the
-// resting spot is measured, not the scaled-down hidden one.
-const collapseRestRect = (): CollapseRect | null => {
-  const el = activeLauncherEl()
+// The field's natural (class-driven) width: measured with any inline width temporarily cleared.
+const naturalFieldWidth = () => {
+  const field = searchField()
+  if (!field) return 0
+  const prev = field.style.width
+  field.style.width = ''
+  const w = field.getBoundingClientRect().width
+  field.style.width = prev
+  return w
+}
+
+// 0 when the field's top is a full FIELD_SCRUB_W below the edge (fully a field), 1 at/above the edge
+// (fully the icon). Everything between is measured live off the field's own position.
+const fieldScrubProgress = (top: number) => clamp01((FIELD_SCRUB_W - top) / FIELD_SCRUB_W)
+
+// The field-side endpoint for BOTH flights: a narrow icon footprint (FIELD_ICON_MIN wide) at the
+// field's leading edge, not the full rect — the launcher box centres its glyph, so a WIDE box would
+// mis-place it; the full↔icon morph lives on the real field (whose glyph is genuinely leading).
+const iconFootprint = (rect: FlyRect): FlyRect => ({
+  left: rect.left,
+  top: rect.top,
+  width: Math.min(rect.width, FIELD_ICON_MIN),
+  height: rect.height
+})
+
+// Recompute the field's IN-PLACE width from scroll every frame (the expanding animation), plus hide
+// it whenever the launcher represents it (collapsed, or mid restore-flight). No CSS transition on the
+// width: it is written straight from scroll, so it tracks the wheel and never lags/snaps.
+const updateFieldMorph = () => {
+  const field = searchField()
+  if (!field) return
+  // The restore flight + its in-place expand own the field entirely; scroll must not fight them.
+  if (returnActive || upFlying) return
+  if (!window.matchMedia(DESKTOP_QUERY).matches) { field.style.visibility = ''; revertFieldWidth(); return }
+  field.style.visibility = isCollapsed.value ? 'hidden' : ''
+  const p = fieldScrubProgress(field.getBoundingClientRect().top)
+  if (p <= 0.002) {
+    field.style.transition = 'none'
+    field.style.overflow = ''
+    field.style.width = ''
+    fieldNaturalW = field.getBoundingClientRect().width
+    return
+  }
+  if (!fieldNaturalW) fieldNaturalW = naturalFieldWidth()
+  if (!fieldNaturalW) return
+  field.style.transition = 'none'
+  field.style.overflow = 'hidden'
+  field.style.width = `${Math.round(lerp(fieldNaturalW, FIELD_ICON_MIN, smooth(p)))}px`
+}
+
+// Scroll stopped mid-scrub: glide the width to the nearer endpoint, then release a full expand back
+// to the responsive classes. A stable target now (no scroll), so no chase. No-op at an endpoint.
+const settleField = () => {
+  const field = searchField()
+  if (!field || !window.matchMedia(DESKTOP_QUERY).matches) return
+  if (upFlying || returnActive) return
+  const p = fieldScrubProgress(field.getBoundingClientRect().top)
+  if (p <= 0.02 || p >= 0.98) return
+  fieldIdleClear()
+  const toField = p < 0.5
+  field.style.overflow = 'hidden'
+  field.style.transition = `width ${FIELD_MORPH_MS}ms ${MORPH_EASE}`
+  field.style.width = toField ? `${fieldNaturalW || naturalFieldWidth()}px` : `${FIELD_ICON_MIN}px`
+  if (toField) fieldIdleTimer = setTimeout(revertFieldWidth, FIELD_MORPH_MS + 40)
+}
+
+// Reconcile the field with the current breakpoint + scroll, no animation — mount / resize entry.
+const applyFieldWidth = () => {
+  fieldIdleClear()
+  fieldNaturalW = 0
+  updateFieldMorph()
+}
+
+// Hand the field back to its own class-driven width (expand settled, mobile, or unmount).
+const revertFieldWidth = () => {
+  fieldIdleTimer = null
+  const field = searchField()
+  if (!field) return
+  field.style.transition = 'none'
+  field.style.width = ''
+  field.style.overflow = ''
+}
+
+const fieldIdleClear = () => {
+  if (fieldIdleTimer) { clearTimeout(fieldIdleTimer); fieldIdleTimer = null }
+}
+
+
+// The launcher's static (sidebar) rect, neutralising any fade transform so we measure the slot, not
+// the scaled/hidden state. Used as the collapse destination and the fresh-restore origin.
+const launcherRestRect = (): FlyRect | null => {
+  const el = desktopLauncherRef.value
   if (!el) return null
-  const previousTransform = el.style.transform
-  const previousTransition = el.style.transition
+  const pt = el.style.transform
+  const ptr = el.style.transition
   el.style.transition = 'none'
   el.style.transform = 'none'
-  const rect = readRect(el)
-  el.style.transform = previousTransform
-  el.style.transition = previousTransition
-  return rect.width ? rect : null
+  const r = el.getBoundingClientRect()
+  el.style.transform = pt
+  el.style.transition = ptr
+  return r.width ? { left: r.left, top: r.top, width: r.width, height: r.height } : null
 }
 
-// The launcher's current box mid-flight (getBoundingClientRect already reflects the animated
-// left/top/width/height), so a reversal resumes from exactly where it is instead of teleporting.
-const currentLauncherRect = (base: CollapseRect): CollapseRect => {
-  const rect = activeLauncherEl()?.getBoundingClientRect()
-  if (!rect || !rect.width) return { ...base }
-  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+const readRect = (el: HTMLElement): FlyRect => {
+  const r = el.getBoundingClientRect()
+  return { left: r.left, top: r.top, width: r.width, height: r.height }
 }
 
-const startCollapseMorph = (direction: 'toIcon' | 'toField') => {
-  if (collapseMorph.value === direction) return
-  const desktop = window.matchMedia(DESKTOP_QUERY).matches
-  // Mobile collapses keep the existing launcher reveal as the primary behaviour; the mobile
-  // restore runs the same machine with its travel gated to a local contraction.
-  if (direction === 'toIcon' && !desktop) return
+// ---------------------------------------------------------------- launcher flight (both ways)
+// One drift-free engine. The launcher becomes a `position: fixed` box at flyLeft/Top/W/H, lerped
+// between two endpoints over FIELD_FLY_MS on a fixed rAF clock:
+//   • flyTarget 'sidebar' (collapse): field's last rect → the sidebar slot.
+//   • flyTarget 'field'   (restore):  the sidebar slot  → the field's LIVE rect, revealing the field
+//     on arrival so it can never show alongside the flying icon.
+// `flyFrom` is the launcher's CURRENT visual box when a flight is already running — so reversing
+// direction mid-flight (fast/snappy scroll) re-aims from where the icon actually is instead of
+// teleporting to an endpoint. That is the whole point of the rewrite: the old code had a transform
+// collapse and a fixed restore that could not hand off to each other without a jump.
+const startFly = (target: 'field' | 'sidebar') => {
+  const launcher = desktopLauncherRef.value
   const field = searchField()
-  if (!field) { finishCollapseMorph(); return }
-
-  const base = collapseRestRect()
-  if (!base) { finishCollapseMorph(); return }
-
-  const fieldGeom = direction === 'toIcon'
-    ? (lastVisibleFieldRect ?? readRect(field))
-    : readRect(field)
-  const targetRect = desktop ? fieldGeom : collapseMobileTarget(fieldGeom, base)
-
-  // A fresh collapse runs field → rest; a fresh restore runs rest → field. A reversal (an edge
-  // while one is already running) resumes from the launcher's live box and re-aims.
-  const retarget = collapseMorph.value !== null
-  const fromRect = retarget ? currentLauncherRect(base) : (direction === 'toIcon' ? targetRect : base)
-  const toRect = direction === 'toIcon' ? base : targetRect
-
-  collapseTimerClear()
-  if (collapseFrame) { cancelAnimationFrame(collapseFrame); collapseFrame = 0 }
-
-  collapseTarget.value = desktop ? 'desktop' : 'mobile'
-  lTransition.value = 'none'
-  lRect.value = fromRect
-  collapseMorph.value = direction
-  collapseToRect = toRect
-
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (collapseMorph.value !== direction) return
-    lTransition.value = `left ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, top ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, width ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}, height ${COLLAPSE_MORPH_MS}ms ${MORPH_EASE}`
-    lRect.value = collapseToRect
-    collapseTimer = setTimeout(onCollapseSettled, COLLAPSE_MORPH_MS + 120)
-  }))
+  if (!launcher || !field) return
+  const origin: FlyRect | null = flying.value
+    ? readRect(launcher)                                    // reversal: continue from the live box
+    : target === 'sidebar' ? iconFootprint(lastVisibleFieldRect ?? readRect(field))  // collapse: field's icon footprint
+    : (flySidebar ?? launcherRestRect())                    // fresh restore: from the sidebar slot
+  if (!origin) { flyClear(); return }
+  if (flyFrame) { cancelAnimationFrame(flyFrame); flyFrame = 0 }
+  flyFrom = origin
+  flyTarget = target
+  upFlying = target === 'field'
+  if (target === 'field') hideFieldForReturn(field)
+  // Seed the box at its origin BEFORE showing it: the style branch reads flyLeft/Top, and if those
+  // still held the last flight's (or default 0,0) values the fixed icon would flash at the top-left
+  // for the frame before flyStep runs.
+  flyLeft.value = origin.left
+  flyTop.value = origin.top
+  flyW.value = origin.width
+  flyH.value = origin.height
+  flyRadius.value = `${Math.round(Math.min(origin.width, origin.height) / 2)}px`
+  flying.value = true
+  flyTransition.value = 'none'
+  flyT0 = performance.now()
+  flyFrame = requestAnimationFrame(flyStep)
 }
 
-// Mobile geometry stays local and subtle: the restore expands the launcher only to a short
-// pill (a couple of icon widths, never the full field width) and shifts its centre a bounded
-// distance toward the field. The "same control" read survives without a cross-screen flight.
-const collapseMobileTarget = (field: CollapseRect, base: CollapseRect): CollapseRect => {
-  const width = Math.min(field.width, base.width * 2.4)
-  const cx = base.left + base.width / 2
-  const cy = base.top + base.height / 2
-  const dx = (field.left + field.width / 2) - cx
-  const dy = (field.top + field.height / 2) - cy
-  const distance = Math.hypot(dx, dy)
-  const k = distance > MOBILE_COLLAPSE_TRAVEL ? MOBILE_COLLAPSE_TRAVEL / distance : 1
-  return { left: cx + dx * k - width / 2, top: cy + dy * k - base.height / 2, width, height: base.height }
+const flyStep = () => {
+  if (!flying.value) return
+  const launcher = desktopLauncherRef.value
+  const field = searchField()
+  const from = flyFrom
+  if (!launcher || !field || !from) { flyFinish(); return }
+  const elapsed = performance.now() - flyT0
+  const t = Math.min(1, elapsed / FIELD_FLY_MS)
+  const k = 1 - (1 - t) ** 3 // ease-out cubic
+  // The field-side target is its live icon footprint (re-read each frame so the box lands wherever
+  // the field is, even as it scrolls); the sidebar target is the captured slot. Straight-line lerp.
+  const to: FlyRect = flyTarget === 'field'
+    ? iconFootprint(readRect(field))
+    : (flySidebar ?? readRect(launcher))
+  flyLeft.value = lerp(from.left, to.left, k)
+  flyTop.value = lerp(from.top, to.top, k)
+  flyW.value = lerp(from.width, to.width, k)
+  flyH.value = lerp(from.height, to.height, k)
+  flyRadius.value = `${Math.round(Math.min(flyW.value, flyH.value) / 2)}px`
+  if (elapsed < FIELD_FLY_MS) { flyFrame = requestAnimationFrame(flyStep); return }
+  // One extra frame so the arrival box is PAINTED before `flying` is released (Vue would otherwise
+  // batch the final position with the release and the icon would vanish short of its target).
+  flyFrame = requestAnimationFrame(() => { flyFrame = 0; flyFinish() })
 }
 
-// Whichever collapse morph armed the watchdog gets to settle; an interrupted one never reports
-// in — same arbitration as the overlay's `settleOn` token.
-const onCollapseSettled = (event?: TransitionEvent) => {
-  if (event) {
-    if (!collapseMorph.value) return
-    if (event.target !== activeLauncherEl()) return
-    if (!['left', 'top', 'width', 'height'].includes(event.propertyName)) return
-    if (lTransition.value === 'none') return
-  }
-  if (!collapseMorph.value) return
-  finishCollapseMorph()
+
+const flyFinish = () => {
+  if (flyTarget === 'field') endFieldReturn()
+  else endFlight()
 }
 
-// Release the launcher: drop the fixed morph box and let the normal rules drive it. Releasing is
-// seamless for a collapse (its endpoint was already the resting rect); for a restore the launcher
-// hands off to the real field, so it drops without replaying its own fade.
-const finishCollapseMorph = () => {
-  collapseTimerClear()
-  if (collapseFrame) { cancelAnimationFrame(collapseFrame); collapseFrame = 0 }
-  collapseMorph.value = null
-  collapseTarget.value = ''
-  lTransition.value = 'none'
-  lRect.value = null
-  collapseToRect = null
+// Collapse arrival: drop the fixed box; the launcher is already at its sidebar slot so the normal
+// isCollapsed fade holds it. The field stays hidden (we are collapsed).
+const endFlight = () => {
+  flying.value = false
+  flyTransition.value = 'none'
+  flyRadius.value = ''
+  flyLeft.value = 0; flyTop.value = 0; flyW.value = 44; flyH.value = 44
+  const glyph = desktopLauncherRef.value?.querySelector('svg')
+  if (glyph) { glyph.style.transition = ''; glyph.style.transform = '' }
+}
+
+// Full teardown (overlay open, resize, unmount): stop the flight and reveal any field hidden for a
+// restore, so the real search is never left invisible.
+const flyClear = () => {
+  if (flyFrame) { cancelAnimationFrame(flyFrame); flyFrame = 0 }
+  upFlying = false
+  endFlight()
+  abortFieldReturn()
+}
+
+// Hide the real field for the restore flight (it must not overlap the flying box) and pin it to the
+// icon footprint so it can expand from there. `visibility` keeps layout + focus (collapse detection
+// still measures it; a focused field survives).
+const hideFieldForReturn = (field: HTMLElement) => {
+  if (collapseFieldEl) return
+  collapseFieldWasFocused = document.activeElement === field
+  collapseFieldEl = field
+  field.style.transition = 'none'
+  field.style.overflow = 'hidden'
+  field.style.width = `${FIELD_ICON_MIN}px` // start the expand from the icon footprint
+  field.style.visibility = 'hidden'
+}
+
+// Re-show a field hidden for a restore; keep (or restore) focus so typing survives.
+const revealSearchField = () => {
+  const field = collapseFieldEl
+  if (!field) return
+  collapseFieldEl = null
+  field.style.visibility = ''
+  if (collapseFieldWasFocused && document.activeElement !== field) field.focus({ preventScroll: true })
+  collapseFieldWasFocused = false
+}
+
+// Restore arrival: release the box IN PLACE (suppress its fade for one commit so it vanishes at the
+// field rather than retracting to the drifted sidebar slot), reveal the field, then expand it in
+// place from the icon footprint (the visible "expanding animation").
+const endFieldReturn = () => {
+  upFlying = false
   suppressLauncherMotion.value = true
-  collapseRestoreFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
-    suppressLauncherMotion.value = false
-    collapseRestoreFrame = 0
-  }))
+  flying.value = false
+  flyTransition.value = 'none'
+  flyRadius.value = ''
+  flyLeft.value = 0; flyTop.value = 0; flyW.value = 44; flyH.value = 44
+  const glyph = desktopLauncherRef.value?.querySelector('svg')
+  if (glyph) { glyph.style.transition = ''; glyph.style.transform = '' }
+  requestAnimationFrame(() => requestAnimationFrame(() => { suppressLauncherMotion.value = false }))
+  revealSearchField()
+  if (returnTimer) { clearTimeout(returnTimer); returnTimer = null }
+  returnActive = true
+  const field = searchField()
+  if (field) {
+    field.style.overflow = 'hidden'
+    field.style.transition = 'none'
+    field.style.width = `${FIELD_ICON_MIN}px`
+    void field.offsetWidth // commit the icon start so the transition has a concrete length
+    const natural = fieldNaturalW || naturalFieldWidth()
+    field.style.transition = `width ${FIELD_MORPH_MS}ms ${MORPH_EASE}`
+    field.style.width = `${natural}px`
+    returnTimer = setTimeout(finishFieldExpand, FIELD_MORPH_MS + 40)
+  } else {
+    returnActive = false
+  }
 }
 
-// Hard stop used when the overlay, a resize, or an unmount takes over: release the launcher and
-// let the normal (non-morph) visibility rules drive it rather than animate to stale geometry.
-const cancelCollapseMorph = () => {
-  if (!collapseMorph.value) return
-  finishCollapseMorph()
+const finishFieldExpand = () => {
+  returnTimer = null
+  returnActive = false
+  fieldNaturalW = 0
+  revertFieldWidth()
 }
 
-const collapseTimerClear = () => {
-  if (collapseTimer) { clearTimeout(collapseTimer); collapseTimer = null }
+// Tear down a restore in progress (reversal to collapse, overlay open, resize, unmount): reveal the
+// field and stop the expand so scroll-scrub takes over from wherever it landed.
+const abortFieldReturn = () => {
+  upFlying = false
+  if (returnTimer) { clearTimeout(returnTimer); returnTimer = null }
+  returnActive = false
+  revealSearchField()
 }
+
+
+
 
 const activeLauncherEl = () => {
   if (typeof window === 'undefined') return null
@@ -505,11 +665,7 @@ const openOverlay = async (event: MouseEvent) => {
 
   originClickEvent = event
   overlayMounted.value = true
-  // The overlay morph owns the launcher's slot from here on; a pill still in flight would
-  // capture from (and cover) geometry the panel is about to take over. Cancelled after
-  // `overlayMounted` so the launcher hands over to the overlay (transition: none) instead of
-  // reappearing with its fade curve mid-morph.
-  cancelCollapseMorph()
+  flyClear()
   overlayActive.value = false
   overlayClosing.value = false
   morphing.value = true
@@ -638,10 +794,10 @@ const closeOverlay = async () => {
 }
 
 const handleResize = () => {
-  // Crossing the desktop/mobile boundary invalidates both endpoints of a running collapse
-  // morph (different launcher, different gating) — drop it and let the normal fade rules
-  // take over rather than animate to stale geometry.
-  cancelCollapseMorph()
+  // Reconcile the field with the (possibly new) breakpoint/collapse, no animation, then let the
+  // overlay re-capture the launcher's new position.
+  flyClear()
+  applyFieldWidth()
   if (!overlayMounted.value) return
   const launcherEl = activeLauncherEl()
   if (!launcherEl || !launcherEl.getBoundingClientRect().width) return
@@ -650,8 +806,9 @@ const handleResize = () => {
 
 onMounted(() => {
   lastScrollY = readScrollY()
-  wasCollapsed = fieldIsOffScreen()
+  isCollapsed.value = fieldIsOffScreen() // pre-set so the first handleScroll sees no edge (no load anim)
   handleScroll()
+  applyFieldWidth()
   window.addEventListener('scroll', handleScroll, { passive: true })
   window.addEventListener('resize', handleResize)
 })
@@ -664,9 +821,10 @@ onUnmounted(() => {
   if (openTimer) clearTimeout(openTimer)
   if (closeTimer) clearTimeout(closeTimer)
   if (restoreFrame) cancelAnimationFrame(restoreFrame)
-  collapseTimerClear()
-  if (collapseFrame) cancelAnimationFrame(collapseFrame)
-  if (collapseRestoreFrame) cancelAnimationFrame(collapseRestoreFrame)
+  fieldIdleClear()
+  flyClear()
+  const field = searchField()
+  if (field) { field.style.visibility = ''; field.style.width = ''; field.style.overflow = ''; field.style.transition = '' }
   unlockScroll()
 })
 </script>
@@ -683,7 +841,6 @@ onUnmounted(() => {
       :aria-expanded="overlayMounted"
       aria-haspopup="dialog"
       @click="openOverlay"
-      @transitionend="onCollapseSettled"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -713,7 +870,6 @@ onUnmounted(() => {
       :aria-expanded="overlayMounted"
       aria-haspopup="dialog"
       @click="openOverlay"
-      @transitionend="onCollapseSettled"
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

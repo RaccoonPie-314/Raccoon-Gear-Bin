@@ -194,7 +194,7 @@ and none of them are visible to the compiler or to `build`.
 | Constant | Value | Where |
 |---|---|---|
 | Spotlight open / close morph | 420ms / 380ms, `cubic-bezier(0.33, 1, 0.68, 1)` | `SearchDock.vue` |
-| Scroll-collapse field↔icon morph | 280ms, same ease; edge-triggered; the **launcher button itself** is the FLIP element (per-axis scale + radius pre-compensation + inverse-scaled child icon), never a separate traveling layer; desktop morphs the launcher between the field's last-visible rect and its circular rest, mobile keeps a bounded local expand | `SearchDock.vue` |
+| Scroll-collapse field↔icon morph | Two cooperating pieces, desktop only. (1) The **real top field morphs its OWN width in place**: `width = lerp(natural, FIELD_ICON_MIN=52, progress)` recomputed every scroll frame over the last `FIELD_SCRUB_W` (180px) before its top reaches the edge (no transition → tracks the wheel; a fast flick can skip it — a known, accepted trade-off, NOT a bug to "fix" by moving the width to the box: doing so killed the in-place expand and mis-centred the icon). A 260ms settle eases a mid-band width to the nearer endpoint on scroll-idle. The field is `visibility:hidden` while collapsed (focus-preserving) so it never co-shows with the launcher. (2) ONE rAF engine (`startFly`, `FIELD_FLY_MS`=500) flies the **launcher as a narrow `position: fixed` box** between the field's icon footprint and its sidebar slot — it carries the icon↔circle TRAVEL only, NOT the width (so no wide-box glyph-centring issue). Fixed, not a transform: the sticky sidebar's layout box drifts as you scroll, so a transform mis-lands it. The box lerps **straight** from origin to target on an ease-out-cubic clock (`k = 1-(1-t)³`). `flyTarget`='sidebar'(collapse: from `iconFootprint(lastVisibleFieldRect)` → slot)/'field'(restore: from slot → field **live** `iconFootprint`, re-read each frame so it lands on the field wherever it is). `endFieldReturn` releases the box in place (`suppressLauncherMotion`) and the real field expands in place. A mid-flight scroll reversal re-aims from the launcher's live box (no teleport). Arrival paints one extra rAF before `flying=false`. Mobile launcher stays a plain fade | `SearchDock.vue` |
 | Backdrop in / out, content in / out / delay | 260/200ms, 220/140ms/150ms | `SearchDock.vue` |
 | Search-field collapse hysteresis | gone at `0`, back at `24` | `SearchDock.vue` |
 | Dock reveal threshold / direction delta | `60` / `6` | `useScrollReveal.ts` (one copy), `SearchDock.vue` (still its own) |
@@ -302,14 +302,16 @@ surface should match the logo.
 
 ## Cross-component contracts to preserve
 
-- `[data-search-anchor]` — `SearchDock` measures this element to decide when to collapse, and
-  (since the scroll-collapse morph) to read the field's last-visible rect as the morph's target
-  geometry. SearchDock owns **both** morphs and each uses one real element: the overlay morph
-  animates the spotlight panel, the scroll morph animates the **launcher button itself** — during
-  a collapse the launcher is placed on the field's rect and FLIPs to its circular rest (its child
-  icon counter-scaled to stay a circle). The real `<input>` never moves, fades, or duplicates, and
-  no separate traveling morph element exists. It is a string contract with no type checking:
-  rename or move the element in the same commit as the change, never across two.
+- `[data-search-anchor]` — `SearchDock` measures this element to decide when to collapse, and the
+  scroll-collapse morph animates this element's own `width` in place (icon footprint ↔ class
+  width) AND reads its last-visible rect as the launcher flight's landing spot. It never moves from
+  its scroll-flow position — SearchDock only sets its inline `width`/`overflow`/`visibility` and a
+  `width` transition, clearing them again on mobile/unmount. On the desktop **restore** flight the
+  field is briefly `visibility:hidden` (focus-preserving; re-focused on reveal) so the flying
+  launcher is the sole visible search — there is never a duplicate bar. The sidebar launcher is the
+  element that flies (both directions); it is not a second search control. It is a string contract
+  with no type checking: rename or move the element in the same commit as the change, never across
+  two.
 - `SearchDock`'s desktop launcher is absolutely positioned against the `<aside>`; it only
   centres correctly because that element is `relative`.
 - `CategoryMobile` teleports itself to `body`, so DOM order ≠ visual order.
