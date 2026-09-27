@@ -39,28 +39,15 @@ const loadSiteInfo = async () => {
 }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
-// The product editor owns its form, save and delete flow. The page keeps catalog loading,
-// browse state and admin identity, and lends the editor the two things it must not own: the
-// category list for defaults, and the reload that refreshes what the grid shows. Authorisation
-// stays where it always was - row-level security in Postgres.
-const {
-  editorForm,
-  editorOpen,
-  deleteTarget,
-  isSaving,
-  actionError,
-  openAddEditor,
-  openEditEditor,
-  handleImageSelection,
-  saveProduct,
-  confirmDelete
-} = useAdminProductEditor({
-  categories,
-  canMutate: () => isAdminMode.value,
-  onMutated: () => { void loadCatalog() }
-})
-
 const logout = async () => { isSigningOut.value = true; try { await signOut(); isAdminMode.value = false } finally { isSigningOut.value = false } }
+
+// The editor UI — both modals, its banner and its writes — lives in the admin feature. The page
+// reaches it through the two names its own template already used, and hands over what the feature
+// must not own: the catalog lists it renders but never fetches, and the reload that refreshes them.
+const adminEditor = ref<{ openAddEditor: () => void, openEditEditor: (product: CatalogProduct) => void } | null>(null)
+const openAddEditor = () => { adminEditor.value?.openAddEditor() }
+const openEditEditor = (product: CatalogProduct) => { adminEditor.value?.openEditEditor(product) }
+
 watch(user, () => { void refreshAdminMode() }, { immediate: true })
 onMounted(() => { void loadCatalog(); void loadSiteInfo() })
 useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
@@ -206,7 +193,17 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           </div>
 
           <UAlert v-if="loadError" class="mt-6" color="error" variant="soft" :title="loadError" />
-          <UAlert v-if="actionError" class="mt-6" color="error" variant="soft" :title="actionError" />
+
+          <!-- The editor sits here rather than at the end of the page so that its own banner keeps
+               its place in this column; both overlays it renders are fixed and full-viewport, so
+               where it mounts does not change how they appear. -->
+          <AdminProductEditor
+            ref="adminEditor"
+            :categories="categories"
+            :products="products"
+            :is-admin-mode="isAdminMode"
+            @mutated="loadCatalog()"
+          />
 
           <div v-if="isLoading" class="mt-8 grid grid-cols-1 gap-x-6 gap-y-10 sm:mt-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 xl:grid-cols-3">
             <div v-for="item in 6" :key="item" class="aspect-[4/5] rounded-2xl border border-zinc-200/60 bg-zinc-100 animate-pulse dark:border-zinc-800/60 dark:bg-zinc-900" />
@@ -226,137 +223,5 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
         </div>
       </div>
     </UContainer>
-
-    <!-- Admin Edit Modal -->
-    <div
-      v-if="editorOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/40 backdrop-blur-sm overflow-y-auto"
-      @click.self="editorOpen = false"
-    >
-      <section
-        class="relative w-full max-w-2xl bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800/80 my-auto overflow-hidden flex flex-col max-h-[90vh]"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('editProduct')"
-      >
-        <div class="flex items-center justify-between gap-4 border-b border-zinc-200/80 px-6 py-5 dark:border-zinc-800/80">
-          <div>
-            <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">{{ t('catalog') }}</p>
-            <h2 class="mt-1 text-xl font-black">{{ editorForm.id ? t('editProduct') : t('addProduct') }}</h2>
-          </div>
-          <button
-            type="button"
-            class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-            :aria-label="t('close')"
-            @click="editorOpen = false"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-        </div>
-
-        <form class="flex-1 overflow-y-auto p-6 sm:p-8 space-y-5" @submit.prevent="saveProduct">
-          <div class="grid gap-5 sm:grid-cols-2">
-            <UFormField :label="t('productName')" required>
-              <UInput v-model="editorForm.name" required class="w-full" />
-            </UFormField>
-            <UFormField :label="t('category')" required>
-              <USelect
-                v-model="editorForm.categoryId"
-                :items="categories.map((category) => ({ label: category.name, value: category.id }))"
-                class="w-full"
-              />
-            </UFormField>
-            <UFormField :label="t('sku')" required>
-              <UInput v-model="editorForm.sku" required class="w-full" />
-            </UFormField>
-            <UFormField :label="t('slug')" required>
-              <UInput v-model="editorForm.slug" required class="w-full" />
-            </UFormField>
-            <UFormField :label="t('price')" required>
-              <UInput v-model.number="editorForm.price" type="number" min="0" step="0.01" required class="w-full" />
-            </UFormField>
-            <UFormField :label="t('stock')" required>
-              <UInput v-model.number="editorForm.stockQuantity" type="number" min="0" step="1" required class="w-full" />
-            </UFormField>
-          </div>
-
-          <UFormField :label="t('shortDescription')" required>
-            <UInput v-model="editorForm.shortDescription" required class="w-full" />
-          </UFormField>
-
-          <UFormField :label="t('fullDescription')" required>
-            <UTextarea v-model="editorForm.description" :rows="4" required class="w-full" />
-          </UFormField>
-
-          <UFormField :label="t('specs')" :hint="t('specificationsHint')">
-            <UTextarea v-model="editorForm.specifications" :rows="4" class="w-full font-mono text-xs" />
-          </UFormField>
-
-          <UFormField :label="t('imagePaths')" :hint="t('imagePathsHint')">
-            <UTextarea v-model="editorForm.imagePaths" :rows="3" class="w-full font-mono text-xs" />
-          </UFormField>
-
-          <UFormField :label="t('uploadImages')">
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              class="block w-full text-xs text-zinc-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-zinc-700 dark:file:text-zinc-300 hover:file:bg-zinc-200 cursor-pointer"
-              @change="handleImageSelection"
-            />
-          </UFormField>
-
-          <div class="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200/80 pt-5 dark:border-zinc-800/80">
-            <UButton
-              v-if="editorForm.id"
-              type="button"
-              color="error"
-              variant="ghost"
-              size="sm"
-              @click="deleteTarget = products.find((product) => product.id === editorForm.id) || null; editorOpen = false"
-            >
-              {{ t('deleteProduct') }}
-            </UButton>
-            <span v-else />
-            <div class="flex gap-2.5">
-              <UButton type="button" color="neutral" variant="ghost" size="sm" @click="editorOpen = false">
-                {{ t('cancel') }}
-              </UButton>
-              <UButton type="submit" color="neutral" size="sm" :loading="isSaving">
-                {{ t('saveChanges') }}
-              </UButton>
-            </div>
-          </div>
-        </form>
-      </section>
-    </div>
-
-    <!-- Delete Confirmation Modal -->
-    <div
-      v-if="deleteTarget"
-      class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      @click.self="deleteTarget = null"
-    >
-      <section
-        class="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800/80 p-6 sm:p-8"
-        role="alertdialog"
-        aria-modal="true"
-      >
-        <h2 class="text-xl font-black text-zinc-950 dark:text-white">
-          {{ t('deleteConfirm', { name: deleteTarget.name }) }}
-        </h2>
-        <p class="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          {{ t('deleteWarning') }}
-        </p>
-        <div class="mt-6 flex justify-end gap-3">
-          <UButton color="neutral" variant="ghost" size="sm" @click="deleteTarget = null">
-            {{ t('cancel') }}
-          </UButton>
-          <UButton color="error" size="sm" :loading="isSaving" @click="confirmDelete">
-            {{ t('deleteProduct') }}
-          </UButton>
-        </div>
-      </section>
-    </div>
   </main>
 </template>

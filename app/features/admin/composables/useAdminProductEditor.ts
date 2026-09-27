@@ -28,7 +28,7 @@ export type AdminProductForm = {
  * because authorisation is row-level security in Postgres: this guard only keeps a UI affordance
  * honest, it is not the security boundary.
  *
- * `onMutated` is how the page refreshes after a write. The editor deliberately does not import
+ * `onMutated` is how the editor's host refreshes after a write. The editor deliberately does not import
  * the catalog loader, so there is still exactly one place that fetches and maps products.
  *
  * Save and delete are one unit here on purpose: the save writes four things (product row,

@@ -6,6 +6,19 @@ export default defineNuxtConfig({
     pageTransition: { name: 'page', mode: 'out-in' }
   },
   modules: ['@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
+  // A feature keeps its UI and the logic only it uses in one folder. Neither half is reachable by
+  // auto-import from `app/features` on its own, so each is registered: the component dir with no
+  // directory prefix (the file name is the component name) and the composable dir exactly like
+  // app/composables/. Naming `dirs` replaces Nuxt's default component scan, so `~/components`
+  // has to stay in the list — dropping it silently unregisters every shared component.
+  components: {
+    dirs: [
+      '~/components',
+      // no prefix: the file name is the component name
+      { path: '~/features/admin/components', pathPrefix: false }
+    ]
+  },
+  imports: { dirs: ['~/features/admin/composables'] },
   runtimeConfig: {
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     public: {
