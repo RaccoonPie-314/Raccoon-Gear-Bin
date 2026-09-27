@@ -37,7 +37,7 @@ These work, are invisible to the compiler, and have no tests protecting them:
 
 | Area | Why |
 |---|---|
-| `SearchDock.vue` morph/measure logic | FLIP engine: matrix inversion, settle-token arbitration, per-axis radius compensation |
+| `SearchDock.vue` morph/measure logic | two cooperating engines: the overlay FLIP (matrix inversion, settle-token arbitration, per-axis radius compensation) and the scroll-collapse fixed-box rAF flight that re-aims from the live box on a reversal |
 | `category/CategoryDesktop.vue` / `CategoryMobile.vue` drag + indicator | tuned input models; desktop and mobile are *deliberately* different |
 | `app/assets/css/main.css` select-morph keyframes | `0.24` is trigger-height ÷ panel-height |
 | `app/app.config.ts` | single owner of the pill control language (it also emits 3 pre-existing `tsc` errors — do not "fix" as a drive-by) |
@@ -50,17 +50,19 @@ Exact numbers worth not breaking are tabulated in ARCHITECTURE.md → *Interacti
 ```bash
 bun install
 bun run build                                                # what CI runs — the only gate
-bun run verify                                               # scripts/verify-ui.mjs — 52 UI checks
+bun run verify                                               # scripts/verify-ui.mjs — 105 UI checks
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only
 ```
 
 - **`bun run verify` exists so you do not rebuild a test harness.** It serves `.output`, drives
   headless Chrome over CDP, and asserts the tuned interactions (category drag, indicator snap and
-  260ms curve, magnification profile, scroll reveal, spotlight morph, the masthead's two levels
-  and emblem height step at five widths, no overflow at five widths) plus the
-  **entire admin flow** — login, add, image upload, save/update, cancel, delete, logout —
-  against a stubbed Supabase in `scripts/fixtures.json`. No real project is contacted and nothing
-  is written. Build first; add `--only=guest|admin` while iterating.
+  260ms curve, magnification profile, scroll reveal, spotlight morph, the scroll-collapse
+  field↔launcher flight in both directions including a mid-flight reversal, the masthead's two
+  levels and emblem height step at five widths, no overflow at five widths) plus the
+  **entire admin flow** — login, add, image upload, save/update, cancel, delete, the site-info
+  editor, logout — against a stubbed Supabase in `scripts/fixtures.json`. No real project is
+  contacted and nothing is written. The count above is the full run; `--only=guest` or
+  `--only=admin` prints fewer. Build first; add `--only=guest|admin` while iterating.
 - To prove a refactor is behaviour-preserving, run it against the pre-change build too (worktree
   from the nearest `backup/*` tag) and diff the `PASS`/`FAIL` lines, including the recorded
   `(method, path, query, body)` write sequence. Phases 3–5 each found real regressions and real

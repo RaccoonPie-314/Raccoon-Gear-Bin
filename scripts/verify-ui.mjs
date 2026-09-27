@@ -4,10 +4,11 @@
  *
  * WHY THIS EXISTS
  * `bun run build` is the only gate CI runs, and it never starts the app, so every tuned
- * interaction (category drag, indicator snap, magnification, scroll reveal, spotlight morph) and
- * the whole admin write path is otherwise unprotected. Refactors Phases 1-5 were each verified by
- * rebuilding the pre-change tag in a worktree and diffing the measurements; that harness is now
- * committed so the next phase runs one command instead of re-deriving it.
+ * interaction (category drag, indicator snap, magnification, scroll reveal, the scroll-collapse
+ * launcher flight, spotlight morph) and the whole admin write path is otherwise unprotected.
+ * Refactors Phases 1-5 were each verified by rebuilding the pre-change tag in a worktree and
+ * diffing the measurements; that harness is now committed so the next phase runs one command
+ * instead of re-deriving it.
  *
  * WHAT IT DOES
  *   bun run build && bun run verify
@@ -474,16 +475,19 @@ const run = async () => {
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(400)
 
     // ---- scroll-collapse field<->icon morph (SearchDock) ----
-    // Both directions are a one-shot FLIP of the real LAUNCHER button between the field's top rect
-    // and its sidebar slot (no separate [data-collapse-morph] layer). LAUNCH reads the dialog
-    // button's live box + running animations. On the collapse it flies down to the sidebar; on the
-    // restore it flies back up into the field slot while the real field is hidden, then expands.
+    // Two cooperating pieces (see ARCHITECTURE.md → Interaction invariants): the real field scrubs
+    // its OWN width in place off scroll, and ONE launcher button flies as a `position: fixed` rAF
+    // box between the field's icon footprint and its sidebar slot — carrying travel, not width.
+    // A mid-flight reversal re-aims from the box's live rect instead of teleporting. There is no
+    // third collapse element; the LEGACY_PILL_ABSENT assertion below guards that. LAUNCH reads the
+    // dialog button's live box + running animations.
     const LAUNCH = '(() => { const el = [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].find(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 }); if (!el) return { present: false }; const cs = getComputedStyle(el); const r = el.getBoundingClientRect(); return { present: true, x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, opacity: +cs.opacity, pe: cs.pointerEvents, pos: cs.position, transform: el.style.transform || \'\', anims: el.getAnimations().filter(a => a.playState === \'running\').length } })()'
-    const NO_PILL_LAYER = '!document.querySelector(\'[data-collapse-morph]\')'
+    // An earlier iteration flew a separate third element for this morph. Nothing in `app/` renders
+    // one any more, so this asserts the design stays one field + one launcher.
+    const LEGACY_PILL_ABSENT = '!document.querySelector(\'[data-collapse-morph]\')'
     const scrollCollapse = '(() => { const a = document.querySelector(\'[data-search-anchor]\'); const top = a.getBoundingClientRect().top + window.scrollY; window.scrollTo({ top: top + a.offsetHeight + 160, behavior: "instant" }); return true })()'
     const scrollTop = '(() => { window.scrollTo({ top: 0, behavior: "instant" }); return true })()'
     await ev(scrollTop); await sleep(450)
-    const fieldAtTop = await ev('(() => { const r = document.querySelector(\'[data-search-anchor]\').getBoundingClientRect(); return { x: r.left + r.width / 2, w: r.width } })()')
 
     // The field's width is a function of scroll (in place). FIELD reads the search field's live
     // width, its distance from the top edge, inline width and overflow.
@@ -502,9 +506,9 @@ const run = async () => {
     await ev(scrollCollapse); await sleep(320)
     const collapsed = await ev(FIELD)
     check('scrolled past, the field pins to the icon footprint (clipped)', collapsed.present && collapsed.w < 70 && collapsed.overflow === 'hidden', collapsed)
-    check('no separate [data-collapse-morph] traveling layer exists', await ev(NO_PILL_LAYER))
+    check('no third collapse element was reintroduced (no [data-collapse-morph] layer)', await ev(LEGACY_PILL_ABSENT))
 
-    // 12. no horizontal overflow while the morph runs
+    // No horizontal overflow while the morph runs
     await ev(scrollTop); await sleep(450)
     await ev(scrollCollapse); await sleep(60)
     check('no horizontal overflow while the field→icon morph runs', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
@@ -564,7 +568,7 @@ const run = async () => {
     const rev = await ev(FIELD)
     check('rapid reversals resolve cleanly (full width, visible, no leftover clip)', rev.present && rev.visibility === 'visible' && rev.w >= fieldTop - 4 && rev.overflow !== 'hidden', rev)
 
-    // 8. The desktop sidebar icon plays a pill→circle ARRIVAL cue when the field collapses (the
+    // The desktop sidebar icon plays a pill→circle ARRIVAL cue when the field collapses (the
     // visual link that "the search became this icon"), then rests as the interactive circle. The
     // whole time, no more than one interactive search control exists and no pill layer appears.
     await ev(scrollTop); await sleep(450)
@@ -578,7 +582,7 @@ const run = async () => {
     const flyEnd = await ev(LAUNCH)
     check('the flight lands as the interactive sidebar circle (pointer-events restored, 44px)', flyEnd.present && flyEnd.pe === 'auto' && flyEnd.w >= 40 && flyEnd.w <= 50, flyEnd)
 
-    // 9. the overlay morph still works after the collapse morph has owned the launcher
+    // The overlay morph still works after the collapse morph has owned the launcher
     await sleep(520)
     const launch2 = await ev(LAUNCH)
     if (!launch2.present) check('launcher present for the overlay check', false)
@@ -592,7 +596,7 @@ const run = async () => {
       check('launcher→overlay morph stays intact after a collapse', opened && closed && restClean.anims === 0, { opened, closed })
     }
 
-    // 10 + 11. desktop stable, mobile restrained: no cross-screen travelling pill
+    // Desktop stable, mobile restrained: no cross-screen travelling pill
     await metrics(390, 844, true)
     await ev(scrollTop); await sleep(500)
     await ev(scrollCollapse); await sleep(80)
