@@ -244,6 +244,13 @@
     "_comment": "What the synthetic data must produce, asserted independently of the fixtures so a bad fixture edit fails loudly instead of silently changing the test.",
     "cards": 6,
     "priceLowToHigh": ["39.00", "45.00", "59.00", "89.00", "123.45", "149.00"],
+    "stockSequence": ["in", "low", "out", "in", "in", "low"],
+    "stockBands": {
+      "_comment": "The fixture quantities are 7, 3, 0, 12, 25, 4 against LOW_STOCK_THRESHOLD 5, so all three bands appear twice and the boundary is tested on both sides (4 and 5 would be low, 7 is not). The band now comes from app/utils/product-stock.ts instead of being re-derived inside the badge, so the check asserts the band, its label and its colour together — that is what proves the shared rule did not move a threshold or a class.",
+      "in": { "label": "In Stock", "text": "text-zinc-400", "dot": "bg-zinc-400" },
+      "low": { "label": "Low Stock", "text": "text-zinc-500", "dot": "bg-zinc-500" },
+      "out": { "label": "Out of Stock", "text": "text-zinc-950", "dot": "bg-zinc-950" }
+    },
     "specRows": {
       "aaaaaaaa-0000-4000-8000-000000000001": [["Switch", "MX Red"], ["Ratio", "60:40"], ["Weight", "58g"]],
       "aaaaaaaa-0000-4000-8000-000000000002": [["Sensor", "PixArt 3395"], ["DPI", "26000"]],

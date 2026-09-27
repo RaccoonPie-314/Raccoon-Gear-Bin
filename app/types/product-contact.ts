@@ -1,11 +1,9 @@
 // View models for the product-page conversion actions. Like catalog.ts and site-info.ts these
 // are presentation shapes, not row shapes — but nothing here is read from a table: a channel is
 // *resolved* from the public SiteInfo model that `useSiteInfo` already produced, which is why
-// this phase adds no data layer and no schema.
-
-/** How the CTA should speak. Mirrors the three bands `StockStatus` renders, and derives from the
- * same `LOW_STOCK_THRESHOLD` constant it uses — the calculation itself is not redefined here. */
-export type ProductStockState = 'in' | 'low' | 'out'
+// this feature adds no data layer and no schema. The stock band the CTA words itself around is
+// not repeated here: `ProductStockState` lives beside the rule that decides it, in
+// `app/utils/product-stock.ts`.
 
 /**
  * One contact/order channel the shop has actually configured. `href` is always the stored value

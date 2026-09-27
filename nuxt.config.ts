@@ -15,10 +15,11 @@ export default defineNuxtConfig({
     dirs: [
       '~/components',
       // no prefix: the file name is the component name
-      { path: '~/features/admin/components', pathPrefix: false }
+      { path: '~/features/admin/components', pathPrefix: false },
+      { path: '~/features/product/components', pathPrefix: false }
     ]
   },
-  imports: { dirs: ['~/features/admin/composables'] },
+  imports: { dirs: ['~/features/admin/composables', '~/features/product/composables'] },
   runtimeConfig: {
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     public: {

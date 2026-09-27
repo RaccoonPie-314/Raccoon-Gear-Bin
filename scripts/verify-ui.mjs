@@ -383,6 +383,14 @@ const run = async () => {
     check('guest sees no admin affordance', !(await ev('!![...document.querySelectorAll("header span")].find(el => /admin\\s*mode/i.test(el.textContent || ""))')) && (await ev(`document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length`)) === 0)
     check('cards carry an image and a price', (await ev('document.querySelectorAll("main article img").length')) === EXP.cards && (await ev('document.querySelectorAll("main article p.tabular-nums").length')) === EXP.cards)
 
+    // The band is now asked of one shared rule (`app/utils/product-stock.ts`) rather than re-derived
+    // inside the badge, so all three of its outputs are asserted per card: which band a quantity
+    // falls into, the label that band carries, and the colour it is painted in. Matching a
+    // `classList` token from position 0 is what keeps `text-zinc-400` from being satisfied by the
+    // `dark:text-zinc-500` sitting beside it in the same attribute.
+    const bands = await ev('(() => { const out = []; const tok = (el, prefix) => { const found = [...el.classList].find(c => c.indexOf(prefix) === 0); return found || null }; for (const el of document.querySelectorAll("main article [data-stock-status]")) { out.push({ s: el.getAttribute("data-stock-state"), l: el.textContent.trim(), t: tok(el, "text-zinc-"), d: el.firstElementChild ? tok(el.firstElementChild, "bg-zinc-") : null }) } return out })()')
+    check('every card renders its stock band with the label and colour it always had', JSON.stringify(bands.map(b => [b.s, b.l, b.t, b.d])) === JSON.stringify(EXP.stockSequence.map(s => [s, EXP.stockBands[s].label, EXP.stockBands[s].text, EXP.stockBands[s].dot])), { bands })
+
     // site info in the masthead: what the fixture singleton stores is what the header exposes
     const phoneLink = await ev('(() => { const a = document.querySelector("header a[data-site-phone]"); return a ? { href: a.getAttribute("href"), text: (a.textContent || "").trim() } : null })()')
     check('header renders the phone as a tel link', !!phoneLink && phoneLink.href === EXP.siteInfo.phoneHref && phoneLink.text === EXP.siteInfo.phoneText, phoneLink)

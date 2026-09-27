@@ -50,7 +50,7 @@ Exact numbers worth not breaking are tabulated in ARCHITECTURE.md → *Interacti
 ```bash
 bun install
 bun run build                                                # what CI runs — the only gate
-bun run verify                                               # scripts/verify-ui.mjs — 152 UI checks
+bun run verify                                               # scripts/verify-ui.mjs — 153 UI checks
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only
 ```
 
@@ -60,7 +60,9 @@ bun run verify                                               # scripts/verify-ui
   field↔launcher flight in both directions including a mid-flight reversal, the masthead's two
   levels and emblem height step at five widths, no overflow at five widths, the detail-page photo
   carousel — bounded strip window, one-slot advance on adjacent selection, wrapping arrows,
-  hover-gated arrows, and the shared-state lightbox — and
+  hover-gated arrows, and the shared-state lightbox — the stock band on every card (in / low / out,
+  each with its label and its colour, read from `data-stock-state` now that the band comes from one
+  shared rule), and
   the detail-page header search) plus the
   **entire admin flow** — login, add, image upload, save/update, cancel, delete, the site-info
   editor, logout — against a stubbed Supabase in `scripts/fixtures.json`. No real project is

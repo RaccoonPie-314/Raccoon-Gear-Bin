@@ -28,9 +28,14 @@ app/
 │       ├── login.vue
 │       └── site-info.vue   Site Info admin page (uses useAdminSiteInfoEditor)
 ├── features/         a feature owns its UI *and* the logic only that UI uses
-│   └── admin/
-│       ├── components/AdminProductEditor.vue   the product editor's modals + error banner
-│       └── composables/useAdminProductEditor.ts  its form, save, upload, delete (Phase 5)
+│   ├── admin/
+│   │   ├── components/AdminProductEditor.vue   the product editor's modals + error banner
+│   │   └── composables/useAdminProductEditor.ts  its form, save, upload, delete (Phase 5)
+│   └── product/
+│       ├── components/ProductConversion.vue    the conversion boundary: inline CTA + mobile sticky bar
+│       ├── components/ProductActions.vue       presentational row (contact CTA, channels, share)
+│       ├── composables/useProductContact.ts    channels, prepared message, copy — fetches nothing
+│       └── composables/useProductShare.ts      share sheet + clipboard fallback, no product type
 ├── composables/
 │   ├── useCatalog.ts            the only public catalog data layer
 │   ├── useCatalogBrowse.ts      browsing state: search / sort / category / filteredProducts
@@ -44,7 +49,10 @@ app/
 │   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
 │   └── …
 ├── middleware/       admin-auth.global.ts — guards /admin/*
-├── types/            database.ts (schema mirror), catalog.ts + site-info.ts (view models)
+├── types/            database.ts (schema mirror), catalog.ts + site-info.ts + product-contact.ts
+├── utils/            rules that are neither reactive state nor a browser capability
+│   ├── product-stock.ts   getProductStockState — the one owner of the in / low / out band
+│   └── clipboard.ts       copyToClipboard — reports only what the Clipboard API really did
 └── assets/css/main.css   theme + the select-morph keyframes
 scripts/
 ├── verify-ui.mjs     CDP regression harness: tuned interactions + the whole admin flow
@@ -105,6 +113,28 @@ shared component silently stops resolving (the build stays green; the page rende
    platform is a data edit in the admin UI, never a migration. The location is stored as a
    display label (per locale) plus one free URL, so a future map page only changes what the
    admin pastes into the URL field.
+8. **Product-detail conversion is the product feature's, and it fetches nothing.** Asking the shop
+   about a product and handing that product to a friend are two halves of one section, and the
+   section is a feature: `app/features/product/components/ProductConversion.vue` is the boundary —
+   it owns the behaviour, the confirmation and the mobile sticky bar — while
+   `ProductActions.vue` stays presentational (props in, `copy` / `share` out, no composable).
+   `useProductContact` is *handed* the `CatalogProduct` and the `SiteInfo` the page loaded and
+   issues no query of its own, so `useCatalog` and `useSiteInfo` remain the only readers of their
+   tables; `useProductShare` is deliberately a different capability that accepts
+   `{ title, text?, url }` rather than a product, so the next shareable thing reuses it instead of
+   duplicating it. `[id].vue` composes the section and holds none of these rules.
+
+   Two decisions inside that boundary are load-bearing, not taste. Channels are the **stored**
+   number and the **stored** social URLs: nothing is ever assembled into a platform compose
+   endpoint from a handle, because a profile link is not a compose link and a guessed parameter
+   would break silently on a platform the shop adds later; a channel left empty or disabled simply
+   does not appear. And the prepared message is copied by an **explicit button**, not as a side
+   effect of tapping a channel, because an async clipboard write cannot be awaited before a link
+   navigates — holding the await costs the navigation, and firing the write without awaiting it
+   would leave the visitor unable to tell whether the copy happened, which `copyToClipboard`
+   refuses to pretend about: it returns `false` when the API is absent *or* when `writeText`
+   rejects, and only a resolved write counts as success. The message is therefore also shown in the
+   panel, so a refused clipboard is a slowdown rather than a dead end.
 
 ## The editor seam
 
@@ -372,6 +402,18 @@ surface should match the logo.
   adding its two dirs there (and keeping `~/components` in the component list).
 - The site-info editor's UI is still `admin/site-info.vue`'s own markup — it is a page, not a
   home-page feature, and `useAdminSiteInfoEditor` has no markup outside it to separate.
+- Product-detail conversion behaviour → `app/features/product/composables/`; its UI →
+  `app/features/product/components/` (both dirs are registered in `nuxt.config.ts`). A capability
+  that takes no catalog type — the share sheet — may live beside them, but must not start taking
+  one, or it stops being reusable.
+- A rule that is neither reactive state nor a browser capability → `app/utils/`, as a plain
+  exported function, **not** a composable. `getProductStockState` is the example: the
+  in / low / out band used to be written twice — once to colour `StockStatus`, once to word the
+  contact CTA — and one function now answers for both while still reading the unchanged
+  `LOW_STOCK_THRESHOLD`. Its band, label and colour are asserted on all six fixture cards by
+  `verify`, because a newly-shared rule with no measurement behind it is a silent recolour
+  waiting to happen. A browser capability wrapper belongs here for the same reason and must
+  return a truthful result rather than reporting success it did not witness (`clipboard.ts`).
 - New env var → both `.env.example` and `runtimeConfig` in `nuxt.config.ts`.
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
@@ -405,6 +447,17 @@ surface should match the logo.
   the same logo + theme + language controls with different sizes. Only the home masthead carries
   Site Info; giving it to the detail page is two props, but at the detail header's sticky
   `min-h-16` rhythm neither level has been measured there yet.
+- **The product feature is not mounted yet.** `app/features/product/` compiles and is registered
+  for auto-import, but `products/[id].vue` renders none of it: no visitor sees the contact CTA, the
+  channel panel, the share button or the mobile sticky bar, and the detail page does not yet read
+  `useSiteInfo` to feed the channels. Until the page composes `ProductConversion`, the harness has
+  no way to reach those controls — `bun run build` does not even put them in the graph, so the
+  stock-band check in `verify` is the only part of this area that is measured today.
+- **The `tel:` digit rule has two owners.** `SiteInfoContact.vue` and
+  `app/features/product/composables/useProductContact.ts` each keep their own
+  `phone.replace(/[^\d+]/g, '')`. It was left duplicated on purpose: the masthead's contact line is
+  under the harness's inset-and-href invariants and a conversion pass has no business editing it.
+  One owner under `app/utils/` is the change a site-info pass should make.
 - **Dead code:** `app/types/product.ts`, `app/types/database.types.ts`, the `ProductCategory`
   union (the schema stores categories as rows, not an enum), `TemplateMenu.vue`, `AppLogo.vue`.
 - **No `server/api` tier.** `createSupabaseAdminClient()` has zero callers and the
