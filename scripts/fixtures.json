@@ -26,7 +26,13 @@
         }
       ],
       "product_images": [
-        { "id": "eeeeeeee-0000-4000-8000-000000000201", "storage_path": "products/verify/keyboard.png", "alt_text": "Verify Keyboard", "sort_order": 0 }
+        { "id": "eeeeeeee-0000-4000-8000-000000000201", "storage_path": "products/verify/keyboard.png", "alt_text": "Verify Keyboard", "sort_order": 0 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000211", "storage_path": "products/verify/keyboard-2.png", "alt_text": "Verify Keyboard angle 2", "sort_order": 1 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000212", "storage_path": "products/verify/keyboard-3.png", "alt_text": "Verify Keyboard angle 3", "sort_order": 2 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000213", "storage_path": "products/verify/keyboard-4.png", "alt_text": "Verify Keyboard angle 4", "sort_order": 3 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000214", "storage_path": "products/verify/keyboard-5.png", "alt_text": "Verify Keyboard angle 5", "sort_order": 4 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000215", "storage_path": "products/verify/keyboard-6.png", "alt_text": "Verify Keyboard angle 6", "sort_order": 5 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000216", "storage_path": "products/verify/keyboard-7.png", "alt_text": "Verify Keyboard angle 7", "sort_order": 6 }
       ],
       "categories": {
         "id": "cccccccc-0000-4000-8000-0000000000k01",
@@ -57,7 +63,8 @@
         }
       ],
       "product_images": [
-        { "id": "eeeeeeee-0000-4000-8000-000000000202", "storage_path": "products/verify/mouse.png", "alt_text": "Verify Mouse", "sort_order": 0 }
+        { "id": "eeeeeeee-0000-4000-8000-000000000202", "storage_path": "products/verify/mouse.png", "alt_text": "Verify Mouse", "sort_order": 0 },
+        { "id": "eeeeeeee-0000-4000-8000-000000000222", "storage_path": "products/verify/mouse-2.png", "alt_text": "Verify Mouse side view", "sort_order": 1 }
       ],
       "categories": {
         "id": "cccccccc-0000-4000-8000-0000000000m01",
@@ -243,6 +250,16 @@
       "aaaaaaaa-0000-4000-8000-000000000003": [["Battery", "40h"], ["Codec", "LC3"]]
     },
     "sortedPayloadColumns": "category_id,price,sku,slug,status,stock_quantity",
+    "gallery": {
+      "_comment": "Photo-set shapes the detail gallery must handle: many (> visible window), two, and one. window must equal ProductGallery's VISIBLE_COUNT.",
+      "manyId": "aaaaaaaa-0000-4000-8000-000000000001",
+      "manyImages": 7,
+      "twoId": "aaaaaaaa-0000-4000-8000-000000000002",
+      "twoImages": 2,
+      "singleId": "aaaaaaaa-0000-4000-8000-000000000003",
+      "controllerId": "aaaaaaaa-0000-4000-8000-000000000004",
+      "window": 5
+    },
     "siteInfo": {
       "phoneText": "+855 12 345 678",
       "phoneHref": "tel:+85512345678",

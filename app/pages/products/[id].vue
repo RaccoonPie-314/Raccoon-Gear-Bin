@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { CatalogProduct } from '~/types/catalog'
+
 const route = useRoute()
-const { fetchProduct, parseSpecificationPairs } = useCatalog()
+const { fetchProduct, fetchProducts, parseSpecificationPairs } = useCatalog()
 const { t } = useI18n()
 const product = ref<Awaited<ReturnType<typeof fetchProduct>>>(null)
-const selectedImageIndex = ref(0)
 const isLoading = ref(true)
 const loadError = ref('')
 
@@ -19,6 +20,35 @@ const loadProduct = async () => {
   }
 }
 
+// The header search filters a loaded catalog list locally: the fetch is `useCatalog`'s, the
+// matching is `useCatalogBrowse`'s — the same pair the home page uses, so the detail page adds
+// no second search implementation and never queries on a keystroke. The list is pulled once,
+// lazily, on the first focus of the field.
+const searchProducts = ref<CatalogProduct[]>([])
+const { search, filteredProducts } = useCatalogBrowse(searchProducts)
+const isSearchCatalogLoading = ref(false)
+const isSearchCatalogLoaded = ref(false)
+
+const ensureSearchCatalog = async () => {
+  if (isSearchCatalogLoaded.value || isSearchCatalogLoading.value) return
+  isSearchCatalogLoading.value = true
+  try {
+    searchProducts.value = await fetchProducts()
+    isSearchCatalogLoaded.value = true
+  } catch (error) {
+    // Like the home masthead's site-info read: a failed auxiliary fetch degrades to "no
+    // results", not to a red banner on a page whose subject is the product.
+    console.error('Catalog search load failed:', error)
+  } finally {
+    isSearchCatalogLoading.value = false
+  }
+}
+
+// Detail→detail navigation (now reachable from the header search) keeps this component
+// instance; without re-reading on a param change the page would show the previous product
+// under the new URL.
+watch(() => route.params.id, () => { void loadProduct() })
+
 // The specifications value arrives in whatever shape the editor stored, and only the catalog
 // data layer knows how to read it; this page just renders the pairs it is handed.
 const parsedSpecs = computed(() => parseSpecificationPairs(product.value?.specifications))
@@ -31,11 +61,22 @@ useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
     <!-- Sticky Translucent Minimalist Header -->
     <header class="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80 transition-colors">
-      <UContainer class="flex min-h-16 sm:min-h-20 items-center justify-between">
-        <NuxtLink to="/" :aria-label="t('appName')">
+      <!-- The search sits between the brand and the utility group from `sm` up, and drops to
+           its own full-width line below that — the same reflow valve the masthead uses, so a
+           control that no longer fits adds a row instead of widening the page. -->
+      <UContainer class="flex min-h-16 sm:min-h-20 flex-wrap items-center gap-x-3 gap-y-2 py-2 sm:gap-x-4">
+        <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
           <BrandLogo size="md" />
         </NuxtLink>
-        <div class="flex items-center gap-3 sm:gap-4">
+        <div class="order-last w-full min-w-0 sm:order-none sm:w-auto sm:max-w-xs sm:flex-1">
+          <CatalogSearchBox
+            v-model="search"
+            :results="filteredProducts"
+            :loading="isSearchCatalogLoading"
+            @focus="ensureSearchCatalog"
+          />
+        </div>
+        <div class="ml-auto flex items-center gap-3 sm:gap-4">
           <ColorModeToggle />
           <LanguageSwitcher />
           <NuxtLink
@@ -71,42 +112,9 @@ useHead(() => ({ title: product.value ? `${product.value.name} | ${t('appName')}
       </section>
 
       <section v-else class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
-        <!-- Gallery Column -->
-        <div class="space-y-4">
-          <div class="relative aspect-square overflow-hidden rounded-2xl sm:rounded-3xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/70 dark:border-zinc-800/70 p-4 sm:p-8 flex items-center justify-center shadow-xs">
-            <img
-              v-if="product.images[selectedImageIndex] || product.images[0]"
-              :src="(product.images[selectedImageIndex] || product.images[0]).url"
-              :alt="(product.images[selectedImageIndex] || product.images[0]).altText || product.name"
-              class="h-full w-full object-contain transition-all duration-300"
-            />
-            <div v-else class="flex h-full items-center justify-center text-xs uppercase tracking-[0.2em] text-zinc-400">
-              {{ t('noImage') }}
-            </div>
-          </div>
-
-          <!-- Thumbnails Row -->
-          <div v-if="product.images.length > 1" class="flex flex-wrap gap-3">
-            <button
-              v-for="(image, index) in product.images"
-              :key="image.id"
-              type="button"
-              class="h-16 w-16 sm:h-20 sm:w-20 rounded-xl overflow-hidden border p-1 bg-zinc-50 dark:bg-zinc-900 transition-all cursor-pointer focus-visible:outline-none"
-              :class="[
-                selectedImageIndex === index
-                  ? 'border-zinc-950 dark:border-white ring-2 ring-zinc-950/20 dark:ring-white/20'
-                  : 'border-zinc-200/80 dark:border-zinc-800/80 opacity-70 hover:opacity-100 hover:border-zinc-400'
-              ]"
-              @click="selectedImageIndex = index"
-            >
-              <img
-                :src="image.url"
-                :alt="image.altText || product.name"
-                class="h-full w-full object-cover rounded-lg"
-              />
-            </button>
-          </div>
-        </div>
+        <!-- Gallery Column: the photo frame, arrows and filmstrip live in one presentational
+             component; the page only hands it the catalog-mapped images. -->
+        <ProductGallery :images="product.images" :name="product.name" />
 
         <!-- Product Summary & Specs Column -->
         <div class="lg:sticky lg:top-24 self-start">

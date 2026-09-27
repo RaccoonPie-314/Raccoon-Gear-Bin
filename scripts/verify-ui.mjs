@@ -644,6 +644,116 @@ const run = async () => {
       const rows = await ev('(() => [...document.querySelectorAll("main dl > div")].map(d => [(d.querySelector("dt")?.textContent || "").trim(), (d.querySelector("dd")?.textContent || "").trim()]))()')
       check(`detail page renders specifications for ${id.slice(-2)}`, JSON.stringify(rows) === JSON.stringify(EXP.specRows[id]), { rows })
     }
+
+    // ---- product gallery: a bounded strip window that ADVANCES one slot when an adjacent
+    // thumb is selected (a static list would keep the window and just move the highlight —
+    // the WINDOW array is what distinguishes the two), centring the selection while it can ----
+    const G = EXP.gallery
+    const THUMB = '[data-gallery-thumb]'
+    const SEL_IDX = `(() => { const t = document.querySelector('${THUMB}[data-selected]'); return t ? +t.getAttribute('data-index') : -1 })()`
+    const WINDOW = `(() => [...document.querySelectorAll('${THUMB}')].map(b => +b.getAttribute('data-index')))()`
+    const CENTRE = `(() => { const s = document.querySelector('[data-gallery-strip]'); const t = document.querySelector('${THUMB}[data-selected]'); if (!s || !t) return null; const sc = s.getBoundingClientRect(), tc = t.getBoundingClientRect(); return Math.abs((sc.left + sc.width / 2) - (tc.left + tc.width / 2)) })()`
+    const MAIN_SRC = '(() => { const i = document.querySelector("[data-gallery-main]"); return i ? i.getAttribute("src") : null })()'
+    const winJson = () => ev(WINDOW).then(w => JSON.stringify(w))
+    const detailUrl = id => new URL('/products/' + id, appUrl).href
+    const pathnameIs = id => `location.pathname === '/products/${id}'`
+
+    await nav(detailUrl(G.manyId))
+    if (!await waitFor('!!document.querySelector(\'[data-product-gallery]\')')) check('product gallery mounts', false)
+    else {
+      check('strip renders a bounded window of thumbs', (await ev(`document.querySelectorAll('${THUMB}').length`)) === G.window, { window: G.window })
+      check('first photo is selected, with both arrows', (await ev(SEL_IDX)) === 0 && await ev('!!document.querySelector(\'[data-gallery-prev]\') && !!document.querySelector(\'[data-gallery-next]\')'))
+      const src0 = await ev(MAIN_SRC)
+      await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 1`)
+      check('next arrow advances the selection', await waitFor(`(${SEL_IDX}) === 1`))
+      check('main photo swaps when the selection moves', !!src0 && (await ev(MAIN_SRC)) !== src0)
+      await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 2`)
+      check('arrows never navigate the page', await ev(pathnameIs(G.manyId)))
+      // [0..4] window, selection 2 → clicking the adjacent thumb (3) must slide the window to
+      // [1..5], not leave it at [0..4] with a moved highlight.
+      await clickSelector(`${THUMB}[data-index="3"]`, `(${SEL_IDX}) === 3`)
+      const fwdSel = await ev(SEL_IDX)
+      const fwdWindow = await winJson()
+      check('adjacent-thumb selection advances the strip one slot', fwdSel === 3 && fwdWindow === JSON.stringify([1, 2, 3, 4, 5]), { fwdSel, fwdWindow })
+      await sleep(350) // let the one-slot slide settle before measuring centring
+      const fwdCentre = await ev(CENTRE)
+      check('selected thumb is highlighted and centred', fwdCentre !== null && fwdCentre < 2, { fwdCentre })
+      await clickSelector(`${THUMB}[data-index="2"]`, `(${SEL_IDX}) === 2`)
+      const backWindow = await winJson()
+      check('previous-adjacent selection retreats the strip one slot', (await ev(SEL_IDX)) === 2 && backWindow === JSON.stringify([0, 1, 2, 3, 4]), { backWindow })
+      // wrap: from 2, three prev clicks land on 0 then wrap to the last photo
+      await clickSelector('[data-gallery-prev]', `(${SEL_IDX}) === 1`)
+      await clickSelector('[data-gallery-prev]', `(${SEL_IDX}) === 0`)
+      await clickSelector('[data-gallery-prev]', `(${SEL_IDX}) === ${G.manyImages - 1}`)
+      const wrapWindow = await winJson()
+      check('previous wraps first → last and pins the window to the end', (await ev(SEL_IDX)) === G.manyImages - 1 && wrapWindow === JSON.stringify([2, 3, 4, 5, 6]), { wrapWindow })
+      await sleep(350)
+      // At the clamped ends the window cannot stay centred — the last thumb rests in the last
+      // slot with the strip pinned at [2..6]. That is the "stay centred whenever possible" rule;
+      // what must hold is highlight + pinned window + right-slot position, not the centre.
+      const wrapEnd = await ev('(() => { const s = document.querySelector(\'[data-gallery-strip]\'); const t = document.querySelector(\'[data-gallery-thumb][data-selected]\'); if (!s || !t) return null; const sc = s.getBoundingClientRect(), tc = t.getBoundingClientRect(); return { right: Math.abs(sc.right - tc.right) < 1.5, ring: getComputedStyle(t).borderColor } })()')
+      check('the wrapped-last selection is highlighted in the pinned end slot', !!wrapEnd && wrapEnd.right, { wrapEnd })
+      await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 0`)
+      check('next wraps last → first', await waitFor(`(${SEL_IDX}) === 0`))
+      await ev('document.querySelector(\'[data-product-gallery]\').focus(); true')
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowRight', key: 'ArrowRight' })
+      check('keyboard arrow drives the selection when the gallery is focused', await waitFor(`(${SEL_IDX}) === 1`))
+    }
+
+    await nav(detailUrl(G.twoId))
+    await waitFor('!!document.querySelector(\'[data-gallery-strip]\')')
+    const twoWindow = await winJson()
+    check('two-photo product shows both thumbs unwindowed', twoWindow === JSON.stringify([0, 1]), { twoWindow })
+    await clickSelector(`${THUMB}[data-index="1"]`, `(${SEL_IDX}) === 1`)
+    check('small sets do not slide: the strip stays put on selection', (await ev(SEL_IDX)) === 1 && (await winJson()) === JSON.stringify([0, 1]))
+    await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 0`)
+    check('two-photo arrows wrap', await waitFor(`(${SEL_IDX}) === 0`))
+
+    await nav(detailUrl(G.singleId))
+    await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
+    check('one-photo product shows no strip, no arrows, and its photo', !(await ev('!!document.querySelector(\'[data-gallery-strip]\')')) && !(await ev('!!document.querySelector(\'[data-gallery-prev]\')')) && !!(await ev(MAIN_SRC)))
+
+    await metrics(390, 844, true)
+    await nav(detailUrl(G.manyId))
+    await waitFor(`document.querySelectorAll('${THUMB}').length === ${G.window}`)
+    await sleep(300)
+    check('mobile gallery does not overflow horizontally', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+    await metrics(1440, 900, false)
+
+    // ---- product-detail header search: one lazy catalog fetch per visit, filtered locally ----
+    const SB = '[data-catalog-search]'
+    const SB_INPUT = `${SB} input`
+    const productsReads = async () => (await allW()).filter(w => w.method === 'GET' && w.p === '/rest/v1/products').length
+
+    await nav(detailUrl(G.manyId))
+    await waitFor(`!!document.querySelector(${JSON.stringify(SB_INPUT)})`)
+    const sb = (await ev(boxesExpr(SB_INPUT)))[0]
+    await clickAt(sb.x, sb.y)
+    await cdp.send('Input.insertText', { text: 'mouse' })
+    check('detail search filters the catalog locally', await waitFor(`document.querySelectorAll(${JSON.stringify(`${SB} a[href^="/products/"]`)}).length === 1 && document.body.textContent.includes('Verify Mouse')`))
+    await clickByText(`${SB} a`, 'Verify Mouse', pathnameIs(G.twoId))
+    check('search result navigates to that product', await waitFor(pathnameIs(G.twoId)) && await waitFor(`(document.querySelector('main h1')?.textContent || '').trim() === 'Verify Mouse'`))
+
+    await nav(detailUrl(G.manyId))
+    await waitFor(`!!document.querySelector(${JSON.stringify(SB_INPUT)})`)
+    await clickAt(sb.x, sb.y)
+    await cdp.send('Input.insertText', { text: 'zzzqqq' })
+    const emptyShown = await waitFor(`document.querySelector(${JSON.stringify(`${SB} p`)})?.textContent?.includes('No products match this view.')`)
+    const readsAfterFirst = await productsReads()
+    await sleep(450)
+    check('no keystroke queries: reads stay put while typing', emptyShown && (await productsReads()) === readsAfterFirst, { readsAfterFirst })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
+    check('Escape closes the search popover', await waitFor(`!document.querySelector(${JSON.stringify(`${SB} ul`)})`))
+    await clickAt(sb.x, sb.y)
+    await sleep(350)
+    check('refocus reuses the loaded catalog (one fetch per visit)', (await productsReads()) === readsAfterFirst)
+    await cdp.send('Input.insertText', { text: 'controller' })
+    await waitFor(`!!document.querySelector(${JSON.stringify(`${SB} ul a`)})`)
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Enter', key: 'Enter', windowsVirtualKeyCode: 13 })
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Enter', key: 'Enter' })
+    check('Enter selects the first search result', await waitFor(pathnameIs(G.controllerId)) && await waitFor(`(document.querySelector('main h1')?.textContent || '').trim() === 'Verify Controller'`))
     collectErrors()
   }
 
