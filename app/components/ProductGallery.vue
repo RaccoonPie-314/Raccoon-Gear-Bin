@@ -229,7 +229,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
     role="group"
     :aria-label="t('photos')"
     tabindex="0"
-    class="mx-auto w-full max-w-md space-y-4 rounded-3xl outline-none focus-visible:ring-2 focus-visible:ring-zinc-950/25 dark:focus-visible:ring-white/25"
+    class="mx-auto w-full min-w-0 max-w-md space-y-4 rounded-3xl outline-none focus-visible:ring-2 focus-visible:ring-zinc-950/25 dark:focus-visible:ring-white/25"
     @keydown="onKeydown"
   >
     <!-- Main photo: a deliberately smaller frame than the full gallery column, so the strip
