@@ -141,6 +141,15 @@ the matrix, don't assume the utility name.
   assertion must be about overflow, control height, inset or a bound — never about where a particular
   word ends. When a font stack changes, re-run the responsive sweep (320 / 390 / 640 and up): the
   narrow-screen guards are the ones that move.
+  The rule is not theoretical: the masthead used to require the phone to stop left of the centre line
+  and the location to start right of it, and that went red on `ubuntu-latest` for nothing worse than a
+  wider UI font — the pair was still pinned to both margins with nothing ellipsised. A text line is now
+  measured as pinning plus clipping (`scrollWidth > clientWidth` on the label), and the clip probe has
+  a control that squeezes a span on purpose, because "never fires" and "nothing is wrong" look
+  identical in a passing run. Note what was traded: `fix(ci): self-host the fonts so the verify gate
+  measures the same text everywhere` bought runner parity by bundling a Latin face, and Phase 1.3 gave
+  that back on purpose. Khmer stays bundled, so the locale with no system fallback is still the one
+  measured identically on every runner.
 - If Chrome fails to start with `Operation not permitted`, the command is running inside a
   restrictive sandbox — run it from a normal terminal.
 - The harness has **no dependencies** (raw CDP over WebSocket; Node 24 for global `WebSocket`) —

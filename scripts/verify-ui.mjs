@@ -1174,7 +1174,13 @@ const run = async () => {
     // rect hangs outside the viewport, and a touch point sent below the fold is silently dropped —
     // which reads exactly like a tap that the app ignored. The pan clamp guarantees the picture still
     // covers the frame, so this point is always on the picture.
-    const tapAt = async (x, y) => { await touch('touchStart', [{ x, y }]); await touch('touchEnd', []); await sleep(320) }
+    // A tap is held for ~70ms and the next gesture waits a beat after a drag, because a real finger
+    // does: Blink synthesises the click from the touch *sequence*, and a start-and-end-in-the-same-frame
+    // dispatch right after a pan is the shape a finger never makes. It also explains nothing when it
+    // fails, so the control logs the events it is handed.
+    const tapAt = async (x, y) => { await touch('touchStart', [{ x, y }]); await sleep(70); await touch('touchEnd', []); await sleep(320) }
+    const zlog = '(() => { const b = document.querySelector(\'[data-lightbox] [data-lightbox-zoom-target]\'); if (!b) return null; window.__Z = []; for (const ty of [\'pointerdown\', \'pointerup\', \'click\']) b.addEventListener(ty, e => window.__Z.push(ty + \'@\' + Math.round(e.clientX) + \',\' + Math.round(e.clientY) + \' d\' + e.detail)); return true })()'
+    await ev(zlog)
     const zoomedNow = () => ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
     check('the lightbox photo itself takes the tap, with no standalone zoom control left', (await ev('document.querySelectorAll(\'[data-lightbox-zoom]\').length')) === 0 && await ev(`!!document.querySelector('${MTAP}')`))
     await tapAt(195, 300)
@@ -1183,9 +1189,13 @@ const run = async () => {
     for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: 195 - 30 * i, y: 420 }]); await sleep(30) }
     const mPan = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const t = getComputedStyle(i).transform; const m = /matrix\\(([^)]+)\\)/.exec(t); return { tx: m ? +m[1].split(",")[4] : 0, zoomed: i.getAttribute("data-zoomed"), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
     await touch('touchEnd', [])
+    await sleep(300)
     check('a finger drag pans the zoomed photo without moving the page', mPan.zoomed === 'true' && mPan.tx < -40 && mPan.overflow <= 1, { mPan })
     await tapAt(195, 420)
-    check('a second tap, with no drag behind it, returns the photo to the contained view', !(await zoomedNow()))
+    // The log is the difference between "the app ignored the tap" and "Blink never offered a click":
+    // the first is a defect in `ProductGallery`, the second is a defect in this rig.
+    const resetLog = await ev('window.__Z || null')
+    check('a second tap, with no drag behind it, returns the photo to the contained view', !(await zoomedNow()), { zoomedNow: await zoomedNow(), resetLog })
     // The drag must not be mistaken for navigation, and navigation must not be lost to the drag: the
     // arrows live outside the photo, so they answer a tap while it is magnified.
     await tapAt(195, 420)
