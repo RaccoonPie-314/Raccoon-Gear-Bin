@@ -1191,19 +1191,28 @@ const run = async () => {
     await touch('touchEnd', [])
     await sleep(300)
     check('a finger drag pans the zoomed photo without moving the page', mPan.zoomed === 'true' && mPan.tx < -40 && mPan.overflow <= 1, { mPan })
-    await tapAt(195, 420)
-    // The log is the difference between "the app ignored the tap" and "Blink never offered a click":
-    // the first is a defect in `ProductGallery`, the second is a defect in this rig.
+    // The tap that undoes a zoom is aimed *away* from the drag's own touch points. A panning gesture
+    // makes Blink withhold the click it would otherwise synthesise for a tap landing back inside that
+    // gesture's room, and on Linux that is what the reset looked like: `pointerdown`, `pointerup`, and
+    // no click at all — the app was never asked. A real finger lifts and comes down somewhere else.
+    // The guard for the case the other way round (a release that *does* trail a click, the mouse path,
+    // where the pan must not read as a zoom-out) is `dragSettled.zoomed` in the desktop section above.
+    await tapAt(300, 200)
+    // The log stays, because it is what turns "the photo is still zoomed" into a diagnosis: the
+    // difference between the app ignoring a tap and Blink never offering one.
     const resetLog = await ev('window.__Z || null')
     check('a second tap, with no drag behind it, returns the photo to the contained view', !(await zoomedNow()), { zoomedNow: await zoomedNow(), resetLog })
     // The drag must not be mistaken for navigation, and navigation must not be lost to the drag: the
     // arrows live outside the photo, so they answer a tap while it is magnified.
     await tapAt(195, 420)
+    // Ask before assuming the photo is magnified here: an arm that silently failed would let the
+    // navigation check pass while testing nothing.
+    const armedForNav = await zoomedNow()
     const selBeforeNav = await ev(SEL_IDX)
     const mLbNext = (await ev(boxesExpr('[data-lightbox-next]')))[0]
     await tapAt(mLbNext.x, mLbNext.y)
     await sleep(200)
-    check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { selBeforeNav })
+    check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', armedForNav === true && (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { armedForNav, selBeforeNav })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
