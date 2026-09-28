@@ -47,11 +47,13 @@ app/
 ├── components/       presentational; never import a data composable
 │   ├── category/     CategoryNav (facade) + CategoryDesktop + CategoryMobile
 │   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
+│   ├── SocialBrandIcon.vue   the one owner of the platform marks the header and contact rows share
 │   └── …
 ├── middleware/       admin-auth.global.ts — guards /admin/*
 ├── types/            database.ts (schema mirror), catalog.ts + site-info.ts + product-contact.ts
 ├── utils/            rules that are neither reactive state nor a browser capability
 │   ├── product-stock.ts   getProductStockState — the one owner of the in / low / out band
+│   ├── social-prefill.ts  socialContactLink — which platforms document a prefill, and the rest
 │   └── clipboard.ts       copyToClipboard — reports only what the Clipboard API really did
 └── assets/css/main.css   theme + the select-morph keyframes
 scripts/
@@ -113,6 +115,13 @@ shared component silently stops resolving (the build stays green; the page rende
    platform is a data edit in the admin UI, never a migration. The location is stored as a
    display label (per locale) plus one free URL, so a future map page only changes what the
    admin pastes into the URL field.
+   Each link also carries **two independent visibility flags**: `enabled` (shown in the masthead)
+   and `contact_enabled` (offered by Product → Contact to Order). They are separate because they
+   answer separate questions — an owner may list an Instagram they never read messages on, or keep
+   a WhatsApp number out of the header while still taking orders through it. `fetchSiteInfo`
+   returns both narrowed lists from one parse rather than letting a component filter the other's
+   list, and a row written before the key existed inherits `enabled`, which is exactly what the
+   product page used, so no shop gains or loses a channel on upgrade.
 8. **Product-detail conversion is the product feature's, and it fetches nothing.** Asking the shop
    about a product and handing that product to a friend are two halves of one section, and the
    section is a feature: `app/features/product/components/ProductConversion.vue` is the boundary —
@@ -193,6 +202,19 @@ Two details in there are contracts rather than style:
 - **The sticky bar is below the lightbox by stacking, not by knowledge.** It is `z-50`; the
   lightbox is `z-[70]`; nothing in the feature reads or owns gallery state, and the harness proves
   the ordering with `elementFromPoint` over the bar's own centre while the lightbox is open.
+
+Platform capability lives in one pure function, `socialContactLink` in `app/utils/social-prefill.ts`,
+and its rule is: use a documented prefill where the platform publishes one, and otherwise open the
+stored URL unchanged. WhatsApp (`wa.me/<number>?text=`) and Telegram (`t.me/<username>?text=`,
+`t.me/+<phone>?text=`, `t.me/share/url?url=&text=`) are supported; Facebook, Messenger, Instagram,
+TikTok and everything unrecognised are not, because none of them documents a public parameter for a
+prefilled DM. Inventing one fails silently — it opens a chat with an empty box — so the only
+assemblies ever performed put the shop's *own* configured number or username into a documented
+parameter, a stored URL is never rewritten into a compose URL, and the row states which it did
+(`prefilled`), with the explicit Copy action always available beside the list. The platform marks
+come from `SocialBrandIcon.vue`, the single owner shared by the masthead and the contact rows: the
+path data is one copy because a hand-copied truncated curve has already rendered a glyph as a 1.4px
+speck, and the globe fallback is what makes a new platform a data edit rather than a code change.
 
 The canonical URL is a page fact and a feature fact at once: `useHead` publishes
 `route.path` against the request origin (not `useRequestURL()`, which on the client is read once and
@@ -435,9 +457,11 @@ surface should match the logo.
 - New read of catalog data → extend `useCatalog` (and its derived row type).
 - New read or write of public site info → extend `useSiteInfo` (reads and jsonb shapes) or
   `useAdminSiteInfoEditor` (editor behaviour). Never a third copy of the row's shape.
-- A new social platform → data only: a row in the Site Info editor. The header renders a known
-  mark or a globe fallback for anything else; making the fallback a real mark is one entry in
-  `SiteInfoSocials`'s `BRAND_ICONS`, never a schema or composable change.
+- A new social platform → data only: a row in the Site Info editor. The header and the contact rows
+  render a known mark or a globe fallback for anything else; making the fallback a real mark is one
+  entry in `SocialBrandIcon.vue`'s `BRAND_ICONS`, never a schema or composable change. Deciding
+  whether that platform can carry the message is one branch in
+  `app/utils/social-prefill.ts`, and only with a parameter its own documentation states.
 - New rendering of stored specifications → consume `parseSpecificationPairs`; widen it, never
   re-parse the column at the call site.
 - New filter/sort/selection state → `useCatalogBrowse`.

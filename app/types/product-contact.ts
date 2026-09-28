@@ -6,16 +6,25 @@
 // `app/utils/product-stock.ts`.
 
 /**
- * One contact/order channel the shop has actually configured. `href` is always the stored value
- * (the phone number as a `tel:` link, or a social link's own URL) — never something assembled
- * from a guess about the platform. `label` is the translated word for the channel and `value`
- * the part worth showing beside it (the number for a phone, empty for a social profile whose URL
- * is already the destination).
+ * One contact/order channel the shop has actually configured.
+ *
+ * `href` is the stored value — the phone number as a `tel:` link, or a social link's own URL —
+ * **except** where the platform documents a way to carry the message with it (see
+ * `app/utils/social-prefill.ts`). That exception is the only assembly that ever happens, and it
+ * uses the shop's own configured identity: a username, handle or number is never invented, and a
+ * stored profile URL is never rewritten into a compose URL.
+ *
+ * `prefilled` is what the row is allowed to claim. A row that carries the message says so; a row
+ * that does not must point at the explicit Copy action instead, so the UI never implies a paste
+ * that did not happen.
  */
 export type ProductContactChannel = {
   key: string
+  /** Normalisable platform name: `phone`, `telegram`, `whatsapp`, or whatever the shop typed. */
+  platform: string
   label: string
   href: string
   value: string
   external: boolean
+  prefilled: boolean
 }

@@ -315,7 +315,11 @@ const run = async () => {
     missing: 'undefined'
   }
   const SHARE = {
-    ok: 'function (data) { window.__SHARES.push(data || {}); return Promise.resolve(); }',
+    // `navigator.userActivation.isActive` is recorded at the moment the app calls share, which is
+    // the only way to tell "called from the click" apart from "called after an await that cost the
+    // activation" — a sheet that silently stops opening on mobile is exactly that failure, and no
+    // amount of reading the code afterwards proves the timing.
+    ok: 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return Promise.resolve(); }',
     abort: 'function () { var e = new Error("dismissed"); e.name = "AbortError"; return Promise.reject(e); }',
     absent: 'undefined'
   }
@@ -334,7 +338,7 @@ const run = async () => {
   // Both mounts of the conversion UI in one read: the inline block and the teleported sticky bar
   // are the same component twice, so every assertion below asks the same question of each and the
   // answers are what prove the two cannot drift apart.
-  const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => ({ href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel") })) }) } return out })()'
+  const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, panelTabbable: panel ? panel.getAttribute("tabindex") === "0" : false, panelOverflow: panel ? panel.scrollHeight - panel.clientHeight : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, shareLink: (el.querySelector("[data-share-link]") || {}).value || null, readonly: el.querySelector("[data-share-link]") ? el.querySelector("[data-share-link]").getAttribute("readonly") !== null : null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => { const mark = a.querySelector("svg"); return { href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-contact-prefilled") === "true", svgs: a.querySelectorAll("svg").length, paths: a.querySelectorAll("svg path").length, fill: mark ? mark.getAttribute("fill") : null, stroke: mark ? mark.getAttribute("stroke") : null, ink: mark ? (() => { const bb = mark.getBBox(); return [Math.round(bb.width), Math.round(bb.height)] })() : null } }) }) } return out })()'
   const mounts = async () => await ev(MOUNTS)
   // The message the page must produce, assembled from the fixture row and the contract in
   // `expectations.conversion` — never read back out of the app.
@@ -958,16 +962,45 @@ const run = async () => {
     const wantIn = expectedMessage(row(G.manyId), C.ask.in, canonical(G.manyId))
     const opened = await openInlinePanel()
     check('the CTA opens the channel panel and announces that it did', opened.expanded === 'true' && opened.panelOpen && opened.controls === opened.panelControls, { expanded: opened.expanded, controls: opened.controls, panelId: opened.panelControls })
+    // A scroll region the keyboard cannot reach is a defect, not a style choice, and on a desktop
+    // there is room to show the whole list — so no inner scroll should be needed at this width.
+    check('the panel is keyboard-focusable and shows every channel on a desktop without an inner scroll', opened.panelTabbable && opened.panelOverflow <= 1, { tabbable: opened.panelTabbable, overflow: opened.panelOverflow })
     check('an in-stock product offers the order action and a five-line message built from the product', opened.ctaText === C.cta.in && opened.message === wantIn && opened.message.split('\n').length === C.lines.length, { cta: opened.ctaText, message: norm(opened.message) })
     check('the message field is a textarea associated with its own label', !!opened.labelFor && opened.labelFor === opened.fieldId && !!opened.labelText, { labelFor: opened.labelFor, fieldId: opened.fieldId, labelText: opened.labelText })
 
-    // The channels are the shop's configured contacts and nothing else: the stored number as a
-    // tel: link, then the enabled social links in their stored order. A invented handle, a guessed
-    // compose endpoint or a disabled platform showing up fails these three.
-    check('the channel list is exactly the configured contacts, in stored order', JSON.stringify(opened.channels.map(c => c.href)) === JSON.stringify(C.channelHrefs), { hrefs: opened.channels.map(c => c.href) })
+    // The contact list is the shop's `contact_enabled` rows and nothing else. The seeded set is a
+    // three-case probe on purpose: facebook is visible but not contactable, telegram carries no
+    // `contact_enabled` key at all (an old row, which must inherit `enabled` and survive), and
+    // tiktok is hidden from the header yet contactable. If either flag is used to answer the other's
+    // question, the order or the membership below stops matching. `{message}` is filled with this
+    // product's own encoded message, so a prefill that carried someone else's text would fail too.
+    const wantHrefs = C.channelHrefs.map(href => href.replace('{message}', encodeURIComponent(wantIn)))
+    const hrefsOf = m => m.channels.map(c => c.href)
+    check('the contact list is exactly the contact_enabled rows, in stored order', JSON.stringify(hrefsOf(opened)) === JSON.stringify(wantHrefs), { hrefs: hrefsOf(opened).map(h => h.slice(0, 60)), want: wantHrefs.map(h => h.slice(0, 60)) })
+    check('visible-but-not-contactable is withheld and hidden-but-contactable is offered', !hrefsOf(opened).some(h => h.includes('facebook.com')) && hrefsOf(opened).some(h => h.includes('t.me/raccoongearbin')))
+    check('only the documented platforms carry the message; the rest keep their stored URL byte-for-byte', JSON.stringify(opened.channels.map(c => c.prefilled)) === JSON.stringify(C.channelsPrefilled) && hrefsOf(opened)[2] === 'https://tiktok.com/@raccoongearbin.hidden', { prefilled: opened.channels.map(c => c.prefilled), tiktok: hrefsOf(opened)[2] })
     check('the phone channel shows the stored number and web channels are named by platform', opened.channels[0].text.includes(EXP.siteInfo.phoneText) && opened.channels.slice(1).every((c, i) => c.text.trim().startsWith(C.channelLabels[i + 1])), { texts: opened.channels.map(c => c.text) })
-    check('a disabled social link is not offered as a contact channel', !(await ev('document.body.innerHTML.includes(' + JSON.stringify(EXP.siteInfo.hiddenSocialUrl) + ')')))
+    check('each web row says what it does, so no channel implies a paste it did not make', opened.channels.slice(1).every(c => c.text.includes(c.prefilled ? C.claimPrefilled : C.claimCopy)), opened.channels.map(c => c.text))
+    // The marks come from the one source the masthead uses: exactly one svg per row, a known
+    // platform a single filled path — and the path must actually paint most of the frame. The
+    // header learned the hard way that a truncated path still yields an element with a fill, so
+    // existence and attributes alone prove nothing about what the visitor sees.
+    check('a known platform is marked by the shared brand mark, one filled path that paints', opened.channels.slice(1).every(c => c.svgs === 1 && c.paths === 1 && c.fill === 'currentColor' && c.ink[0] >= 12 && c.ink[1] >= 12), opened.channels.map(c => [c.svgs, c.paths, c.fill, c.ink]))
     check('a web channel opens in a new tab with a safe rel, the phone stays a plain link', opened.channels.slice(1).every(c => c.target === '_blank' && /noopener/.test(c.rel || '') && /noreferrer/.test(c.rel || '')) && opened.channels[0].target === null, opened.channels.map(c => [c.target, c.rel]))
+
+    // WhatsApp's documented prefill and an unknown platform are not in the seeded rows, so the
+    // stub's own collection is extended for one navigation. The app reads them through the same
+    // REST path as everything else, which is what makes this an integration check rather than a
+    // unit test of the rule — and the unknown platform is the case that a guessed `?text=` would
+    // have passed happily while shipping an empty chat box to a real customer.
+    const extraScript = await forNextDocument('window.__SITE.social_links.push({ platform: "whatsapp", url: "https://wa.me/85512345678", enabled: false, contact_enabled: true, sort_order: 5 }, { platform: "thelifeofpw", url: "https://store.example.test/handmade", enabled: false, contact_enabled: true, sort_order: 6 });')
+    await nav(detailUrl(G.manyId))
+    const extra = await openInlinePanel()
+    const waRow = extra.channels.find(c => c.href.includes('wa.me'))
+    const oddRow = extra.channels.find(c => c.href.includes('store.example.test'))
+    check('WhatsApp prefills through the documented wa.me form with the exact message', !!waRow && waRow.href === `https://wa.me/85512345678?text=${encodeURIComponent(wantIn)}` && waRow.prefilled === true, { wa: waRow && waRow.href.slice(0, 70) })
+    check('an unknown platform keeps its stored URL and the drawn globe, never a guessed parameter', !!oddRow && oddRow.href === 'https://store.example.test/handmade' && oddRow.prefilled === false && oddRow.svgs === 1 && oddRow.paths === 2 && oddRow.fill === 'none', { odd: oddRow && { href: oddRow.href, prefilled: oddRow.prefilled, paths: oddRow.paths, fill: oddRow.fill } })
+    await stopForNextDocument(extraScript)
 
     // The determinism rule: leaving for a channel must not leave a "copied" claim behind. The
     // capture listener cancels only the navigation, so the app's own click path still runs.
@@ -998,12 +1031,17 @@ const run = async () => {
     await clickSelector('[data-copy-message]', expectFeedback(JSON.stringify(C.feedback.copied)))
     const okCopies = await copies()
     check('a successful copy writes the exact message and only then says so', okCopies.length === 1 && okCopies[0] === wantIn && (await inlineMount()).feedback === C.feedback.copied, { copied: norm(okCopies[0] || ''), feedback: (await inlineMount()).feedback })
+    check('a copy that worked does not clutter the block with a manual fallback', !(await inlineMount()).shareLink, { shareLink: (await inlineMount()).shareLink })
 
     await armClipboard('missing')
     await clickSelector('[data-copy-message]', expectFeedback(JSON.stringify(C.feedback.blocked)))
     const refused = await inlineMount()
     check('an unavailable clipboard is reported as a failure, never as copied', (await copies()).length === 0 && refused.feedback === C.feedback.blocked && refused.feedback !== C.feedback.copied, { feedback: refused.feedback })
     check('a refused clipboard still leaves the whole message on screen to select by hand', refused.message === wantIn && refused.message.length > 40, { length: (refused.message || '').length })
+    // The sentence tells the visitor to copy the link themselves. Before this existed, that
+    // instruction pointed at nothing: the canonical address lived only inside the message field,
+    // behind a panel that the failed copy did not open.
+    check('and it puts the link on screen that the failure message asks them to copy', refused.shareLink === canonical(G.manyId) && refused.readonly === true, { shareLink: refused.shareLink, readonly: refused.readonly })
 
     check('the confirmation clears itself', await waitFor(cleared, 7000))
     await armClipboard('reject')
@@ -1020,6 +1058,9 @@ const run = async () => {
     const shared = await shares()
     const shareRow = row(G.manyId).product_translations[0]
     check('share goes through the Web Share API with the product name, its summary and the canonical URL', shared.length === 1 && shared[0].title === shareRow.name && shared[0].text === shareRow.short_description && shared[0].url === canonical(G.manyId), { shared })
+    // Web Share only works when the call is made while the browser still holds the gesture. This is
+    // the check that keeps a future `await` in front of it from silently killing mobile sharing.
+    check('the sheet is opened from the click itself, while user activation is still live', shared.length === 1 && shared[0].activation === true, { activation: shared[0] && shared[0].activation })
     check('a share that opened its sheet claims nothing behind it', (await copies()).length === 0 && (await inlineMount()).feedback === '', { copies: await copies(), feedback: (await inlineMount()).feedback })
 
     await armShare('abort')
@@ -1342,8 +1383,26 @@ const run = async () => {
     check('a social link can be disabled from its row', await ev(SWITCH_OFF))
     const SWITCH_2 = '[data-social-enabled="2"]'
     const SWITCH_ON = '(() => { const b = document.querySelector(' + JSON.stringify(SWITCH_2) + '); return !!b && b.getAttribute("aria-checked") === "true" })()'
+    // The two switches have to drive two fields, and the seeded row 2 proves it before anything is
+    // clicked: tiktok is stored hidden from the header (`enabled` false) but contactable
+    // (`contact_enabled` true), so its two controls must disagree out of the box. Asserted here,
+    // above, because the next line is the flow turning that row's masthead switch on.
+    const CONTACT_2 = '[data-social-contact="2"]'
+    const flagsOf = (visible, contact) => '(() => { const v = document.querySelector(' + JSON.stringify(visible) + '); const c = document.querySelector(' + JSON.stringify(contact) + '); return !!v && !!c && v.getAttribute("aria-checked") === "false" && c.getAttribute("aria-checked") === "true" })()'
+    check('one row can be hidden from the site and contactable at the same time', await ev(flagsOf(SWITCH_2, CONTACT_2)), { row: 2 })
     await clickSelector(SWITCH_2, SWITCH_ON)
     check('a social link can be enabled from its row', await ev(SWITCH_ON))
+    // Row 1 is the other half of the pair: the flow has just hidden telegram from the header, and
+    // its contact switch must still be on. Flipping that switch off and back on leaves `enabled`
+    // untouched at both ends, which is the point of two controls — and restores the exact state the
+    // saved body below is asserted against.
+    const CONTACT_1 = '[data-social-contact="1"]'
+    check('the row the flow just hid is still contactable', await ev('(() => { const v = document.querySelector(' + JSON.stringify(SWITCH_1) + '); const c = document.querySelector(' + JSON.stringify(CONTACT_1) + '); return !!v && !!c && v.getAttribute("aria-checked") === "false" && c.getAttribute("aria-checked") === "true" })()'))
+    const contactOffVisibleStillOff = '(() => { const c = document.querySelector(' + JSON.stringify(CONTACT_1) + '); const v = document.querySelector(' + JSON.stringify(SWITCH_1) + '); return !!c && !!v && c.getAttribute("aria-checked") === "false" && v.getAttribute("aria-checked") === "false" })()'
+    await clickSelector(CONTACT_1, contactOffVisibleStillOff)
+    check('the contact switch turns off without touching the masthead switch', await ev(contactOffVisibleStillOff))
+    await clickSelector(CONTACT_1, '(() => { const c = document.querySelector(' + JSON.stringify(CONTACT_1) + '); return !!c && c.getAttribute("aria-checked") === "true" })()')
+    check('and turns back on, so the saved rows keep their contact visibility', await ev('(() => { const c = document.querySelector(' + JSON.stringify(CONTACT_1) + '); return !!c && c.getAttribute("aria-checked") === "true" })()'))
     check('a link can be reordered up', await clickSelector('[data-social-up="3"]', 'JSON.stringify([...document.querySelectorAll("[data-social-platform]")].map(i => i.value)) === "[\\"facebook\\",\\"telegram\\",\\"youtube\\",\\"tiktok\\"]"'))
     check('a link can be removed', await clickSelector('[data-social-remove="0"]', 'document.querySelectorAll("[data-social-row]").length === 3 && document.querySelectorAll("[data-social-platform]")[0].value === "telegram"'))
     await resetW()
@@ -1353,10 +1412,13 @@ const run = async () => {
     const siteBody = JSON.parse(siteW[0]?.body || '{}')
     check('saved phone, location label and link reflect the edits', siteBody.phone === '+855 99 888 777' && siteBody.location_url === 'https://maps.example/hq' && JSON.stringify(siteBody.location_translations) === JSON.stringify([{ locale: 'en', label: 'RGB Bin HQ' }, { locale: 'km', label: 'ភ្នំពេញ កម្ពុជា' }]), { phone: siteBody.phone, url: siteBody.location_url, labels: siteBody.location_translations })
     check('saved links reflect add, edit, disable, enable, reorder and remove', JSON.stringify(siteBody.social_links) === JSON.stringify([
-      { platform: 'telegram', url: 'https://t.me/raccoongearbin', enabled: false, sort_order: 0 },
-      { platform: 'youtube', url: 'https://youtube.com/@raccoongearbin', enabled: true, sort_order: 1 },
-      { platform: 'tiktok', url: 'https://tiktok.com/@raccoongearbin.hidden', enabled: true, sort_order: 2 }
+      { platform: 'telegram', url: 'https://t.me/raccoongearbin', enabled: false, contact_enabled: true, sort_order: 0 },
+      { platform: 'youtube', url: 'https://youtube.com/@raccoongearbin', enabled: true, contact_enabled: true, sort_order: 1 },
+      { platform: 'tiktok', url: 'https://tiktok.com/@raccoongearbin.hidden', enabled: true, contact_enabled: true, sort_order: 2 }
     ]), siteBody.social_links)
+    // The new key is written explicitly on every row the current editor saves, so a shop's stored
+    // data stops depending on the inheritance rule the moment an owner touches the panel.
+    check('both visibility flags are written per row, not implied', siteBody.social_links.every(link => typeof link.enabled === 'boolean' && typeof link.contact_enabled === 'boolean'), siteBody.social_links)
     check('editor reloads the saved row', await waitFor('document.querySelectorAll("[data-social-row]").length === 3'))
     await ev('document.querySelector("main header a")?.click(); true')
     check('public header reflects the saved values', await waitFor('location.pathname === "/" && document.querySelector("header a[data-site-phone]")?.getAttribute("href") === "tel:+85599888777" && document.querySelector("header a[data-site-location]")?.getAttribute("href") === "https://maps.example/hq" && [...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform")).join() === "youtube,tiktok"'))
@@ -1383,8 +1445,13 @@ const run = async () => {
     await clickSelector('[data-contact-cta]', '!!document.querySelector("[data-contact-panel]")')
     const afterSave = (await mounts()).find(m => m.where === 'inline') || { channels: [], message: '' }
     const hrefsNow = afterSave.channels.map(c => c.href)
-    check('the product page offers exactly the channels the shop just configured', JSON.stringify(hrefsNow) === JSON.stringify(EXP.conversion.savedChannelHrefs), { hrefsNow })
-    check('and it withdraws the channel the shop just disabled', !hrefsNow.some(h => h.includes('t.me')), { telegramOffered: hrefsNow.some(h => h.includes('t.me')) })
+    const wantSaved = EXP.conversion.savedChannelHrefs.map(href => href.replace('{message}', encodeURIComponent(afterSave.message)))
+    check('the product page offers exactly the channels the shop just configured', JSON.stringify(hrefsNow) === JSON.stringify(wantSaved), { hrefsNow: hrefsNow.map(h => h.slice(0, 60)), want: wantSaved.map(h => h.slice(0, 60)) })
+    // The header check above proves telegram left the masthead; this one proves it stayed a contact
+    // channel, which is only possible because the two flags are separate settings. Seeded fixtures
+    // already cover the same pair statically — this is the same rule applied to data the admin flow
+    // actually wrote through the real upsert body.
+    check('a channel the shop hid from the header but left contactable is still offered', hrefsNow.some(h => h.includes('t.me/raccoongearbin')) && await ev('window.__SITE.social_links.some(l => l.platform === "telegram" && l.enabled === false && l.contact_enabled === true)'), { hrefsNow: hrefsNow.map(h => h.slice(0, 60)) })
     const here = await ev('location.origin + location.pathname')
     const headingNow = await ev('(document.querySelector("main h1") || {}).textContent?.trim()')
     const canonicalHere = await ev('(() => { const l = document.querySelector("link[rel=canonical]"); return l ? l.getAttribute("href") : null })()')

@@ -4,6 +4,7 @@ import type { ProductContactChannel } from '~/types/product-contact'
 import type { SiteInfo } from '~/types/site-info'
 import { copyToClipboard } from '~/utils/clipboard'
 import { getProductStockState } from '~/utils/product-stock'
+import { socialContactLink } from '~/utils/social-prefill'
 
 /**
  * The contact half of the product detail page's conversion: which channels the shop has actually
@@ -41,26 +42,6 @@ export const useProductContact = (
   // duplication is recorded in ARCHITECTURE.md so a later site-info change can give it one owner.
   const phoneHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`
 
-  /**
-   * Whatever the shop configured, and nothing else: the phone number when it is filled in, then
-   * the social links in their stored order. `useSiteInfo` has already dropped the disabled ones, so
-   * a hidden masthead icon is a hidden channel here too. No username, handle or number is ever
-   * constructed — an unset channel simply does not appear, and a stored profile URL is opened
-   * exactly as stored rather than rewritten into a compose endpoint.
-   */
-  const channels = computed<ProductContactChannel[]>(() => {
-    const siteInfo = toValue(siteInfoSource)
-    const resolved: ProductContactChannel[] = []
-    const phone = siteInfo?.phone?.trim()
-    if (phone) resolved.push({ key: 'phone', label: t('phone'), href: phoneHref(phone), value: phone, external: false })
-    for (const link of siteInfo?.socialLinks ?? []) {
-      const url = link.url.trim()
-      if (!url) continue
-      resolved.push({ key: `${link.platform}-${url}`, label: link.platform, href: url, value: '', external: true })
-    }
-    return resolved
-  })
-
   const url = computed(() => {
     const product = toValue(source)
     return product ? productUrl(product.id) : ''
@@ -95,6 +76,29 @@ export const useProductContact = (
    * the panel keeps the text selectable, so a refused clipboard is a slowdown rather than a dead end.
    */
   const copyMessage = async () => copyToClipboard(message.value)
+
+  /**
+   * Where a channel actually goes, given the message it may be allowed to carry. The identity
+   * half is `useSiteInfo`'s `contactLinks` — the links the shop marked contactable, which are not
+   * the links the shop marked visible — and the destination half is the documented-prefill rule in
+   * `app/utils/social-prefill.ts`. Declared after `message`/`url` because it composes them.
+   */
+  const channels = computed<ProductContactChannel[]>(() => {
+    const siteInfo = toValue(siteInfoSource)
+    const resolved: ProductContactChannel[] = []
+    const phone = siteInfo?.phone?.trim()
+    if (phone) resolved.push({ key: 'phone', platform: 'phone', label: t('phone'), href: phoneHref(phone), value: phone, external: false, prefilled: false })
+    const prepared = message.value
+    const page = url.value
+    for (const link of siteInfo?.contactLinks ?? []) {
+      const stored = link.url.trim()
+      // An unset channel is not a channel: nothing is offered in its place.
+      if (!stored) continue
+      const target = socialContactLink(link, { phone: phone ?? '', message: prepared, productUrl: page })
+      resolved.push({ key: `${link.platform}-${stored}`, platform: link.platform, label: link.platform, href: target.href, value: '', external: true, prefilled: target.prefilled })
+    }
+    return resolved
+  })
 
   return { stock, url, channels, message, copyMessage }
 }

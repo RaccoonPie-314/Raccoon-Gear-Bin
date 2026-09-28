@@ -108,7 +108,19 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
             >
               <UInput v-model="link.platform" :placeholder="t('platform')" class="w-full min-w-0 sm:w-36" :data-social-platform="index" />
               <UInput v-model="link.url" :placeholder="t('linkUrl')" type="url" class="w-full min-w-0 flex-1" :data-social-url="index" />
-              <USwitch v-model="link.enabled" color="neutral" :aria-label="t('enabledLabel')" class="shrink-0" :data-social-enabled="index" />
+              <!-- Two switches, two questions. `enabled` answers "does the site show this link",
+                   `contactEnabled` answers "may Product → Contact to Order use it" — and each is
+                   captioned rather than left to a tooltip, because an owner who guesses wrong about
+                   the second one hides a way for customers to reach the shop. The row's own
+                   dimming still tracks masthead visibility, which is the thing a hidden row is. -->
+              <span class="flex shrink-0 items-center gap-2">
+                <USwitch v-model="link.enabled" color="neutral" :aria-label="t('socialVisibleLabel')" :title="t('socialVisibleLabel')" class="shrink-0" :data-social-enabled="index" />
+                <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('socialVisibleLabel') }}</span>
+              </span>
+              <span class="flex shrink-0 items-center gap-2">
+                <USwitch v-model="link.contactEnabled" color="neutral" :aria-label="t('socialContactLabel')" :title="t('socialContactLabel')" class="shrink-0" :data-social-contact="index" />
+                <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('socialContactLabel') }}</span>
+              </span>
               <span class="flex shrink-0 items-center gap-1">
                 <button
                   type="button"

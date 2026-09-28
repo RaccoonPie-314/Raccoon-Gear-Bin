@@ -208,9 +208,9 @@
       { "locale": "km", "label": "ភ្នំពេញ កម្ពុជា" }
     ],
     "social_links": [
-      { "platform": "facebook", "url": "https://facebook.com/raccoongearbin", "enabled": true, "sort_order": 0 },
+      { "platform": "facebook", "url": "https://facebook.com/raccoongearbin", "enabled": true, "contact_enabled": false, "sort_order": 0 },
       { "platform": "telegram", "url": "https://t.me/raccoongearbin", "enabled": true, "sort_order": 1 },
-      { "platform": "tiktok", "url": "https://tiktok.com/@raccoongearbin.hidden", "enabled": false, "sort_order": 2 }
+      { "platform": "tiktok", "url": "https://tiktok.com/@raccoongearbin.hidden", "enabled": false, "contact_enabled": true, "sort_order": 2 }
     ]
   },
   "categories": [
@@ -262,10 +262,15 @@
       },
       "appName": "Raccoon Gear Bin",
       "titleSuffix": " | Raccoon Gear Bin",
-      "channelLabels": ["Phone", "facebook", "telegram"],
-      "channelHrefs": ["tel:+85512345678", "https://facebook.com/raccoongearbin", "https://t.me/raccoongearbin"],
-      "savedChannelLabels": ["Phone", "youtube", "tiktok"],
-      "savedChannelHrefs": ["tel:+85599888777", "https://youtube.com/@raccoongearbin", "https://tiktok.com/@raccoongearbin.hidden"],
+      "_comment_channels": "The contact list the product page must offer for the seeded row set, in stored order, after the phone. It is a three-case probe: facebook is `enabled` but not `contact_enabled` (visible in the header, unusable to order), telegram carries no `contact_enabled` at all (an old row, which must inherit `enabled` and stay contactable), and tiktok is hidden from the header but explicitly contactable. `{message}` is filled in by the check with the encodeURIComponent of that product's own prepared message — only the two platforms with a documented prefill carry it, and tiktok's href must stay byte-for-byte the stored URL.",
+      "channelLabels": ["Phone", "Telegram", "Tiktok"],
+      "channelHrefs": ["tel:+85512345678", "https://t.me/raccoongearbin?text={message}", "https://tiktok.com/@raccoongearbin.hidden"],
+      "channelsPrefilled": [false, true, false],
+      "claimPrefilled": "Opens with your message",
+      "claimCopy": "Copy, then paste",
+      "_comment_saved": "After the admin flow disables telegram, adds youtube, enables tiktok, reorders and removes facebook: the header shows youtube+tiktok, while the contact list keeps telegram (still `contact_enabled`) and gains tiktok. The two lists are allowed to differ — that difference is the feature.",
+      "savedChannelLabels": ["Phone", "telegram", "youtube", "tiktok"],
+      "savedChannelHrefs": ["tel:+85599888777", "https://t.me/raccoongearbin?text={message}", "https://youtube.com/@raccoongearbin", "https://tiktok.com/@raccoongearbin.hidden"],
       "sticky": { "controlHeight": 44, "minPadding": 12, "lightboxZ": 70 }
     },
     "stockBands": {

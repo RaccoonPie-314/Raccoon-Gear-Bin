@@ -6,7 +6,15 @@
 export type SiteSocialLink = {
   platform: string
   url: string
+  /** Masthead visibility. */
   enabled: boolean
+  /**
+   * Offered as a "Contact to Order" channel. A separate setting on purpose: being visible in the
+   * header and being a route to the shop about a product are different decisions an owner makes,
+   * and a stored row may answer them differently. Rows written before the key existed fall back to
+   * `enabled` in `useSiteInfo`, so no shop gains or loses a channel on upgrade.
+   */
+  contactEnabled: boolean
   sortOrder: number
 }
 
@@ -17,12 +25,17 @@ export type SiteLocationLabel = {
   label: string
 }
 
-/** Public render model: locale already resolved, disabled links already dropped. */
+/** Public render model: locale already resolved, each collection already narrowed to what it shows. */
 export interface SiteInfo {
   phone: string
   locationLabel: string
   locationUrl: string
+  /** What the masthead renders: the links whose `enabled` is true, in stored order. */
   socialLinks: SiteSocialLink[]
+  /** What Product → Contact to Order offers: the links whose `contact_enabled` is true. Deliberately
+   * a second list rather than a second filter inside a component — the two settings answer different
+   * questions, and `useSiteInfo` is the only place the row is understood. */
+  contactLinks: SiteSocialLink[]
 }
 
 /** Admin editor model: every locale and every link (including disabled ones), so the editor

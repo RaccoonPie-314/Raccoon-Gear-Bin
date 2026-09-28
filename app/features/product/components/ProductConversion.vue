@@ -43,22 +43,28 @@ const say = (text: string, mount: ActionsMount) => {
 
 const feedbackFor = (mount: ActionsMount) => feedbackMount.value === mount ? feedback.value : ''
 
-// A product swap must not leave the previous product's confirmation on screen.
-watch(url, () => { clearTimeout(hideAt); feedback.value = '' })
+// A product swap must not leave the previous product's confirmation, or its manual fallback, on
+// screen: the link in that field belongs to the product the visitor has already left.
+watch(url, () => { clearTimeout(hideAt); feedback.value = ''; revealLink.value = false })
 onBeforeUnmount(() => { clearTimeout(hideAt) })
 
 // The composable's boolean is the truth; this is where it becomes a sentence. `false` says so
-// rather than letting a claimed copy go unchallenged.
+// rather than letting a claimed copy go unchallenged — and it puts the address on screen, because
+// telling someone to copy a link they cannot see is not a fallback.
+const revealLink = ref(false)
+
 const handleCopy = async (mount: ActionsMount) => {
-  say(await copyMessage() ? t('messageCopied') : t('copyFailed'), mount)
+  const copied = await copyMessage()
+  if (!copied) revealLink.value = true
+  say(copied ? t('messageCopied') : t('copyFailed'), mount)
 }
 
-const handleShare = async (payload: ProductSharePayload) => {
+const handleShare = async (payload: ProductSharePayload, mount: ActionsMount) => {
   const outcome = await share(payload)
   // A sheet that opened has already said everything worth saying, and a sheet the visitor closed
   // was a decision — neither gets a message behind it. Only the copy paths need one.
-  if (outcome === 'copied') say(t('linkCopied'), 'inline')
-  else if (outcome === 'failed') say(t('shareFailed'), 'inline')
+  if (outcome === 'copied') say(t('linkCopied'), mount)
+  else if (outcome === 'failed') { revealLink.value = true; say(t('shareFailed'), mount) }
 }
 </script>
 
@@ -72,8 +78,9 @@ const handleShare = async (payload: ProductSharePayload) => {
     :url="url"
     :message="message"
     :feedback="feedbackFor('inline')"
+    :reveal-link="revealLink"
     @copy="handleCopy('inline')"
-    @share="handleShare"
+    @share="handleShare($event, 'inline')"
   />
 
   <!-- Mobile only, and teleported for the same reason the gallery lightbox and the mobile category
@@ -99,8 +106,8 @@ const handleShare = async (payload: ProductSharePayload) => {
         :url="url"
         :message="message"
         :feedback="feedbackFor('sticky')"
+        :reveal-link="revealLink"
         @copy="handleCopy('sticky')"
-        @share="handleShare"
       />
     </div>
   </Teleport>

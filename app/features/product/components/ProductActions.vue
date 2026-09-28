@@ -17,12 +17,21 @@ const props = defineProps<{
   url: string
   message: string
   feedback: string
+  /** Set once a copy or share could not be completed: reveals the canonical link as selectable
+   * text, so "copy it yourself" is an instruction the visitor can actually carry out. */
+  revealLink?: boolean
   compact?: boolean
 }>()
 
 const emit = defineEmits<{ copy: [], share: [payload: ProductSharePayload] }>()
 
 const { t } = useI18n()
+
+// Selecting the revealed link on focus is what makes the manual path a single click: the visitor
+// who was told to copy by hand should not also have to drag across the address.
+const selectOnFocus = (event: FocusEvent) => {
+  (event.target as HTMLInputElement | null)?.select()
+}
 
 // Each mount keeps its own open flag — the inline block and the sticky bar are two separate
 // affordances, and opening one should not move the other. Nothing here is shared with the gallery:
@@ -51,6 +60,13 @@ const close = (returnFocus = false) => {
 const shareProduct = () => {
   emit('share', { title: props.product.name, text: props.product.shortDescription || undefined, url: props.url })
 }
+
+// The stored platform string is the shop's own data and stays the row's identity, but a raw
+// lowercase `telegram` beside the translated "Phone" reads as an unresolved message key. The first
+// letter is the only thing changed: nothing is renamed, re-translated, or mapped to a guess about
+// what the owner meant to call it.
+const channelName = (channel: ProductContactChannel) =>
+  channel.label ? `${channel.label[0]?.toUpperCase()}${channel.label.slice(1)}` : channel.label
 </script>
 
 <template>
@@ -94,9 +110,31 @@ const shareProduct = () => {
       </button>
     </div>
 
+    <!-- Only ever rendered after a copy or a share actually failed. The last thing this flow should
+         do is tell a visitor to copy a link they cannot see — which is what happened while the
+         canonical address existed only inside the message field, behind a closed panel. Read-only,
+         selected on focus, and labelled so the accessible name is "Product link" rather than an
+         anonymous field. -->
+    <div v-if="revealLink" class="mt-2 flex min-w-0 items-center">
+      <input
+        readonly
+        type="text"
+        inputmode="url"
+        :value="url"
+        data-share-link
+        :aria-label="t('shareLinkLabel')"
+        class="min-w-0 w-full truncate rounded-xl border border-zinc-200/80 bg-white px-3 py-2 text-xs text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-950 dark:text-zinc-300 dark:focus-visible:ring-white"
+        @focus="selectOnFocus"
+      />
+    </div>
+
     <!-- Anchored above itself in the sticky variant (the bar sits at the viewport edge, so the
          panel has nowhere to go but up) and in normal flow inline. `max-h` + `overflow-y-auto`
-         keeps a long channel list inside the screen instead of pushing the page wider or taller.
+         keeps a long channel list inside the screen instead of pushing the page wider or taller —
+         roomier inline, where the page can scroll with it, tighter afloat on a phone. `tabindex`
+         is on the scroll box itself: a region that scrolls but cannot be focused is unreachable
+         from the keyboard, and a shop with six channels would otherwise hide four of them from
+         exactly the visitor least able to discover the scrollbar.
          The surface is set once per variant rather than base-plus-override: two background
          utilities in the same class list are one layer apart in the stylesheet, so the translucent
          inline wash used to win over the solid one this variant needs — and a see-through panel
@@ -114,8 +152,9 @@ const shareProduct = () => {
       data-contact-panel
       role="group"
       :aria-label="ctaLabel"
-      class="min-w-0 max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs dark:border-zinc-800/80"
-      :class="compact ? 'absolute inset-x-0 bottom-full mb-2 bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 bg-zinc-50/80 dark:bg-zinc-900/70'"
+      tabindex="0"
+      class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
+      :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70'"
     >
       <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
            a browser that refuses the clipboard still leaves them something to select. The field
@@ -166,12 +205,21 @@ const shareProduct = () => {
             :target="channel.external ? '_blank' : undefined"
             :rel="channel.external ? 'noopener noreferrer' : undefined"
             :data-contact-channel="channel.key"
+            :data-contact-prefilled="channel.prefilled"
             class="flex min-w-0 items-center gap-2 rounded-full border border-zinc-200/80 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 shadow-xs transition-colors duration-200 hover:border-zinc-300 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-white dark:focus-visible:ring-white"
           >
-            <svg v-if="channel.key === 'phone'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0 opacity-70" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0 opacity-70" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-            <span class="shrink-0">{{ channel.label }}</span>
+            <!-- The brand marks come from the one source the masthead uses, so a channel is named
+                 by the same silhouette the visitor already saw in the header. Phone keeps the
+                 drawn glyph it has always had. -->
+            <svg v-if="channel.platform === 'phone'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0 opacity-70" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            <SocialBrandIcon v-else :platform="channel.platform" class="shrink-0 opacity-70" />
+            <span class="shrink-0">{{ channelName(channel) }}</span>
             <span v-if="channel.value" class="min-w-0 flex-1 truncate text-right font-normal tabular-nums text-zinc-500 dark:text-zinc-400">{{ channel.value }}</span>
+            <!-- The row says what it does. A link that carries the message does not tell the
+                 visitor to paste anything, and one that cannot is not allowed to imply that it did. -->
+            <span v-else class="min-w-0 flex-1 truncate text-right text-xs font-normal text-zinc-500 dark:text-zinc-400">
+              {{ channel.prefilled ? t('channelPrefilled') : t('channelCopyFirst') }}
+            </span>
           </a>
         </li>
       </ul>
