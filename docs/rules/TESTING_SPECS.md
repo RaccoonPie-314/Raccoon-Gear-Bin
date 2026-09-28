@@ -125,6 +125,12 @@ the matrix, don't assume the utility name.
 
 ## Environment
 
+- The build must be **hermetic for fonts**: `nuxt.config.ts` keeps only `@nuxt/fonts`' offline
+  `local` provider and the real faces come from the `@fontsource*` devDependencies. A runner that
+  cannot reach `fonts.googleapis.com` silently falls back to a wider system sans (locally it is
+  invisible — the machine has the font or the cache), and that delta alone trips the harness's
+  @320 overflow guards. If a build logs `Could not fetch … fonts.googleapis.com`, fix the
+  providers, not the assertions.
 - If Chrome fails to start with `Operation not permitted`, the command is running inside a
   restrictive sandbox — run it from a normal terminal.
 - The harness has **no dependencies** (raw CDP over WebSocket; Node 24 for global `WebSocket`) —

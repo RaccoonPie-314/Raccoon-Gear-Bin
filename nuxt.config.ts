@@ -6,6 +6,25 @@ export default defineNuxtConfig({
     pageTransition: { name: 'page', mode: 'out-in' }
   },
   modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
+  // @nuxt/ui auto-registers @nuxt/fonts, whose default provider fetches fonts.googleapis.com at
+  // build time. The CI runner cannot reach it, the fetch fails silently, and the page renders in
+  // a wider system sans — enough to trip the harness's @320 overflow guards (254/256 on the
+  // runner vs 257/257 locally). Empty providers = no network step; the real fonts are imported
+  // hermetically from the @fontsource* devDependencies in app/assets/css/main.css, so every
+  // machine measures identical metrics.
+  fonts: {
+    // Keep only @nuxt/fonts' offline `local` provider (it resolves families from installed
+    // packages — the @fontsource* devDependencies). The string keys set to `false` are the
+    // network providers @nuxt/fonts registers by default; on CI they fail to fetch.
+    providers: {
+      google: false,
+      fontsource: false,
+      bunny: false,
+      adobe: false,
+      fontshare: false,
+      googleicons: false,
+    },
+  },
   // A feature keeps its UI and the logic only it uses in one folder. Neither half is reachable by
   // auto-import from `app/features` on its own, so each is registered: the component dir with no
   // directory prefix (the file name is the component name) and the composable dir exactly like

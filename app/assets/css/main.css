@@ -1,3 +1,10 @@
+/* Self-hosted fonts (hermetic CI build — see the `fonts` note in nuxt.config.ts). These are
+   the only @font-face sources: @nuxt/fonts' network providers are disabled. */
+@import "@fontsource-variable/public-sans";
+@import "@fontsource/noto-sans-khmer/400.css";
+@import "@fontsource/noto-sans-khmer/500.css";
+@import "@fontsource/noto-sans-khmer/700.css";
+
 @import "tailwindcss";
 @import "@nuxt/ui";
 
