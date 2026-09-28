@@ -23,3 +23,21 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      # Fails only on new hard errors; the 16 remaining warnings are the
+      # pre-existing debt documented in eslint.config.mjs.
+      - name: Lint
+        run: bun run lint
+
+      # scripts/verify-ui.mjs runs on Node (global WebSocket needs Node 24),
+      # and its Chrome candidates are macOS/Windows paths, so point it at the
+      # runner's Chrome explicitly.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify UI
+        run: bun run verify
+        env:
+          CHROME_PATH: /usr/bin/google-chrome

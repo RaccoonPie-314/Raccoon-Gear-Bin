@@ -520,10 +520,13 @@ surface should match the logo.
   ref with the pair of functions it expects; `tsc` cannot read `.vue`, so nothing in CI proves the
   component still `defineExpose`s names that match. The IDE language server does, and the harness
   drives both paths (add, edit) on every run.
-- **Nothing runs the harness automatically.** `scripts/verify-ui.mjs` covers the admin flow and
-  the tuned interactions, but CI still only builds — `bun run verify` needs a Chrome binary and a
-  browser, which the CI job has neither configured nor permission-checked. Until that is solved,
-  the harness is a *pre-push habit*, not a gate.
+- **The harness runs in CI, unreviewed at the browser boundary.** `scripts/verify-ui.mjs` covers the
+  admin flow and the tuned interactions, and since 2026-09-28 CI runs it after Build — with
+  `CHROME_PATH` pinned to the runner's stock Chrome and Node 24 for global `WebSocket`. The push
+  acceptance boundary therefore fails on a tuned-interaction regression, but the runner's browser
+  has never been permission-checked against the traps in
+  [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md); a red first run is a wiring bug to
+  fix in the workflow, not a licence to drop the step.
 - **The specifications view model round-trips through a string.** `mapProduct` stores
   `formatSpecifications(jsonb)` on `CatalogProduct.specifications` so the editor textarea can
   bind straight to it, and the detail page then calls `parseSpecificationPairs` to undo that.
@@ -545,7 +548,12 @@ surface should match the logo.
 - **No `server/api` tier.** `createSupabaseAdminClient()` has zero callers and the
   service-role key is wired into `runtimeConfig` unread. All data access is the browser's
   anon client governed by RLS — which is the actual security model here.
-- **No tests, no typecheck script.** CI runs `bun run build` only, which does not type-check.
+- **No test suite; lint is opt-in-tight, typecheck is .ts-only.** CI runs `bun run build`,
+  `bun run lint` and `bun run verify`. `lint` fails only on new hard errors — the pre-existing
+  debt (17 `any` casts, custom-class warnings) is downgraded in `eslint.config.mjs`, and the
+  `no-explicit-any` rule being off does not relax the Supabase `as any` prohibition in AGENTS.md,
+  which stays a review rule. There is still no typecheck script: `tsc` covers `.ts` only, so
+  template bindings are unchecked.
 - **Generated pages that describe absent capabilities.** `Supabase Integration/Real-time
   Features & Subscriptions.md`, `Testing & Quality Assurance/Testing Framework & Setup.md`,
   `Performance Optimization/Caching Patterns.md` and `Deployment & DevOps/Monitoring &
@@ -563,8 +571,9 @@ surface should match the logo.
 ## Verifying a change
 
 ```bash
-bun run build                                            # what CI runs
-bun run verify                                           # scripts/verify-ui.mjs (needs Chrome)
+bun run build                                            # compile check (CI)
+bun run lint                                             # new hard errors only (CI)
+bun run verify                                           # scripts/verify-ui.mjs (CI; needs Chrome)
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit   # .ts only; .vue needs vue-tsc
 ```
 

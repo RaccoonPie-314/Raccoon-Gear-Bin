@@ -8,12 +8,17 @@ works, and before extending `scripts/verify-ui.mjs`.
 | Command | What it actually proves |
 |---|---|
 | `bun install` | Deps resolve against the committed `bun.lock`. |
-| `bun run build` (`nuxt build`) | **The only CI gate.** It compiled. It does not start the app, does not type-check, and says nothing about the tuned interactions or the admin write path. |
-| `bun run verify` (`node scripts/verify-ui.mjs`) | The tuned interactions, the conversion flow and the whole admin flow still behave, measured in a real browser against a stubbed backend. |
+| `bun run build` (`nuxt build`) | It compiled. It does not start the app, does not type-check, and says nothing about the tuned interactions or the admin write path. CI runs this **and** `bun run verify` on every push. |
+| `bun run verify` (`node scripts/verify-ui.mjs`) | The tuned interactions, the conversion flow and the whole admin flow still behave, measured in a real browser against a stubbed backend. A CI gate since 2026-09-28: `.github/workflows/ci.yml` runs it after Build with `CHROME_PATH=/usr/bin/google-chrome` and Node 24 (the harness needs global `WebSocket`; Bun's bundled Node is older). |
 | `./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit` | `.ts` files only. `tsc` cannot parse `.vue`, so **template bindings are unchecked** — re-read the IDE language server's diagnostics after editing a `<template>`. |
 
-There is **no test suite and no typecheck in CI**. `bun run verify` is therefore a pre-push habit,
-not a gate: CI has neither a Chrome binary nor a permission-checked browser.
+There is **no test suite and no template typecheck — in CI or anywhere else** (verified
+2026-09-28: Nuxt 4.5.2 ships no `typecheck` route and `vue-tsc` is not a dependency — checking
+templates would mean adding it). CI runs build + lint + verify on every push; `bun run lint`
+fails only on new hard errors (the pre-existing debt — 17 `any` casts, custom-class warnings — is
+documented in `eslint.config.mjs`; the `no-explicit-any` rule being off does **not** relax
+AGENTS.md's Supabase `as any` prohibition, which stays a review rule). Run `bun run verify`
+locally while iterating so you are not waiting on a push.
 
 ## `bun run verify` — the CDP harness
 
@@ -51,12 +56,15 @@ Covered (this list is the shape of the run, not its check count — the run prin
 ### Flags
 
 ```bash
-bun run build && bun run verify          # all checks
-bun run verify --only=guest              # or --only=admin (fewer checks than the full run)
-node scripts/verify-ui.mjs --build       # build first, in one step
-node scripts/verify-ui.mjs --keep        # leave Chrome + profile running to debug
+bun install
+bun run build
+bun run lint                                  # eslint app+server; CI fails only on new errors
+bun run verify                                # all checks against the existing .output
+bun run verify --only=guest                   # or --only=admin (fewer checks than the full run)
+node scripts/verify-ui.mjs --build            # build first, in one step
+node scripts/verify-ui.mjs --keep             # leave Chrome + profile running to debug
 node scripts/verify-ui.mjs --url http://127.0.0.1:PORT/   # point at an already-served build
-CHROME_PATH=/path/to/chrome bun run verify # if no Chrome binary is found
+CHROME_PATH=/path/to/chrome bun run verify    # if no Chrome binary is found (CI pins it to /usr/bin/google-chrome)
 ```
 
 Build first; use `--only=guest|admin` while iterating.

@@ -63,15 +63,17 @@ selects collapse to `never`.
 
 ```bash
 bun install
-bun run build                                                 # what CI runs — the only gate
-bun run verify                                                # scripts/verify-ui.mjs — needs Chrome
+bun run build                                                 # compiles (CI)
+bun run lint                                                  # eslint app+server (CI — fails on new errors)
+bun run verify                                                # scripts/verify-ui.mjs (CI) — needs Chrome
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only
 ```
 
-`build` succeeding means it compiled, not that it works: there is no test suite and no typecheck
-in CI, and `tsc` cannot parse `.vue`, so **template bindings are unchecked**. What each command
-actually proves, the harness's coverage and the CDP measurement traps are in
-[docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md).
+`build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
+compiled, not that it works, and there is no test suite or template typecheck: `tsc` cannot parse
+`.vue`, so **template bindings are unchecked** — `verify`'s painted-geometry asserts and the IDE
+language server are the backstop. What each command actually proves, the harness's coverage and
+the CDP measurement traps are in [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md).
 
 ## Localhost use for testing
 

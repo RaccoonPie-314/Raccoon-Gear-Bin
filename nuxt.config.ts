@@ -5,7 +5,7 @@ export default defineNuxtConfig({
   app: {
     pageTransition: { name: 'page', mode: 'out-in' }
   },
-  modules: ['@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
+  modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
   // A feature keeps its UI and the logic only it uses in one folder. Neither half is reachable by
   // auto-import from `app/features` on its own, so each is registered: the component dir with no
   // directory prefix (the file name is the component name) and the composable dir exactly like

@@ -3,7 +3,7 @@
  * scripts/verify-ui.mjs — the repository's UI regression harness.
  *
  * WHY THIS EXISTS
- * `bun run build` is the only gate CI runs, and it never starts the app, so every tuned
+ * `bun run build` compiles but never starts the app (CI has run this harness alongside it since 2026-09-28), so every tuned
  * interaction (category drag, indicator snap, magnification, scroll reveal, the scroll-collapse
  * launcher flight, spotlight morph) and the whole admin write path is otherwise unprotected.
  * Refactors Phases 1-5 were each verified by rebuilding the pre-change tag in a worktree and
