@@ -39,7 +39,7 @@ const { t } = useI18n()
       <div class="flex items-start justify-between gap-4 pt-4">
         <div class="min-w-0 flex-1">
           <p class="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-500">
-            {{ product.categoryName }}
+            {{ product.categoryName ?? t('uncategorized') }}
           </p>
           <h2 class="mt-1 text-sm sm:text-base font-bold tracking-tight text-zinc-950 dark:text-white truncate">
             <NuxtLink :to="`/products/${product.id}`" class="hover:underline">

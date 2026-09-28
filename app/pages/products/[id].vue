@@ -175,7 +175,7 @@ useHead(() => {
              measured at 320px it was 5px of horizontal scroll before this was added. -->
         <div class="min-w-0 lg:sticky lg:top-24 self-start">
           <p class="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
-            {{ product.categoryName }}
+            {{ product.categoryName ?? t('uncategorized') }}
           </p>
           <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl text-zinc-950 dark:text-white">
             {{ product.name }}

@@ -17,7 +17,9 @@ export type CatalogSpecification = {
 export interface CatalogProduct {
   id: string
   categoryId: string
-  categoryName: string
+  /** The stored category name, or `null` when the product has no resolvable category. The view
+   * owns the fallback wording, because only a template can translate it in the active locale. */
+  categoryName: string | null
   categorySlug?: string
   slug: string
   sku: string

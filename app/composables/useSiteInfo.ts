@@ -13,6 +13,19 @@ const asObject = (value: unknown): JsonObject | null =>
 const asString = (value: Json | undefined): string | null => typeof value === 'string' ? value : null
 
 /**
+ * The stored destination, but only when it is an http(s) URL — otherwise `null`.
+ *
+ * Both public views bind this text straight to `href`, and Vue assigns an `href` without filtering
+ * its scheme, so a `javascript:` or `data:` value typed into the admin editor would run as the
+ * visitor who clicked it. This is a scheme allowlist on the public read, not a rewrite: a
+ * destination the site cannot link to is absent rather than re-aimed.
+ */
+const httpUrl = (value: string): string | null => {
+  const trimmed = value.trim()
+  return /^https?:\/\//i.test(trimmed) ? trimmed : null
+}
+
+/**
  * The public site-info data layer: the only place the `site_settings` singleton row is read,
  * and the only place its two jsonb collections are understood. The catalog rule this mirrors
  * (one owner per data domain) is why a page must not `.from('site_settings')` directly.
@@ -73,12 +86,15 @@ export const useSiteInfo = () => {
   // One parse, two narrowed lists: the settings are independent, so neither consumer may borrow the
   // other's filter. Doing it here is what lets `useProductContact` ask for `contactLinks` without
   // ever learning that a jsonb column or an `enabled` key exists.
+  // The scheme allowlist and this enabled/contact split belong to the public model only:
+  // `mapSiteInfoDraft` keeps every stored row, so the editor can still show a destination this view
+  // refuses to link to and the shop can repair it.
   const mapSiteInfo = (row: SiteInfoRow): SiteInfo => {
-    const links = parseSocialLinks(row.social_links)
+    const links = parseSocialLinks(row.social_links).filter((link) => httpUrl(link.url))
     return {
       phone: row.phone,
       locationLabel: pickTranslation(parseLocationLabels(row.location_translations))?.label || '',
-      locationUrl: row.location_url,
+      locationUrl: httpUrl(row.location_url) ?? '',
       socialLinks: links.filter((link) => link.enabled),
       contactLinks: links.filter((link) => link.contactEnabled)
     }

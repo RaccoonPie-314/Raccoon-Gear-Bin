@@ -48,9 +48,11 @@ export const useCatalog = () => {
     return translations.find((item) => item.locale === locale.value) || translations.find((item) => item.locale === FALLBACK_LOCALE) || translations[0]
   }
 
-  const categoryName = (category: ProductRow['categories']): string => {
-    if (!category) return 'Uncategorized'
-    return pickTranslation(category.category_translations)?.name || category.slug || 'Uncategorized'
+  // `null`, not a placeholder word: what an unclassified product is *called* is a translation,
+  // and this mapper runs at fetch time, before the view knows which locale is on screen.
+  const categoryName = (category: ProductRow['categories']): string | null => {
+    if (!category) return null
+    return pickTranslation(category.category_translations)?.name || category.slug || null
   }
 
   const mapProduct = (product: ProductRow): CatalogProduct => {
@@ -142,5 +144,5 @@ export const useCatalog = () => {
     return { products, categories }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, formatSpecifications, parseSpecificationPairs, pickTranslation }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, parseSpecificationPairs, pickTranslation }
 }

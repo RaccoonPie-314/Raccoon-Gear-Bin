@@ -108,7 +108,7 @@ const onKeydown = (event: KeyboardEvent) => {
             />
             <span class="min-w-0 flex-1">
               <span class="block truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ product.name }}</span>
-              <span class="block truncate text-xs text-zinc-500 dark:text-zinc-400">{{ product.categoryName }}</span>
+              <span class="block truncate text-xs text-zinc-500 dark:text-zinc-400">{{ product.categoryName ?? t('uncategorized') }}</span>
             </span>
             <span class="shrink-0 text-sm font-bold tabular-nums text-zinc-950 dark:text-white">{{ product.currency }} {{ product.price.toFixed(2) }}</span>
           </NuxtLink>

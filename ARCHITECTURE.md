@@ -87,6 +87,15 @@ shared component silently stops resolving (the build stays green; the page rende
    state, and it may not read the catalog.
 4. **Locale resolution has one implementation:** `pickTranslation` inside `useCatalog`
    (current locale → `en` → first available). Never resolve a translation inline.
+   It runs at **fetch time**, which makes the route load-bearing: `LanguageSwitcher` links through
+   `switchLocalePath` instead of calling `setLocale`, because `setLocale` only writes `locale.value`
+   and fires `i18n:localeSwitched` — nothing in `@nuxtjs/i18n` turns that into a navigation, so the
+   URL and Nuxt's default page key (`route.path`) stay put, the page never remounts, and the
+   interface would re-render around rows picked in the previous locale.
+   A translated field therefore stays **absent, never invented**: `CatalogProduct.categoryName` is
+   `string | null` and each view renders `?? t('uncategorized')`. A fallback word decided in the
+   mapper is one locale's wording baked into the data layer, which is exactly how an English-only
+   `Uncategorized` ended up displayed by three templates to Khmer readers.
 5. **The `specifications` jsonb has one implementation:** the three conversions inside
    `useCatalog` — `parseSpecifications` (textarea → column), `formatSpecifications`
    (column → textarea) and `parseSpecificationPairs` (column → the pairs a view renders).
@@ -108,8 +117,10 @@ shared component silently stops resolving (the build stays green; the page rende
    or read those columns itself. It is deliberately separate from `useCatalog`: site info is
    not catalog data, and merging them would let one page's needs leak into the other's shape.
    `useSiteInfo` exposes two views of the same row — the resolved public model (locale picked
-   via `useCatalog`'s `pickTranslation`, disabled links dropped) and the raw admin draft — so
-   the locale rule stays a single implementation. **Every site-info mutation lives in
+   via `useCatalog`'s `pickTranslation`, disabled links dropped, and — since the scheme allowlist —
+   only `http(s)` destinations) and the raw admin draft — so the locale rule stays a single
+   implementation. The allowlist belongs to the public view alone: the editor must still see a
+   stored URL it refuses to link to, or the shop loses the row it needs to repair. **Every site-info mutation lives in
    `useAdminSiteInfoEditor`**, which is the site-info analogue of the product editor and stays
    out of it: no catalog state crosses between the two. Authorisation is again RLS only.
    Social links are one structured jsonb collection, not a column per platform — adding a
@@ -527,6 +538,20 @@ surface should match the logo.
   has never been permission-checked against the traps in
   [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md); a red first run is a wiring bug to
   fix in the workflow, not a licence to drop the step.
+- **`nav()` sleeps instead of polling, so a cold run reads as a product bug.** It awaits
+  `Page.navigate` and then a fixed 2200 ms, which is exactly the pattern trap 2 in
+  [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) warns against. Measured 2026-09-28: on
+  one unchanged build, three of five runs died at the first product-detail check
+  (`specifications rows: []`, gallery absent) or on `Page.navigate` itself — every one of them the
+  first run after a fresh `bun run build` — while the same build passed 257/257 twice with no rebuild
+  between. Re-run a red detail-page run before believing it; the real fix is a `waitFor` on the
+  mount selector after each `nav`, not a longer sleep.
+- **Two paths the harness cannot see: switching locale, and a product with no category.** Nothing
+  clicks `LanguageSwitcher`, so the navigation rule under Boundary rule 4 is held by reading
+  `@nuxtjs/i18n`'s source rather than by a check; and every fixture product carries a category, so
+  `?? t('uncategorized')` never renders. Both are cheap to close — one fixture row with
+  `categories: null`, and one SPA click that asserts a Khmer product name after the route takes its
+  `/km` prefix.
 - **The specifications view model round-trips through a string.** `mapProduct` stores
   `formatSpecifications(jsonb)` on `CatalogProduct.specifications` so the editor textarea can
   bind straight to it, and the detail page then calls `parseSpecificationPairs` to undo that.
