@@ -1,6 +1,8 @@
-/* Self-hosted fonts (hermetic CI build — see the `fonts` note in nuxt.config.ts). These are
-   the only @font-face sources: @nuxt/fonts' network providers are disabled. */
-@import "@fontsource-variable/public-sans";
+/* The only bundled face: Khmer. Latin UI text deliberately uses the *native* system font (see
+   the stack below) — no SF Pro download, no UA sniffing: Apple devices answer with SF, Windows
+   with Segoe UI, Android with Roboto. Noto Sans Khmer stays self-hosted (hermetic build — see the
+   `fonts` note in nuxt.config.ts) because Windows and the CI runner ship no Khmer font at all,
+   and a cluster-fallback to another script is broken rendering, not a missing glyph. */
 @import "@fontsource/noto-sans-khmer/400.css";
 @import "@fontsource/noto-sans-khmer/500.css";
 @import "@fontsource/noto-sans-khmer/700.css";
@@ -9,7 +11,7 @@
 @import "@nuxt/ui";
 
 @theme static {
-  --font-sans: 'Public Sans', 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
 }
 
 html {
@@ -17,7 +19,7 @@ html {
 }
 
 body {
-  font-family: 'Public Sans', 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

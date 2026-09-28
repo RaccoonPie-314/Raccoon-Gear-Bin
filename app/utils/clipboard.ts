@@ -21,3 +21,15 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
     return false
   }
 }
+
+/**
+ * Select a revealed link the moment it takes focus.
+ *
+ * This is the manual half of the copy story: when the clipboard refused the write, the page shows the
+ * address as read-only text and asks the visitor to copy it themselves. Selecting on focus makes that
+ * one keystroke or one click instead of a drag across the string, and it belongs beside the clipboard
+ * rule rather than being written twice — the contact row and the Share Sheet both reveal a link.
+ */
+export const selectOnFocus = (event: FocusEvent) => {
+  (event.target as HTMLInputElement | null)?.select()
+}

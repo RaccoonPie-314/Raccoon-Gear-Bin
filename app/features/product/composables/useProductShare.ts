@@ -1,4 +1,6 @@
+import type { SiteSocialLink } from '~/types/site-info'
 import { copyToClipboard } from '~/utils/clipboard'
+import { socialPrefillLink } from '~/utils/social-prefill'
 
 /**
  * What a caller hands over to be shared. Deliberately not a product: a title, an optional line of
@@ -12,67 +14,79 @@ export type ProductSharePayload = {
 }
 
 /**
- * What actually happened, in the caller's words rather than this file's. Four outcomes because
- * they are four different things to say: the sheet took it, the visitor closed the sheet, the link
- * went to the clipboard instead, or neither was possible.
+ * One destination the sheet offers: the shop's own configured account, at the address a share
+ * actually goes to. `prefilled` carries the same promise it does on a contact row — the href
+ * contains the text — so no row can imply a send it did not make.
  */
-export type ProductShareOutcome = 'shared' | 'cancelled' | 'copied' | 'failed'
-
-// One number, one question: could this settle have been a *human* leaving the sheet? Measured on
-// real Chrome (visible window, macOS): the native popover takes ~1s to even appear, the promise
-// stays pending while the visitor is in it, and it settles — resolve or AbortError — only after
-// they chose or dismissed. So any settle inside this window came from the platform, not the
-// visitor: a no-sheet platform rejects instantly (headless Chrome, desktop Chrome where the OS
-// share service is absent) or "resolves" instantly without ever painting (the phantom sheet a
-// plain success claim would report as shared). Both fall through to the clipboard. Slower than
-// the window: the visitor had a sheet and used or closed it — their decision is answered with
-// silence, never with a claim behind them. 250ms sits at least ~750ms below the fastest real
-// settle, so the two cases cannot overlap.
-const HUMAN_SHEET_MS = 250
+export type ProductShareDestination = {
+  key: string
+  platform: string
+  label: string
+  href: string
+  prefilled: boolean
+}
 
 /**
- * Share through the platform's own sheet when the browser offers one, and fall back to the one
- * thing every browser can do — the link on the clipboard.
+ * Share capability, and nothing else: the text a share carries, where each destination goes, and
+ * whether the clipboard took it. The three names it hands back are the three the sheet actually uses;
+ * `shareText` and `copy` stay private rather than becoming a public surface nobody calls.
  *
- * No dependency on the catalog, the site info, or a component: it is handed a title and a URL and
- * reports an outcome. Deciding which of those outcomes deserves a sentence is the caller's job,
- * because only the caller knows which region on the screen should say it.
+ * It is not a *sheet*. `ProductShareSheet.vue` decides what sharing looks like and when it is open;
+ * this file answers what it says and where its links point. That split is why the browser's own
+ * `navigator.share()` is not here: the platform sheet was removed as the primary UI (it cannot be
+ * styled, it cannot show the product, and its success tells you nothing — desktop Chrome answers a
+ * share it never painted with an instant resolve, and a page that trusts it reports a share nobody
+ * performed). Anything a visitor could not see happen is reported as what it was: a clipboard write
+ * that worked, or one that did not.
+ *
+ * No dependency on the catalog, the site info, or a component. Links arrive from the caller, which
+ * is what keeps the share destinations from reading a table and keeps `useSiteInfo` the only reader
+ * of the row.
  */
 export const useProductShare = () => {
-  const share = async (payload: ProductSharePayload): Promise<ProductShareOutcome> => {
-    if (!payload.url) return 'failed'
+  /**
+   * The text a destination or the clipboard receives: the thing's name, its own line, then the
+   * address on a line of its own so a chat client does not fold it into the sentence before it.
+   */
+  const shareText = (payload: ProductSharePayload) =>
+    [payload.title, payload.text, payload.url].filter(Boolean).join('\n')
 
-    const data = { title: payload.title, text: payload.text, url: payload.url }
+  /**
+   * One write, one truth: `true` only when the Clipboard API said it stored the text. Deliberately a
+   * boolean rather than a named outcome — the caller has its own words for each branch, and a
+   * `'copied' | 'failed'` union is a string an `if` can get wrong without a compiler noticing.
+   */
+  const copy = async (text: string) => !!text && await copyToClipboard(text)
 
-    // Presence is tested before anything is awaited: `navigator.share` is absent on many desktop
-    // browsers, and a missing method is a capability the page never had rather than a failure.
-    // `canShare()` is consulted where the browser offers it — it is the browser's own statement
-    // that this exact payload is shareable, and honouring it keeps a doomed `share()` call from
-    // rejecting with some non-abort error name and leaving this file's contract to guess.
-    if (typeof navigator.share === 'function'
-      && (typeof navigator.canShare !== 'function' || navigator.canShare(data))) {
-      const openedAt = performance.now()
-      try {
-        // The await sits *on* the call, never before it: the sheet only opens while the click's
-        // user activation is still live.
-        await navigator.share(data)
-        // A resolve inside the window is the platform claiming success without ever showing the
-        // sheet — the phantom the plain-'shared' report used to hand the visitor a sentence about
-        // a popover they never saw. Only a resolve a human could have caused is a real outcome.
-        if (performance.now() - openedAt >= HUMAN_SHEET_MS) return 'shared'
-      } catch (error: any) {
-        // A rejection that took its time is the visitor closing a sheet they opened. That is a
-        // decision, not an error, and it must not be answered by silently copying behind their
-        // back. Anything else — AbortError arriving instantly, NotAllowedError, a data error no
-        // name was invented for — is the platform not sharing, and joins the clipboard path.
-        if (error?.name === 'AbortError' && performance.now() - openedAt >= HUMAN_SHEET_MS) return 'cancelled'
-      }
+  const copyLink = (payload: ProductSharePayload) => copy(payload.url)
+  const copyMessage = (payload: ProductSharePayload) => copy(shareText(payload))
+
+  /**
+   * Where the sheet's rows go, given the links the shop lists in its header.
+   *
+   * The platform-URL rule has one owner — `app/utils/social-prefill.ts` — and this only changes
+   * *which text* it hands over: the share's own line rather than the message a contact row drafts.
+   * The shop's phone is deliberately not passed: a share addressed to the shop's own number is a
+   * contact, and the two settings answer different questions.
+   */
+  const destinations = (payload: ProductSharePayload, links: SiteSocialLink[]) => {
+    const text = shareText(payload)
+    const resolved: ProductShareDestination[] = []
+    for (const link of links) {
+      const stored = link.url.trim()
+      // An unset link is not a destination: nothing is invented in its place.
+      if (!stored) continue
+      const target = socialPrefillLink(link, { phone: '', message: text, productUrl: payload.url })
+      resolved.push({
+        key: `${link.platform}-${stored}`,
+        platform: link.platform,
+        label: link.platform,
+        href: target.href,
+        prefilled: target.prefilled
+      })
     }
-
-    // Reached by browsers with no share sheet, by a payload they refuse to share, and by a sheet
-    // that never visibly opened.
-    return await copyToClipboard(payload.url) ? 'copied' : 'failed'
+    return resolved
   }
 
-  return { share }
+  return { copyLink, copyMessage, destinations }
 }

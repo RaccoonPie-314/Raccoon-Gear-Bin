@@ -34,9 +34,10 @@ app/
 │   │   └── composables/useAdminProductEditor.ts  its form, save, upload, delete (Phase 5)
 │   └── product/
 │       ├── components/ProductConversion.vue    the conversion boundary: inline CTA + mobile sticky bar, one visible per breakpoint
-│       ├── components/ProductActions.vue       presentational row (contact CTA, channels, share)
+│       ├── components/ProductActions.vue       presentational row (contact CTA, channels, share) + its panel
+│       ├── components/ProductShareSheet.vue    the share UI: desktop popover / mobile bottom sheet
 │       ├── composables/useProductContact.ts    channels, prepared message, copy — fetches nothing
-│       └── composables/useProductShare.ts      share sheet + clipboard fallback, no product type
+│       └── composables/useProductShare.ts      share payload, destinations, clipboard — no product type, no sheet
 ├── composables/
 │   ├── useCatalog.ts            the only public catalog data layer
 │   ├── useCatalogBrowse.ts      browsing state: search / sort / category / filteredProducts
@@ -54,9 +55,9 @@ app/
 ├── types/            database.ts (schema mirror), catalog.ts + site-info.ts + product-contact.ts
 ├── utils/            rules that are neither reactive state nor a browser capability
 │   ├── product-stock.ts   getProductStockState — the one owner of the in / low / out band
-│   ├── social-prefill.ts  socialContactLink — which platforms document a prefill, and the rest
+│   ├── social-prefill.ts  socialPrefillLink — which platforms document a prefill, and the rest
 │   └── clipboard.ts       copyToClipboard — reports only what the Clipboard API really did
-└── assets/css/main.css   theme + the select-morph keyframes
+└── assets/css/main.css   theme, the system-UI font stack, and the select-morph keyframes
 scripts/
 ├── verify-ui.mjs     CDP regression harness: tuned interactions + the whole admin flow
 └── fixtures.json     synthetic Supabase-shaped rows the harness serves instead of the project
@@ -138,7 +139,7 @@ shared component silently stops resolving (the build stays green; the page rende
    about a product and handing that product to a friend are two halves of one section, and the
    section is a feature: `app/features/product/components/ProductConversion.vue` is the boundary —
    it owns the behaviour, the confirmation and the mobile sticky bar — while
-   `ProductActions.vue` stays presentational (props in, `copy` / `share` out, no composable).
+   `ProductActions.vue` stays presentational (props in, `copy` / `copyLink` / `copyMessage` out, no composable).
    `useProductContact` is *handed* the `CatalogProduct` and the `SiteInfo` the page loaded and
    issues no query of its own, so `useCatalog` and `useSiteInfo` remain the only readers of their
    tables; `useProductShare` is deliberately a different capability that accepts
@@ -198,8 +199,8 @@ editor seam above: the page hands over what it owns and keeps none of the rules.
 | Direction | What |
 |---|---|
 | page → feature (props) | `product` (the `useCatalog` model), `siteInfo` (the `useSiteInfo` model, `null` until it resolves) |
-| inside the feature | `useProductContact` resolves the channels, the stock band and the prepared message; `useProductShare` runs the sheet and the clipboard fallback; `ProductConversion` owns the confirmation and mounts the UI twice |
-| leaf | `ProductActions` — props in, `copy` / `share` out, no composable |
+| inside the feature | `useProductContact` resolves the channels, the stock band and the prepared message; `useProductShare` resolves the share text, the destinations and the clipboard write; `ProductConversion` owns the confirmation and mounts the UI twice |
+| leaf | `ProductActions` — props in, `copy` / `copyLink` / `copyMessage` out, no composable; `ProductShareSheet` — payload, destinations and feedback in, `close` / `copyLink` / `copyMessage` out |
 | page keeps | route param, the product fetch and its loading/error state, the site-info read, `useHead`, and the grid the section sits in |
 
 The page's whole contribution is `<ProductConversion :product="product" :site-info="siteInfo" />`.
@@ -209,37 +210,57 @@ Two details in there are contracts rather than style:
 
 - **Two mounts, one behaviour, one visible.** The inline block and the teleported sticky bar are
   the same component with a `compact` flag, so `verify` can demand that both offer the same
-  channels and the same message — and each is switched off at the other's breakpoint (inline
-  `hidden lg:block`, bar `lg:hidden`), so a visitor ever sees exactly one Contact to Order CTA.
-  The confirmation lives in `ProductConversion` and records *which* mount spoke, because two
-  `aria-live` regions bound to one string would announce every copy twice.
+  channels, the same message and the same Share control — and each is switched off at the other's
+  breakpoint (inline `hidden lg:block`, bar `lg:hidden`), so a visitor ever sees exactly one Contact
+  to Order CTA and exactly one Share CTA. The bar no longer disappears when a shop configures no
+  channel: it still carries Share, and Share does not ask the contact settings' permission.
+  The confirmation lives in `ProductConversion` and records *which* surface spoke — `inline`,
+  `sticky` or `sheet` — because two `aria-live` regions bound to one string would announce every
+  copy twice, and while the sheet is open the bar's own line is behind it.
 - **The sticky bar is below the lightbox by stacking, not by knowledge.** It is `z-50`; the
   lightbox is `z-[70]`; nothing in the feature reads or owns gallery state, and the harness proves
   the ordering with `elementFromPoint` over the bar's own centre while the lightbox is open.
+- **The sheet teleports itself, like the bar and the lightbox.** A `position: fixed` panel inside the
+  sticky bar would be positioned by the bar's own box, because `backdrop-blur` makes an ancestor a
+  containing block. So `ProductShareSheet` renders into `body` and takes its anchor as a prop.
 
-`useProductShare` asks one question of every `navigator.share()` settle — *could a human have
-caused this?* — because the browser gives no other signal. Measured in a visible Chrome window, a
-real sheet stays pending until the visitor leaves it (~1s at the fastest), and platforms with no
-sheet answer *instantly*: either an `AbortError` (headless Chrome, desktop Chrome where the OS
-share service is absent) or a **phantom resolve** that paints nothing (reported from a desktop
-browser that "succeeded" with no popover). Both instants — reject *or* resolve under
-`HUMAN_SHEET_MS` — are the platform answering for the visitor, and fall through to the clipboard
-with its true sentence ("Product link copied."). Anything slower was a sheet the visitor used or
-closed, and both of those stay silent: the page never claims an act the visitor watched happen,
-and never contradicts one they chose not to. `canShare()` is consulted before calling.
+Sharing is a *surface*, not a platform call. `navigator.share()` is not used at all: its sheet cannot
+be styled, cannot show the product, and its promise is not evidence — measured in Phase 1.2, desktop
+Chrome answers a share it never painted with an instant resolve, so a page that trusts it reports a
+share nobody performed, and every honest fallback needed a timing heuristic (`HUMAN_SHEET_MS`) to
+tell the platform's answer from the visitor's. Both problems disappeared when the sheet became the
+UI: what the visitor can see happen is what the page says happened. `useProductShare` therefore holds
+only data and actions — the share text, each destination's href, and one `copy()` that returns the
+clipboard's own truth — while `ProductShareSheet` owns the two shapes (an anchored popover on a
+`lg`-and-up pointer, a bottom sheet on a phone), the dismiss paths (backdrop, Escape, close button,
+each returning focus to the control that opened it), and its own `role="status"` line. Escape is
+answered document-wide while it is open, for the same reason the lightbox's is: a click on a
+non-focusable part of a backdrop moves focus to `<body>`, and a dialog that only listened inside its
+own subtree would then have trapped the visitor in it.
 
-Platform capability lives in one pure function, `socialContactLink` in `app/utils/social-prefill.ts`,
-and its rule is: use a documented prefill where the platform publishes one, and otherwise open the
-stored URL unchanged. WhatsApp (`wa.me/<number>?text=`) and Telegram (`t.me/<username>?text=`,
-`t.me/+<phone>?text=`, `t.me/share/url?url=&text=`) are supported; Facebook, Messenger, Instagram,
-TikTok and everything unrecognised are not, because none of them documents a public parameter for a
-prefilled DM. Inventing one fails silently — it opens a chat with an empty box — so the only
-assemblies ever performed put the shop's *own* configured number or username into a documented
-parameter, a stored URL is never rewritten into a compose URL, and the row states which it did
-(`prefilled`), with the explicit Copy action always available beside the list. The platform marks
-come from `SocialBrandIcon.vue`, the single owner shared by the masthead and the contact rows: the
-path data is one copy because a hand-copied truncated curve has already rendered a glyph as a 1.4px
-speck, and the globe fallback is what makes a new platform a data edit rather than a code change.
+The destinations are the shop's **visible** links (`SiteInfo.socialLinks`), not its contactable ones:
+whether an owner appears in the header and whether a shopper may order through a platform are two
+settings, and the share list is resolved from the first. Only the documented prefills are used —
+Telegram's `?text=` and `t.me/share/url`, WhatsApp's `wa.me/<number>?text=` — and the shop's phone is
+deliberately *not* handed to the rule for a share, because addressing the shop's own number is a
+contact, not a share. Every other platform opens its stored URL unchanged beside explicit Copy rows,
+and no row implies a send it did not make (`prefilled` says which did).
+
+Platform capability lives in one pure function, `socialPrefillLink` in
+`app/utils/social-prefill.ts`, and its rule is: use a documented prefill where the platform publishes
+one, and otherwise open the stored URL unchanged. Two callers ask it the same question with different
+text — the contact rows hand over the order enquiry, the Share Sheet the product's own line and link
+— which is why the rule has one owner rather than a second copy. WhatsApp (`wa.me/<number>?text=`)
+and Telegram (`t.me/<username>?text=`, `t.me/+<phone>?text=`, `t.me/share/url?url=&text=`) are
+supported; Facebook, Messenger, Instagram, TikTok and everything unrecognised are not, because none of
+them documents a public web parameter for a prefilled DM. Inventing one fails silently — it opens a
+chat with an empty box — so the only assemblies ever performed put the shop's *own* configured number
+or username into a documented parameter, a stored URL is never rewritten into a compose URL, and the
+row states which it did (`prefilled`), with the explicit Copy action always available beside the list.
+The platform marks come from `SocialBrandIcon.vue`, the single owner shared by the masthead, the
+contact rows and the share sheet: the path data is one copy because a hand-copied truncated curve has
+already rendered a glyph as a 1.4px speck, and the globe fallback is what makes a new platform a data
+edit rather than a code change.
 
 The canonical URL is a page fact and a feature fact at once: `useHead` publishes
 `route.path` against the request origin (not `useRequestURL()`, which on the client is read once and
@@ -299,7 +320,7 @@ index.vue → useCatalog().fetchCatalog()
          → useSiteInfo().fetchSiteInfo()     on mount — auxiliary, silent when it fails
          → <ProductConversion :product :site-info>
               └─ useProductContact(product, siteInfo) → { stock, url, channels, message, copyMessage }
-              └─ useProductShare()                    → share({ title, text?, url }) → outcome
+              └─ useProductShare()                    → { shareText, copy, copyLink, copyMessage, destinations }
          → useHead(...)                       title, description, canonical and og:* off the product
 ```
 
@@ -358,8 +379,10 @@ and none of them are visible to the compiler or to `build`.
 | Indicator slide | 260ms `cubic-bezier(0.16, 1, 0.3, 1)` | `CategoryDesktop.vue` |
 | Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
-| Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion); pan clamped to ±(s−1)/(2s) of the photo's layout box | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
-| Share settle window | `HUMAN_SHEET_MS = 250` — any settle (resolve or abort) under it is the platform answering, not the visitor | `useProductShare.ts` |
+| Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion), **anchored on the point that was clicked**: `transform-origin` is that point and the photo carries no other translation, so the clicked detail stays under the pointer instead of sliding to the centre. Pan is clamped per axis to the picture's own edges under that origin (a picture shorter than the frame after the scale is held centred, not given invented travel), and the zoom resets on photo change and on close. No standalone zoom control — the enlarged photo *is* the control | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
+| Contact panel enter / leave | 200ms transform + 160ms opacity, `cubic-bezier(0.33, 1, 0.68, 1)`, travelling from the edge it is anchored to (below the row inline, above the bar in the sticky mount); reduced motion keeps a 120ms fade and drops the travel | `ProductActions.vue` |
+| Share Sheet enter / leave | sheet 260ms `translateY(100%)` + 220ms backdrop; popover 180ms `translateY(-6px) scale(0.96)` + 140ms fade; both dropped to a fade under reduced motion | `ProductShareSheet.vue` |
+| Share copy confirmation | `FEEDBACK_MS = 4000`, one speaker at a time (`inline` / `sticky` / `sheet`) | `ProductConversion.vue` |
 | Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
 | Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
 | Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; phone left of the centre line, location right of it | `index.vue` header, asserted by `verify-ui.mjs` |
@@ -367,6 +390,22 @@ and none of them are visible to the compiler or to `build`.
 `0.24` is trigger-height ÷ panel-height, so the panel grows out of the control instead of
 popping beside it. The exit uses an accelerating curve on purpose: a decelerating collapse
 leaves an opaque remnant motionless under the pill, which reads as a hang.
+
+### Type: the platform's own UI font, and one bundled face
+
+Latin text is set in the **native system UI font** — `system-ui, -apple-system, BlinkMacSystemFont,
+'Segoe UI', Roboto, 'Helvetica Neue', Arial, …` in both `--font-sans` and `body` (`main.css`). No SF
+Pro file is downloaded or shipped, and there is no user-agent sniffing: Apple devices answer with SF,
+Windows with Segoe UI, Android with Roboto, anything else with its own UI face. The one face still
+self-hosted from `@fontsource*` is **Noto Sans Khmer**, because a Khmer run has no acceptable
+fallback — Windows and the CI runner ship no Khmer font at all, and a missing cluster is broken
+rendering rather than a missing glyph. `@nuxt/fonts`' network providers stay disabled in
+`nuxt.config.ts`; nothing needs them now that Latin text asks for no webfont.
+
+The consequence for verification is deliberate and worth knowing before you change a width: text
+metrics are now the *machine's* metrics, so a measurement that depends on how wide a string is cannot
+be an absolute pixel number if it has to pass on a runner too. The harness's @320 guards are therefore
+about overflow, control height and inset — not about where a particular word ends.
 
 ### The storefront masthead
 
@@ -502,8 +541,10 @@ surface should match the logo.
   home-page feature, and `useAdminSiteInfoEditor` has no markup outside it to separate.
 - Product-detail conversion behaviour → `app/features/product/composables/`; its UI →
   `app/features/product/components/` (both dirs are registered in `nuxt.config.ts`). A capability
-  that takes no catalog type — the share sheet — may live beside them, but must not start taking
-  one, or it stops being reusable.
+  that takes no catalog type — the share payload, its destinations and the sheet that shows them —
+  may live beside them, but must not start taking one, or it stops being reusable. The gallery, the
+  lightbox and the zoom stay in `app/components/ProductGallery.vue`: presentational, props in, no
+  data composable, which is what that directory is for.
 - A rule that is neither reactive state nor a browser capability → `app/utils/`, as a plain
   exported function, **not** a composable. `getProductStockState` is the example: the
   in / low / out band used to be written twice — once to colour `StockStatus`, once to word the

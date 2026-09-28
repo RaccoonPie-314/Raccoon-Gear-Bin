@@ -41,14 +41,21 @@ Covered (this list is the shape of the run, not its check count — the run prin
   brand row; phone and location on their own margins; socials stacked under the utility line;
   icon-only socials; no collision; no horizontal overflow.
 - **Detail page**: photo carousel (bounded strip window, one-slot advance on adjacent selection,
-  wrapping and hover-gated arrows), the shared-state lightbox, the stock band on every card read
+  wrapping and hover-gated arrows), the shared-state lightbox and its **click-to-zoom** (the enlarged
+  photo is the control: the clicked point stays anchored, two different points give two different
+  focal points, the pan stops at the photo's own bound, and the zoom resets on photo change and on
+  close — measured with a mouse and with touch), the stock band on every card read
   from `data-stock-state` (band, label and colour), header search.
 - **Product conversion flow**: CTA wording and prepared message per stock band; the channel list
   against what Site Info actually configures (including the edit the admin flow just saved); the
-  clipboard in all three states so a refused write can never report success; both share paths and
-  the dismissed-sheet case; the sticky bar's geometry, safe area, breakpoint, surface and
-  stacking under the lightbox; Escape handing focus back; no horizontal overflow at seven widths
-  in both colour schemes; canonical and Open Graph metadata.
+  clipboard in all three states so a refused write can never report success; the **custom Share
+  Sheet** — desktop popover and mobile bottom sheet from one component, its product context, its
+  destinations resolved from the shop's *visible* links rather than its contactable ones, Copy link
+  and Copy message, Escape / backdrop / keyboard dismissal, its geometry at 320 / 390 / 640, and the
+  assertion that `navigator.share()` is never reached for; the Contact panel's enter and leave
+  transitions, frame-sampled with and without reduced motion; the sticky bar's geometry, safe area,
+  breakpoint, surface and stacking under the lightbox; Escape handing focus back; no horizontal
+  overflow at seven widths in both colour schemes; canonical and Open Graph metadata.
 - **Admin flow**: login, add, image upload, save/update, cancel, delete, the site-info editor
   (seed, field edits, link add/toggle/reorder/remove, the singleton upsert body, and the public
   header reflecting it), logout.
@@ -125,12 +132,15 @@ the matrix, don't assume the utility name.
 
 ## Environment
 
-- The build must be **hermetic for fonts**: `nuxt.config.ts` keeps only `@nuxt/fonts`' offline
-  `local` provider and the real faces come from the `@fontsource*` devDependencies. A runner that
-  cannot reach `fonts.googleapis.com` silently falls back to a wider system sans (locally it is
-  invisible — the machine has the font or the cache), and that delta alone trips the harness's
-  @320 overflow guards. If a build logs `Could not fetch … fonts.googleapis.com`, fix the
-  providers, not the assertions.
+- **Fonts are the platform's own, and that is a measurement fact, not a detail.** Latin text is set in
+  the native system UI stack (`app/assets/css/main.css`); the only bundled face is Noto Sans Khmer,
+  imported from the `@fontsource/noto-sans-khmer` devDependency, because Windows and the runner ship no
+  Khmer font and a missing cluster is broken rendering rather than a missing glyph. `@nuxt/fonts`'
+  network providers stay disabled in `nuxt.config.ts`, so there is no `fonts.googleapis.com` step to
+  fail. The consequence: text width differs between this machine and the runner by design, so a new
+  assertion must be about overflow, control height, inset or a bound — never about where a particular
+  word ends. When a font stack changes, re-run the responsive sweep (320 / 390 / 640 and up): the
+  narrow-screen guards are the ones that move.
 - If Chrome fails to start with `Operation not permitted`, the command is running inside a
   restrictive sandbox — run it from a normal terminal.
 - The harness has **no dependencies** (raw CDP over WebSocket; Node 24 for global `WebSocket`) —

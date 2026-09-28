@@ -1,37 +1,51 @@
 import type { SiteSocialLink } from '~/types/site-info'
 
-/** Where a contact row actually goes, and whether the product message travels inside the link. */
-export type SocialContactLink = {
+/** Where one of the shop's stored social links actually goes, and whether the text travels inside it. */
+export type SocialPrefillLink = {
   href: string
-  /** True when this href carries the message itself, because the platform documents a prefill. */
+  /** True when this href carries the text itself, because the platform documents a prefill. */
   prefilled: boolean
 }
 
 /**
- * Which stored contact link can carry the product message on its own.
+ * How a stored platform string is shown to a visitor.
  *
- * The rule for everything not listed below — Facebook and Messenger, Instagram, TikTok, and any
- * platform the shop adds later — is that the stored destination opens unchanged and the message
- * stays available through the panel's explicit Copy action. That is not timidity: none of them
- * documents a public web parameter for a prefilled DM, and guessing one does not fail loudly. It
- * opens a chat with an empty box, which is worse than not trying, and it is precisely how a
- * "we copied your message" claim becomes a lie. So a stored URL is never rewritten into a compose
- * URL, and the only numbers ever placed into a documented parameter come from the shop's own
- * configured identity.
+ * The value the shop typed stays the row's identity — it is never renamed, re-translated, or mapped
+ * to a guess about what the owner meant — but a raw lowercase `telegram` beside the translated
+ * "Phone" reads as an unresolved message key. The first letter is the only thing changed. Both the
+ * contact rows and the Share Sheet name a destination this way, so the rule has one owner here rather
+ * than a second implementation that can drift.
  */
-export const socialContactLink = (
+export const platformLabel = (platform: string) =>
+  platform ? `${platform[0]?.toUpperCase() ?? ''}${platform.slice(1)}` : platform
+
+/**
+ * Which stored social link can carry a message on its own.
+ *
+ * Two callers ask this question and only differ in what they put in `message`: the product page's
+ * Contact rows (the order enquiry) and the Share Sheet (the product's own line + link). The rule
+ * for everything not listed below — Facebook and Messenger, Instagram, TikTok, and any platform the
+ * shop adds later — is that the stored destination opens unchanged and the text stays available
+ * through an explicit Copy action. That is not timidity: none of them documents a public web
+ * parameter for a prefilled DM, and guessing one does not fail loudly. It opens a chat with an
+ * empty box, which is worse than not trying, and it is precisely how a "we copied your message"
+ * claim becomes a lie. So a stored URL is never rewritten into a compose URL, and the only numbers
+ * ever placed into a documented parameter come from the shop's own configured identity.
+ */
+export const socialPrefillLink = (
   link: SiteSocialLink,
   context: { phone: string, message: string, productUrl: string }
-): SocialContactLink => {
+): SocialPrefillLink => {
   const stored = link.url.trim()
   const platform = link.platform.toLowerCase().replace(/[^a-z0-9]/g, '')
   const text = encodeURIComponent(context.message)
 
   if (platform === 'whatsapp') {
     // WhatsApp's click-to-chat form is `https://wa.me/<number>?text=<urlencoded>`, where the number
-    // is international format without `+`, spaces or punctuation. The shop's own identity is taken
-    // from its stored `wa.me` link when it has one, and otherwise from the configured phone. With
-    // neither, there is no number to address, so the stored link opens as stored and prefills nothing.
+    // is international format without `+`, spaces or punctuation. The identity is taken from the
+    // shop's stored `wa.me` link when it has one, and otherwise from the configured phone the
+    // caller chose to hand over. With neither, there is no number to address, so the stored link
+    // opens as stored and prefills nothing.
     const number = whatsappNumber(stored, context.phone)
     if (number) return { href: `https://wa.me/${number}?text=${text}`, prefilled: true }
     return { href: stored, prefilled: false }

@@ -89,60 +89,148 @@ const onKeydown = (event: KeyboardEvent) => {
 // selectedIndex, so closing it leaves the normal gallery on the photo the lightbox was
 // last showing — there is nothing to synchronise because there is one state.
 const isLightboxOpen = ref(false)
-const zoomBtn = ref<HTMLElement | null>(null)
+const photoBtn = ref<HTMLElement | null>(null)
 const lightboxCloseBtn = ref<HTMLElement | null>(null)
 const dialogEl = ref<HTMLElement | null>(null)
+const frameEl = ref<HTMLElement | null>(null)
+const zoomControlEl = ref<HTMLElement | null>(null)
+const lightboxImgEl = ref<HTMLImageElement | null>(null)
 
-// ---- second-stage zoom (photo → lightbox → zoom) ----
-// A magnification of the already-enlarged photo, owned by the lightbox itself: it adds no modal
-// and no second image — the same `<img>` carries a `scale()` transform, so the previous/next
-// controls, the swap transition and the shared selection all keep working untouched. One step of
-// fixed magnification rather than a scroll-zoom continuum: the visitor came to inspect a detail,
-// not to tune a scale. 2.5x is the point where a keyboard keycap or a stitch reads clearly at a
-// phone's lightbox size while one pan gesture still reaches every corner of the photo.
+// ---- second-stage zoom: photo → lightbox → click the photo ----
+// No separate control and no second modal: the enlarged photo *is* the zoom button, and the same
+// `<img>` carries the transform, so the previous/next controls, the swap transition and the shared
+// selection all keep working untouched. One step of magnification rather than a scroll-zoom
+// continuum — the visitor came to inspect a detail, not to tune a scale — and it opens around the
+// point they clicked: 2.5x is where a keyboard keycap or a stitch reads clearly at a phone's
+// lightbox size while one pan still reaches every corner of the photo.
 const ZOOM_SCALE = 2.5
 const isZoomed = ref(false)
+// Where the zoom is pinned, as a fraction of the element box `transform-origin` measures in — so a
+// viewport resize cannot leave it pointing at a stale pixel. It is the click itself, which is what
+// makes the clicked point stay under the pointer instead of sliding to the centre.
+const anchor = ref({ x: 0.5, y: 0.5 })
 const panX = ref(0)
 const panY = ref(0)
 
-// Panning is clamped against the image's own layout box: at `scale(s)` about the centre, the
-// viewport shows 1/s of the photo, so the translate may travel ±(s − 1)/(2s) of the box before
-// the edge of the photo would cross the edge of the frame. `offsetWidth`/`offsetHeight` are asked
-// for rather than `getBoundingClientRect()` because the latter includes the scale itself — the
-// limit would chase the drag and grow every frame. The bound is also why no page scrollbar can
-// ever appear: the transform paints outside the box, but the layout box, and therefore the
-// document, never grows.
-const zoomLimit = () => {
-  const el = document.querySelector<HTMLElement>('[data-lightbox-main]')
-  const room = (ZOOM_SCALE - 1) / (2 * ZOOM_SCALE)
+/**
+ * The picture's own box, in page coordinates, plus the frame it is letterboxed inside.
+ *
+ * The lightbox `<img>` is `object-contain` in a frame of a different aspect, so a portrait photo in a
+ * wide window is banded left-and-right and a landscape one top-and-bottom — and the coordinates that
+ * answer "what did they just click on" and "how far may this pan" belong to the picture, not to the
+ * transparent box that centres it. Derived from the frame's rect (never transformed) and the image's
+ * intrinsic ratio, so it is the rendered geometry at any viewport for any aspect ratio, at a click of
+ * the pointer rather than a measurement per frame.
+ */
+const paintedBox = () => {
+  const frame = frameEl.value
+  if (!frame) return null
+  const r = frame.getBoundingClientRect()
+  const img = lightboxImgEl.value
+  const ratio = img?.naturalWidth && img?.naturalHeight
+    ? img.naturalWidth / img.naturalHeight
+    : (r.width / r.height || 1)
+  const width = Math.min(r.width, r.height * ratio)
+  const height = width / ratio
   return {
-    x: Math.max(0, (el?.offsetWidth ?? 0) * room),
-    y: Math.max(0, (el?.offsetHeight ?? 0) * room)
+    frameLeft: r.left,
+    frameTop: r.top,
+    frameWidth: r.width,
+    frameHeight: r.height,
+    left: r.left + (r.width - width) / 2,
+    top: r.top + (r.height - height) / 2,
+    width,
+    height
   }
 }
 
-const resetZoom = () => { isZoomed.value = false; panX.value = 0; panY.value = 0 }
-
-const toggleZoom = () => {
-  isZoomed.value = !isZoomed.value
-  if (!isZoomed.value) { panX.value = 0; panY.value = 0 }
-  void nextTick(() => dialogEl.value?.focus())
+const zoomAt = (clientX: number, clientY: number) => {
+  const box = paintedBox()
+  if (!box) return false
+  // Keep the anchor inside the picture: a click on the letterbox band around it should zoom into the
+  // nearest part of the photo, not pin the magnification to empty space.
+  const ax = Math.min(box.left + box.width, Math.max(box.left, clientX))
+  const ay = Math.min(box.top + box.height, Math.max(box.top, clientY))
+  anchor.value = { x: (ax - box.frameLeft) / box.frameWidth, y: (ay - box.frameTop) / box.frameHeight }
+  // The resting pan is the *legal* zero, not the literal one: an anchor near the edge of a
+  // letterboxed picture has less room on that side than on the other, and starting outside the range
+  // would leave a band of bare backdrop at the clicked edge and snap the picture on the first drag.
+  const rest = clampPan(0, 0)
+  panX.value = rest.x
+  panY.value = rest.y
+  isZoomed.value = true
+  return true
 }
 
-// Changing the photo — by arrow, thumb, or keyboard — resets the zoom: the magnification and the
-// pan belong to the photo they were made on, and carrying them onto the next one would open on
-// some unrelated cropped corner instead of the whole new photo.
+const resetZoom = () => {
+  isZoomed.value = false
+  anchor.value = { x: 0.5, y: 0.5 }
+  panX.value = 0
+  panY.value = 0
+}
+
+/** The one entry point for the zoom, from a pointer or from the keyboard. */
+const toggleZoom = (clientX?: number, clientY?: number) => {
+  if (isZoomed.value) resetZoom()
+  else {
+    const box = paintedBox()
+    // No coordinates means the keyboard: the middle of the picture, so Enter on the control
+    // magnifies the whole of it rather than one corner nobody chose.
+    zoomAt(clientX ?? (box ? box.left + box.width / 2 : 0), clientY ?? (box ? box.top + box.height / 2 : 0))
+  }
+  // Focus belongs to the zoom control, which is inside the dialog: the arrow keys reach the dialog's
+  // handler by bubbling, and a keyboard visitor who just pressed Enter is not teleported elsewhere.
+  void nextTick(() => zoomControlEl.value?.focus())
+}
+
+/**
+ * How far one axis may travel: until the picture's own edge reaches the frame's.
+ *
+ * Scaling about an origin maps a picture edge at element-local coordinate `p` to
+ * `o + (p − o)·s`, which is the whole of the arithmetic. Pinning the range to those two edges is what
+ * makes the zoom structurally safe — the magnified picture can never uncover the frame or push the
+ * document wider, because it is only ever allowed to move inside it. When the picture is shorter than
+ * the frame even at 2.5x (a wide photo in a tall window) the range inverts, and the answer is to hold
+ * it centred rather than to invent travel. Asked once per gesture, from the frame's rect, which is
+ * never the transformed element.
+ */
+const panRange = (paintStart: number, paintSize: number, originPx: number, frameSize: number): [number, number] => {
+  const near = originPx + (paintStart - originPx) * ZOOM_SCALE
+  const far = originPx + (paintStart + paintSize - originPx) * ZOOM_SCALE
+  const max = -near
+  const min = frameSize - far
+  return min > max ? [(min + max) / 2, (min + max) / 2] : [min, max]
+}
+
+/** Both axes at once, from the travel a drag has produced so far. */
+const clampPan = (x: number, y: number) => {
+  const box = paintedBox()
+  if (!box) return { x: 0, y: 0 }
+  const rangeX = panRange(box.left - box.frameLeft, box.width, anchor.value.x * box.frameWidth, box.frameWidth)
+  const rangeY = panRange(box.top - box.frameTop, box.height, anchor.value.y * box.frameHeight, box.frameHeight)
+  return {
+    x: Math.min(rangeX[1], Math.max(rangeX[0], x)),
+    y: Math.min(rangeY[1], Math.max(rangeY[0], y))
+  }
+}
+
+// Changing the photo — by arrow, thumb, or keyboard — resets the zoom: the magnification, the focal
+// point and the pan belong to the photo they were made on, and carrying them onto the next one would
+// open on some unrelated cropped corner instead of the whole new photo.
 watch(selectedIndex, resetZoom)
 
 const zoomStyle = computed(() => isZoomed.value
-  ? { transform: `translate(${panX.value}px, ${panY.value}px) scale(${ZOOM_SCALE})` }
+  ? {
+      transform: `translate(${panX.value}px, ${panY.value}px) scale(${ZOOM_SCALE})`,
+      'transform-origin': `${(anchor.value.x * 100).toFixed(3)}% ${(anchor.value.y * 100).toFixed(3)}%`
+    }
   : undefined)
 
-// Drag-to-pan, mouse and touch through one Pointer Events path. Reduced motion is honoured by
-// the stylesheet (the zoom entry loses its transition, and the swap checks keep the slide
-// softened) — the drag itself stays available under that flag, because moving content *by the
-// visitor's own hand* is direct manipulation, not an animation the flag declines. `dragged`
-// swallows the click that trails a real drag so panning never reads as "close the zoom".
+// Drag-to-pan, mouse and touch through one Pointer Events path. Reduced motion is honoured by the
+// stylesheet (the zoom entry loses its transition) — the drag itself stays available under that flag,
+// because moving content *by the visitor's own hand* is direct manipulation, not an animation the
+// flag declines. `dragged` swallows the click that trails a real drag so panning never reads as "zoom
+// back out".
 let dragId: number | null = null
 let dragMoved = false
 let dragX = 0
@@ -170,9 +258,9 @@ const onZoomPointerMove = (event: PointerEvent) => {
   const dy = event.clientY - startY
   if (!dragMoved && Math.hypot(dx, dy) < 4) return
   dragMoved = true
-  const limit = zoomLimit()
-  panX.value = Math.min(limit.x, Math.max(-limit.x, dragX + dx))
-  panY.value = Math.min(limit.y, Math.max(-limit.y, dragY + dy))
+  const clamped = clampPan(dragX + dx, dragY + dy)
+  panX.value = clamped.x
+  panY.value = clamped.y
 }
 
 const onZoomPointerUp = (event: PointerEvent) => {
@@ -187,7 +275,7 @@ const closeLightbox = () => {
   // resets it, so reopening always starts from the contained photo the frame showed.
   resetZoom()
   isLightboxOpen.value = false
-  void nextTick(() => zoomBtn.value?.focus())
+  void nextTick(() => photoBtn.value?.focus())
 }
 
 // The page must not scroll awkwardly behind a full-screen photo. Restoring on close (and on
@@ -209,16 +297,22 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
 })
 
-// A click on the enlarged photo keeps the lightbox up and pulls focus back into the dialog,
-// so the arrow keys still belong to it afterwards. The click that trails a pan drag is the end
-// of a gesture, not an intent, and is ignored.
-const onLightboxImgClick = () => {
+// The enlarged photo is the zoom control: a click in its picture magnifies around the exact point
+// that was clicked, and a click while magnified returns to the contained view. The click that trails
+// a pan drag is the end of a gesture, not an intent, and is ignored — otherwise every drag that ended
+// without moving far enough to count as one would silently un-zoom what it just panned.
+const onZoomControlClick = (event: MouseEvent) => {
   if (dragged.value) { dragged.value = false; return }
-  dialogEl.value?.focus()
+  // A keyboard-activated button reports a click with no pointer behind it (`detail` 0, coordinates
+  // 0,0), which is exactly the case the centre anchor exists for.
+  if (event.detail === 0) { toggleZoom(); return }
+  toggleZoom(event.clientX, event.clientY)
 }
 
 const onDialogKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') { closeLightbox(); return }
+  // Enter and Space belong to the zoom control itself — it is a real button, so Blink activates it
+  // and the click handler decides where to anchor. Everything else is the arrow-key selection rule.
   onKeydown(event)
 }
 </script>
@@ -241,7 +335,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
     <div class="gallery-swap relative aspect-square overflow-hidden rounded-2xl border border-zinc-200/70 bg-zinc-50 p-4 shadow-xs sm:rounded-3xl sm:p-8 dark:border-zinc-800/70 dark:bg-zinc-900/60 flex items-center justify-center">
       <button
         v-if="selectedImage"
-        ref="zoomBtn"
+        ref="photoBtn"
         type="button"
         data-gallery-zoom
         :aria-label="t('enlargePhoto')"
@@ -337,44 +431,42 @@ const onDialogKeydown = (event: KeyboardEvent) => {
       @click.self="closeLightbox"
       @keydown="onDialogKeydown"
     >
-      <div class="relative flex h-[82dvh] w-[92vw] max-w-5xl items-center justify-center">
+      <div ref="frameEl" class="relative flex h-[82dvh] w-[92vw] max-w-5xl items-center justify-center overflow-hidden">
         <Transition :name="swapTransition">
           <img
             v-if="selectedImage"
+            ref="lightboxImgEl"
             :key="selectedImage.id"
             data-lightbox-main
             :data-zoomed="isZoomed ? 'true' : undefined"
-            tabindex="-1"
             draggable="false"
             :src="selectedImage.url"
             :alt="selectedImage.altText || name"
             :style="zoomStyle"
-            :aria-label="t('enlargePhoto')"
             class="h-full w-full object-contain"
-            :class="isZoomed ? 'lightbox-zoomed cursor-grab active:cursor-grabbing' : 'cursor-default'"
-            @click="onLightboxImgClick"
-            @pointerdown="onZoomPointerDown"
-            @pointermove="onZoomPointerMove"
-            @pointerup="onZoomPointerUp"
-            @pointercancel="onZoomPointerUp"
+            :class="isZoomed ? 'lightbox-zoomed' : ''"
           />
         </Transition>
 
-        <!-- The zoom control shares the dialog's corner language with prev/next/close: same
-             circle, same surface, opposite bottom corner so it never trades a hit with the close
-             button. One button carries both directions — pressing it again returns the photo to
-             the contained view it came from. -->
+        <!-- The zoom control lies over the photo instead of being the photo. A focusable `<img>` with
+             an action name would be announced as an image (no role), and its `aria-label` would
+             replace the alt text the photo exists to carry; a transparent button keeps the picture's
+             own semantics and gets a real role, name, cursor and keyboard activation for free. The
+             prev/next controls sit above it (`z-10`), so the overlay never trades a hit with them. -->
         <button
+          v-if="selectedImage"
+          ref="zoomControlEl"
           type="button"
-          data-lightbox-zoom
-          :aria-pressed="isZoomed"
+          data-lightbox-zoom-target
           :aria-label="isZoomed ? t('zoomOut') : t('zoomIn')"
-          class="absolute bottom-4 right-4 z-10 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-          @click="toggleZoom"
-        >
-          <svg v-if="!isZoomed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8a3 3 0 0 0-3 3"/><path d="M11 8a3 3 0 0 1 3 3"/><path d="M8 11h6"/></svg>
-          <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M8 11h6"/></svg>
-        </button>
+          class="absolute inset-0 cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+          :class="isZoomed ? 'lightbox-pan cursor-zoom-out active:cursor-grabbing' : ''"
+          @click="onZoomControlClick"
+          @pointerdown="onZoomPointerDown"
+          @pointermove="onZoomPointerMove"
+          @pointerup="onZoomPointerUp"
+          @pointercancel="onZoomPointerUp"
+        />
 
         <template v-if="imageCount > 1">
           <button
@@ -467,17 +559,26 @@ const onDialogKeydown = (event: KeyboardEvent) => {
   .gallery-previous-leave-to { transform: translateX(12%); }
 }
 
-/* The zoomed photo: `touch-action: none` hands every drag to the pan handler instead of letting
-   the browser scroll the page under the finger, and the transition turns the zoom toggle into the
-   same 220ms move the swap already uses. During an actual drag the transform must track the
-   pointer on the frame it moved, so the easing is dropped for that one class of element state.
-   Reduced motion keeps the zoom and the drag-pan (direct manipulation), and drops the animated
-   entry — the photo arrives at its magnification rather than travelling to it. */
+/* The zoomed photo: the transition turns the zoom toggle into the same 220ms move the swap already
+   uses. Because the magnification is pinned to the point that was clicked, that move travels *out of*
+   the pointer rather than towards the centre, which is what makes it read as "the photo opened where I
+   touched" instead of a resize. During an actual drag the transform must track the pointer on the
+   frame it moved, so the easing is dropped while the control is being pressed. Reduced motion keeps
+   the zoom and the drag-pan (direct manipulation), and drops the animated entry — the photo arrives at
+   its magnification rather than travelling to it. */
 .lightbox-zoomed {
-  touch-action: none;
   transition: transform 220ms cubic-bezier(0.33, 1, 0.68, 1);
 }
-[data-lightbox-main]:active {
+/* `touch-action: none` on the zoom control while magnified hands every drag to the pan handler
+   instead of letting the browser scroll the page under the finger; unset, a swipe on the contained
+   photo behaves like a swipe anywhere else in the dialog. */
+.lightbox-pan {
+  touch-action: none;
+}
+/* The photo follows the control it sits under: while the zoom control is being dragged, the
+   transform must track the pointer on the frame it moved, so the easing is dropped. `:has()` because
+   the control is the photo's following sibling. */
+[data-lightbox-main]:has(+ [data-lightbox-zoom-target]:active) {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {

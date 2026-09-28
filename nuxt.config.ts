@@ -7,11 +7,11 @@ export default defineNuxtConfig({
   },
   modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
   // @nuxt/ui auto-registers @nuxt/fonts, whose default provider fetches fonts.googleapis.com at
-  // build time. The CI runner cannot reach it, the fetch fails silently, and the page renders in
-  // a wider system sans — enough to trip the harness's @320 overflow guards (254/256 on the
-  // runner vs 257/257 locally). Empty providers = no network step; the real fonts are imported
-  // hermetically from the @fontsource* devDependencies in app/assets/css/main.css, so every
-  // machine measures identical metrics.
+  // build time. The CI runner cannot reach it, and the fetch fails silently. Empty providers = no
+  // network step. Latin UI text needs no webfont at all: the theme stack is the native system UI
+  // font (see app/assets/css/main.css), so there is nothing hermetic left to bundle for it. The
+  // one real @fontface still imported is Noto Sans Khmer — Windows and the runner ship no Khmer
+  // font and a missing cluster is broken rendering, not a fallback.
   fonts: {
     // Keep only @nuxt/fonts' offline `local` provider (it resolves families from installed
     // packages — the @fontsource* devDependencies). The string keys set to `false` are the

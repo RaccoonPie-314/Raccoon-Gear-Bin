@@ -146,7 +146,7 @@ const stubSource = [
 // Every CDP response wraps its payload in `result`; forgetting that level is the single easiest
 // way to "discover" a missing element that is really a parsing mistake.
 class Cdp {
-  constructor(url) { this.url = url; this.id = 0; this.pending = new Map(); this.events = [] }
+  constructor(url) { this.url = url; this.id = 0; this.pending = new Map(); this.events = []; this.onEvent = null }
   connect() {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url)
@@ -155,7 +155,7 @@ class Cdp {
       this.ws.onmessage = ev => {
         const m = JSON.parse(ev.data)
         if (m.id && this.pending.has(m.id)) { this.pending.get(m.id)(m); this.pending.delete(m.id) }
-        if (m.method) this.events.push(m)
+        if (m.method) { this.events.push(m); this.onEvent?.(m) }
       }
     })
   }
@@ -182,6 +182,31 @@ class Cdp {
 }
 
 const boxesExpr = sel => '[...document.querySelectorAll(' + JSON.stringify(sel) + ')].map(el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, t: (el.textContent || "").trim() } })'
+
+// ------------------------------------------------------- generated product photos
+// The fixture rows point at `product-images` storage paths, and this rig contacts no project, so
+// without help every `<img>` on the detail page is a broken image: it still *lays out*, but it has no
+// intrinsic size. That is fine for a thumbnail grid and fatal for the lightbox zoom, whose whole job
+// is to work out where an `object-contain` picture sits inside its frame. So the rig answers those
+// requests itself, cycling three aspect ratios through a photo set — landscape, portrait, square —
+// which are precisely the three cases the focal-point maths has to get right.
+const PHOTO_SIZES = [[1600, 900], [900, 1600], [1200, 1200]]
+// The size a given storage path was served at, from the same trailing number `photoFor` reads, so a
+// check can compare the ratio the app derived against the ratio the file declares.
+const sizeOfPhoto = path => {
+  const name = String(path).split('/').pop()
+  const n = Number((/(?:^|-)(\d+)\.\w+$/.exec(name) || [, '0'])[1])
+  return PHOTO_SIZES[n % PHOTO_SIZES.length]
+}
+const photoFor = url => {
+  const name = decodeURIComponent(url.split('?')[0].split('/').pop() || '')
+  const n = Number((/(?:^|-)(\d+)\.\w+$/.exec(name) || [, '0'])[1])
+  const [w, h] = PHOTO_SIZES[n % PHOTO_SIZES.length]
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}' viewBox='0 0 ${w} ${h}'>`
+    + `<rect width='${w}' height='${h}' fill='#e4e4e7'/>`
+    + `<rect x='${w * 0.06}' y='${h * 0.06}' width='${w * 0.88}' height='${h * 0.88}' fill='none' stroke='#18181b' stroke-width='${Math.round(Math.min(w, h) / 60)}'/>`
+    + `<text x='50%' y='52%' text-anchor='middle' font-family='sans-serif' font-size='${Math.round(Math.min(w, h) / 6)}' fill='#18181b'>${w}x${h}</text></svg>`
+}
 
 // ---------------------------------------------------------------- main
 mkdirSync(WORK, { recursive: true })
@@ -254,7 +279,23 @@ const run = async () => {
   const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${debugPort}/json/new?${encodeURIComponent('about:blank')}`, { method: 'PUT' })).json()
   cdp = new Cdp(webSocketDebuggerUrl)
   await cdp.connect()
+  // Product photos come from the rig, not the network. `Fetch` is the only CDP domain that can answer
+  // an `<img>` request — the in-browser `fetch` stub cannot — and it is scoped to the one bucket the
+  // app builds public URLs from, so nothing else is intercepted.
+  cdp.onEvent = async (m) => {
+    if (m.method !== 'Fetch.requestPaused') return
+    const body = Buffer.from(photoFor(m.params.request.url)).toString('base64')
+    try {
+      await cdp.send('Fetch.fulfillRequest', {
+        requestId: m.params.requestId,
+        responseCode: 200,
+        responseHeaders: [{ name: 'content-type', value: 'image/svg+xml' }, { name: 'access-control-allow-origin', value: '*' }],
+        body
+      })
+    } catch { /* the request was already dropped; the picture is decorative here */ }
+  }
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('DOM.enable')
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/storage/v1/object/public/*', requestStage: 'Request' }] })
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stubSource })
 
   // 3. helpers built on the client
@@ -307,44 +348,28 @@ const run = async () => {
   const seqOf = list => list.map(w => `${w.method} ${w.p}${w.q ? '?' + w.q : ''}`)
 
   // ---- the capabilities the conversion flow depends on -----------------------------------------
-  // The clipboard and the share sheet are things the rig has to decide about, and both have to be
-  // installed *after* the navigation that re-injected the stub: the app reads `navigator.clipboard`
-  // and `navigator.share` when the button is pressed, not when the page loads. `reject` and
-  // `absent` deliberately record nothing, so "the copy happened" and "the copy was attempted" stay
-  // distinguishable in the assertions.
+  // The clipboard is something the rig has to decide about, and it has to be installed *after* the
+  // navigation that re-injected the stub: the app reads `navigator.clipboard` when a row is pressed,
+  // not when the page loads. `reject` and `missing` deliberately record nothing, so "the copy
+  // happened" and "the copy was attempted" stay distinguishable in the assertions.
   const CLIPBOARD = {
     ok: '{ writeText: function (t) { window.__COPIES.push(String(t)); return Promise.resolve(); } }',
     reject: '{ writeText: function () { return Promise.reject(new Error("NotAllowedError")); } }',
     missing: 'undefined'
   }
-  const SHARE = {
-    // `navigator.userActivation.isActive` is recorded at the moment the app calls share, which is
-    // the only way to tell "called from the click" apart from "called after an await that cost the
-    // activation" — a sheet that silently stops opening on mobile is exactly that failure, and no
-    // amount of reading the code afterwards proves the timing.
-    // Both settling mocks settle on a *timer*, not a microtask: a real share sheet takes ~1s
-    // before it can resolve or be dismissed (measured in a visible Chrome window), and the app
-    // now reads the SPEED of any settle as "the visitor had a sheet" vs "the platform answered
-    // for them". A mock that settled synchronously would mock a browser that does not exist —
-    // and the app must treat that shape (fast resolve or fast abort) as a phantom: no sheet ever
-    // painted, so the clipboard fallback is the only honest outcome.
-    ok: 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return new Promise(function (resolve) { setTimeout(function () { window.__SHARE_SETTLED = "shared"; resolve(); }, 400) }); }',
-    // The reported defect, as a mock: the method exists, "succeeds" instantly, and no UI paints.
-    'resolve-fast': 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return Promise.resolve(); }',
-    abort: 'function () { return new Promise(function (_, reject) { setTimeout(function () { var e = new Error("dismissed"); e.name = "AbortError"; window.__SHARE_SETTLED = "aborted"; reject(e); }, 400) }); }',
-    // The desktop-Chrome-on-macOS case measured in Phase 1.2: the method exists, and it rejects
-    // with an AbortError so fast the sheet never painted.
-    'abort-fast': 'function () { return Promise.reject(Object.assign(new Error("abort"), { name: "AbortError" })); }',
-    absent: 'undefined'
-  }
+  // The one thing the clipboard mock cannot decide for itself: the sheet must never reach for the
+  // platform's share API at all, so the rig installs a `navigator.share` that records any call and
+  // fails the check that reads it. A share sheet the visitor cannot see is not a UI, and its promise
+  // resolving is not evidence that anything was shared (see ARCHITECTURE.md → The conversion flow).
+  const SHARE_TRAP = 'function (data) { window.__SHARES.push(data); return Promise.resolve(); }'
   const armClipboard = mode => ev('(() => { window.__COPIES = []; Object.defineProperty(navigator, "clipboard", { configurable: true, value: ' + CLIPBOARD[mode] + ' }); return true })()')
-  const armShare = mode => ev('(() => { window.__SHARES = []; Object.defineProperty(navigator, "share", { configurable: true, value: ' + SHARE[mode] + ' }); return true })()')
+  const armShareTrap = () => ev('(() => { window.__SHARES = []; Object.defineProperty(navigator, "share", { configurable: true, value: ' + SHARE_TRAP + ' }); return true })()')
+  const shareCalls = async () => await ev('window.__SHARES || []')
   const copies = async () => await ev('window.__COPIES || []')
-  const shares = async () => await ev('window.__SHARES || []')
-  // Stop a channel link from actually leaving the page so the click can still be observed. The
-  // listener captures on the document and only cancels the default, which leaves the app's own
-  // handlers running — the way to ask "did tapping a channel pretend to copy something?".
-  const holdChannelLinks = () => ev('(() => { window.__BLOCKED = 0; document.addEventListener("click", function (e) { var link = e.target && e.target.closest ? e.target.closest("[data-contact-channel]") : null; if (link) { e.preventDefault(); window.__BLOCKED++; } }, true); return true })()')
+  // Stop a channel or destination link from actually leaving the page so the click can still be
+  // observed. The listener captures on the document and only cancels the default, which leaves the
+  // app's own handlers running — the way to ask "did tapping this pretend to copy something?".
+  const holdChannelLinks = () => ev('(() => { window.__BLOCKED = 0; document.addEventListener("click", function (e) { var link = e.target && e.target.closest ? e.target.closest("[data-contact-channel], [data-share-destination]") : null; if (link) { e.preventDefault(); window.__BLOCKED++; } }, true); return true })()')
   // A shop or a product that the fixtures do not contain: mutate the stub's own collections before
   // the app boots, run the navigation, then remove the script so no later check inherits it.
   const forNextDocument = async source => (await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source })).identifier
@@ -354,6 +379,12 @@ const run = async () => {
   // answers are what prove the two cannot drift apart.
   const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, panelTabbable: panel ? panel.getAttribute("tabindex") === "0" : false, panelOverflow: panel ? panel.scrollHeight - panel.clientHeight : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, shareLink: (el.querySelector("[data-share-link]") || {}).value || null, readonly: el.querySelector("[data-share-link]") ? el.querySelector("[data-share-link]").getAttribute("readonly") !== null : null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => { const mark = a.querySelector("svg"); return { href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-contact-prefilled") === "true", svgs: a.querySelectorAll("svg").length, paths: a.querySelectorAll("svg path").length, fill: mark ? mark.getAttribute("fill") : null, stroke: mark ? mark.getAttribute("stroke") : null, ink: mark ? (() => { const bb = mark.getBBox(); return [Math.round(bb.width), Math.round(bb.height)] })() : null } }) }) } return out })()'
   const mounts = async () => await ev(MOUNTS)
+  // The Share Sheet is teleported to `body` — a fixed panel may not inherit the sticky bar's
+  // containing block, whose `backdrop-blur` would otherwise make the bar its viewport — so it is asked
+  // about document-wide rather than through a mount. Exactly one mount is painted at a time, so there
+  // is never more than one sheet to find.
+  const SHEET = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const c = getComputedStyle(s); const rows = [...s.querySelectorAll("[data-share-destination]")].map(a => { const mark = a.querySelector("svg"); return { platform: a.getAttribute("data-share-destination"), href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-share-prefilled") === "true", svgs: a.querySelectorAll("svg").length, fill: mark ? mark.getAttribute("fill") : null } }); const fb = s.querySelector("[data-share-feedback]"); const link = s.querySelector("[data-share-sheet-link]"); return { label: s.getAttribute("aria-label"), text: (s.textContent || "").trim(), position: c.position, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height), radius: c.borderTopLeftRadius, pb: c.paddingBottom, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, vh: innerHeight, hasCopyLink: !!s.querySelector("[data-share-copy-link]"), hasCopyMessage: !!s.querySelector("[data-share-copy-message]"), copyLinkText: (s.querySelector("[data-share-copy-link]") || {}).textContent ? (s.querySelector("[data-share-copy-link]").textContent || "").trim() : null, copyMessageText: (s.querySelector("[data-share-copy-message]") || {}).textContent ? (s.querySelector("[data-share-copy-message]").textContent || "").trim() : null, viaText: [...s.querySelectorAll("p")].map(p => (p.textContent || "").trim()).filter(Boolean).join(" | "), hasClose: !!s.querySelector("[data-share-close]"), link: link ? link.value : null, readonly: link ? link.getAttribute("readonly") !== null : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, rows } })()'
+  const sheet = async () => await ev(SHEET)
   // The message the page must produce, assembled from the fixture row and the contract in
   // `expectations.conversion` — never read back out of the app.
   const expectedMessage = (row, ask, url) => EXP.conversion.lines
@@ -832,10 +863,19 @@ const run = async () => {
       check('focus moved into the lightbox', await ev(`(() => { const d = document.querySelector(${JSON.stringify(LB)}); return !!d && d.contains(document.activeElement) })()`))
       await clickSelector('[data-lightbox-next]', `(${SEL_IDX}) === 3`)
       check('lightbox next moves the one shared selection', await waitFor(`(${SEL_IDX}) === 3`) && (await ev(`(document.querySelector('${THUMB}[data-selected]') || {}).getAttribute && document.querySelector('${THUMB}[data-selected]').getAttribute('data-index')`)) === '3')
+      // Let the swap finish first: while two layers are alive, the press and the release of one
+      // synthetic click can land on different nodes, and Blink then delivers the click to their
+      // common ancestor — the frame — which reads as a zoom that never happened.
+      await waitFor(`document.querySelectorAll('${LB} [data-lightbox-main]').length === 1`, 3000)
       const lbImg = (await ev(boxesExpr(`${LB} [data-lightbox-main]`)))[0]
       await clickAt(lbImg.x, lbImg.y)
-      await sleep(160)
-      check('clicking the enlarged image keeps the lightbox open', await ev(`!!document.querySelector(${JSON.stringify(LB)})`))
+      await sleep(300)
+      const centreClick = await ev('(() => { const lb = document.querySelector(\'[data-lightbox]\'); const z = document.querySelector(\'[data-lightbox-main][data-zoomed]\'); return { open: !!lb, zoomed: !!z } })()')
+      check('clicking the enlarged image keeps the lightbox open and magnifies it', centreClick.open && centreClick.zoomed, { centreClick, aimedAt: lbImg })
+      await clickAt(lbImg.x, lbImg.y)
+      await sleep(300)
+      // The backdrop, not the photo: with the zoom folded into the photo, a click that lands on the
+      // picture is a zoom gesture, so this aims at the band beside it.
       await clickAt(12, 12)
       check('backdrop click closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
       check('closing hands focus back to the photo', await waitFor('document.activeElement === document.querySelector(\'[data-gallery-zoom]\')', 2500))
@@ -850,46 +890,130 @@ const run = async () => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       check('Escape closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
 
-      // ---- second-stage zoom: photo → lightbox → zoom, inside the same dialog ----
-      // Explicit about the motion preference: headless Chrome answers the reduced-motion query
-      // with `reduce` by default, and "running with motion" is a precondition of these checks,
-      // not an accident of the rig.
+      // ---- second-stage zoom: the enlarged photo *is* the zoom control ----
+      // No button, no second modal: a click magnifies the photo around the point that was clicked and
+      // a click again returns it. These checks are explicit about the motion preference, because
+      // headless Chrome answers reduced-motion queries with `reduce` by default and "running with
+      // motion" is a precondition here, not an accident of the rig.
       await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
       await clickAt(zoomBox.x, zoomBox.y)
-      await waitFor(`!!document.querySelector(${JSON.stringify(LB)} [data-lightbox-zoom])`)
-      const zBtn = (await ev(boxesExpr(`${LB} [data-lightbox-zoom]`)))[0]
+      await waitFor(`!!document.querySelector(${JSON.stringify(LB)} [data-lightbox-main])`)
       // The *current* lightbox photo, never the outgoing layer of a swap still running (the same
       // MAIN_SRC rule the gallery checks follow): a leave-active ghost is first in document order,
       // absolutely positioned and perfectly zoomable — measuring it would measure yesterday's photo.
-      const ZGEO = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const b = document.querySelector('${LB} [data-lightbox-zoom]'); if (!i || !b) return null; const r = i.getBoundingClientRect(); const c = getComputedStyle(i); return { zoomed: i.getAttribute('data-zoomed'), pressed: b.getAttribute('aria-pressed'), scale: c.transform, transition: c.transitionDuration, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, w: r.width, left: r.left, right: r.right, h: r.height, top: r.top, bottom: r.bottom, vw: innerWidth, vh: innerHeight } })()`
-      const ZFOCUS = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; if (i) i.focus(); return true })()`
-      check('the lightbox carries one zoom control that starts unpressed', !!zBtn && (await ev(`document.querySelectorAll(${JSON.stringify(LB + ' [data-lightbox-zoom]')}).length`)) === 1 && (await ev(`document.querySelector(${JSON.stringify(LB + ' [data-lightbox-zoom]')}).getAttribute('aria-pressed')`)) === 'false')
-      const fit0 = await ev(ZGEO)
-      await clickAt(zBtn.x, zBtn.y)
-      await sleep(350) // the 220ms zoom transition must settle before the matrix is read
+      // Geometry is read off the frame (the photo's parent), which carries no transform of its own,
+      // and the *painted* picture is derived from it plus the image's intrinsic size: `object-contain`
+      // letterboxes one axis, and the focal point belongs to the picture, not to the box around it.
+      const ZGEO = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; if (!i) return null; const f = i.parentElement; const fr = f.getBoundingClientRect(); const c = getComputedStyle(i); const ctl = document.querySelector('${LB} [data-lightbox-zoom-target]'); const m = /matrix\\(([^)]+)\\)/.exec(c.transform); const p = m ? m[1].split(',').map(Number) : [1, 0, 0, 1, 0, 0]; const o = (c.transformOrigin || '0 0').split(/\\s+/); const px = (v, size) => /%$/.test(v) ? parseFloat(v) / 100 * size : parseFloat(v) || 0; const ox = px(o[0] || '0', fr.width), oy = px(o[1] || '0', fr.height); const nat = (i.naturalWidth && i.naturalHeight) ? i.naturalWidth / i.naturalHeight : 1; const pw = Math.min(fr.width, fr.height * nat), ph = pw / nat; return { zoomed: i.getAttribute('data-zoomed'), cursor: ctl ? getComputedStyle(ctl).cursor : null, scale: p[0], tx: p[4], ty: p[5], originX: ox, originY: oy, originFX: fr.width ? ox / fr.width : 0, originFY: fr.height ? oy / fr.height : 0, transition: c.transitionDuration, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, frameLeft: fr.left, frameTop: fr.top, frameW: fr.width, frameH: fr.height, paintLeft: fr.left + (fr.width - pw) / 2, paintTop: fr.top + (fr.height - ph) / 2, paintW: pw, paintH: ph, ratio: nat } })()`
+      const ZFOCUS = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const d = document.querySelector('${LB}'); if (d) d.focus(); return !!d })()`
+      // Every measurement below derives the painted picture from the image's intrinsic size, so a
+      // photo that has not decoded yet reports a ratio of 1 and the letterbox maths reads as broken.
+      const PHOTO_READY = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return !!i && i.complete && i.naturalWidth > 0 })()`
+      const photoReady = () => waitFor(PHOTO_READY, 5000)
+      await photoReady()
+      const geo0 = await ev(ZGEO)
+      // Clicks are aimed at fractions of the *picture*, not of the frame: a portrait photo in a wide
+      // window occupies the middle third of it, and a click outside the picture is the clamp's test
+      // case, not the focal point's.
+      const anchorOf = (g, fx, fy) => ({ x: g.paintLeft + g.paintW * fx, y: g.paintTop + g.paintH * fy })
+      const clickPhoto = async (fx, fy) => { const g = await ev(ZGEO); const p = anchorOf(g, fx, fy); await clickAt(p.x, p.y); await sleep(320); return p }
+      // The containment rule: after the scale and the resting translate, the picture's own edges must
+      // sit at or beyond the frame's on any axis it is large enough to cover — otherwise the zoom has
+      // uncovered the backdrop, which is exactly what the pan clamp exists to prevent. Scaling about
+      // an origin maps a picture edge at element-local `p` to `o + (p − o)·s + t`.
+      const coverGaps = g => {
+        const edge = (paintStart, paintSize, origin, translate, frameStart, frameSize) => {
+          const near = frameStart + origin + (paintStart - origin) * g.scale + translate
+          const far = near + paintSize * g.scale
+          return { left: frameStart - near, right: far - (frameStart + frameSize) }
+        }
+        const x = edge(g.paintLeft - g.frameLeft, g.paintW, g.originX, g.tx, g.frameLeft, g.frameW)
+        const y = edge(g.paintTop - g.frameTop, g.paintH, g.originY, g.ty, g.frameTop, g.frameH)
+        return { x, y, wideEnough: g.paintW * g.scale >= g.frameW - 1, tallEnough: g.paintH * g.scale >= g.frameH - 1 }
+      }
+      const contained = g => {
+        const c = coverGaps(g)
+        return (!c.wideEnough || (c.x.left >= -1 && c.x.right >= -1)) && (!c.tallEnough || (c.y.left >= -1 && c.y.right >= -1))
+      }
+      // Anchoring is what the gesture asks for, but containment is what the app must never break, so a
+      // resting zoom has exactly three legal shapes per axis: held under the pointer; centred, because
+      // the picture is too small to cover the frame even at 2.5x (`panRange` inverts and refuses to
+      // invent travel); or flush with a frame edge, because the clamp moved it to keep the backdrop
+      // covered. Anything else is drift, and the axis says so in the detail.
+      const anchoredOrCentred = (g, click) => {
+        const c = coverGaps(g)
+        const h = hold(g, click)
+        const axis = (enough, gaps, paint, frame, moved) => {
+          if (Math.abs(moved) < 2) return { ok: true, how: 'anchored' }
+          if (!enough) return { ok: Math.abs(gaps.left - (paint * g.scale - frame) / 2) < 2, how: 'centred' }
+          const flush = Math.abs(gaps.left) < 2 || Math.abs(gaps.right) < 2
+          return { ok: flush, how: flush ? 'clamped' : 'drifted' }
+        }
+        const x = axis(c.wideEnough, c.x, g.paintW, g.frameW, h.dx)
+        const y = axis(c.tallEnough, c.y, g.paintH, g.frameH, h.dy)
+        return { ok: x.ok && y.ok, how: x.how + '/' + y.how, dx: h.dx, dy: h.dy }
+      }
+
+      check('the enlarged photo invites a click and no standalone zoom button survives', !!geo0 && geo0.cursor === 'zoom-in' && (await ev(`document.querySelectorAll('[data-lightbox-zoom]').length`)) === 0, { geo0 })
+      // The rig must be serving photos with a real intrinsic size, or every painted-box measurement
+      // below is derived from a broken image's zero and the letterbox maths is untested. Compared
+      // against the declared size of the photo actually on screen — which may legitimately be square.
+      const sel0 = await ev(SEL_IDX)
+      const [w0, h0] = sizeOfPhoto(row(G.manyId).product_images[sel0].storage_path)
+      check('the rig is painting real photos, so the letterbox maths is actually under test', !!geo0 && geo0.ratio === w0 / h0 && geo0.paintW > 0 && geo0.paintH > 0, { ratio: geo0 && geo0.ratio, served: w0 / h0, sel0 })
+
+      // The anchoring rule, measured rather than asserted by reading the code: the picture coordinate
+      // under the pointer must be the picture coordinate still under the pointer afterwards. Scaling
+      // about an origin maps local `p` to `o + (p − o)·s + t`, so the clicked point is held exactly
+      // when that expression returns where it started.
+      const topLeft = await clickPhoto(0.25, 0.25)
       const zin = await ev(ZGEO)
-      check('the zoom control magnifies the one enlarged photo in place', zin && zin.zoomed === 'true' && zin.pressed === 'true' && zin.scale.startsWith('matrix') && Math.abs(Number(zin.scale.slice(7).split(',')[0]) - G.zoomScale) < 0.01, { zin })
+      const hold = (g, click) => {
+        const local = click.x - g.frameLeft
+        const anchored = g.originX + (local - g.originX) * g.scale + g.tx
+        const localY = click.y - g.frameTop
+        const anchoredY = g.originY + (localY - g.originY) * g.scale + g.ty
+        return { dx: anchored - local, dy: anchoredY - localY }
+      }
+      const heldTopLeft = hold(zin, topLeft)
+      check('clicking the photo magnifies it in place at the point that was clicked', zin.zoomed === 'true' && Math.abs(zin.scale - G.zoomScale) < 0.01 && Math.abs(heldTopLeft.dx) < 2 && Math.abs(heldTopLeft.dy) < 2, { zin, heldTopLeft })
+      check('the zoomed photo still covers its frame — no band of backdrop at the clicked edge', contained(zin), { gaps: coverGaps(zin) })
+      check('the zoomed photo offers the zoom-out cursor', zin.cursor === 'zoom-out', { cursor: zin.cursor })
       check('the zoomed photo cannot make the page scroll sideways', zin.overflow <= 1, { overflow: zin.overflow })
-      // Pan: press, drag, and the translate part of the matrix follows the pointer while the
-      // scale part stays pinned at the one magnification. The drag starts at the centre of the
-      // *contained* box (the zoomed rect hangs outside the viewport and its corners are buttons)
-      // and travels down-right: from the centre, every intermediate of a ±(s−1)/2·w pan stays
-      // inside the viewport, so no step of the gesture can land on a floating control.
-      const panFrom = { x: fit0.left + fit0.w / 2, y: fit0.top + fit0.h / 2 }
+      // A different corner has to produce a different anchor — a `scale()` with a fixed centre would
+      // pass the check above just as well, which is precisely the defect this replaced.
+      await clickPhoto(0.5, 0.5)
+      const bottomRight = await clickPhoto(0.78, 0.72)
+      const zin2 = await ev(ZGEO)
+      const heldBottomRight = hold(zin2, bottomRight)
+      check('a different point produces a different focal point, still anchored', zin2.zoomed === 'true' && Math.abs(zin2.originFX - zin.originFX) > 0.1 && Math.abs(zin2.originFY - zin.originFY) > 0.1 && Math.abs(heldBottomRight.dx) < 2 && Math.abs(heldBottomRight.dy) < 2, { before: [zin.originFX, zin.originFY], after: [zin2.originFX, zin2.originFY], heldBottomRight })
+
+      // Pan: press, drag, and the translate part of the matrix follows the pointer while the scale
+      // part stays pinned at the one magnification. Started near the anchor so every intermediate
+      // lands on the photo itself, not on a floating control.
+      const panFrom = anchorOf(zin2, 0.6, 0.6)
       await mouse('mouseMoved', panFrom.x, panFrom.y)
       await mouse('mousePressed', panFrom.x, panFrom.y, 1)
-      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', panFrom.x + 46 * i, panFrom.y + 22 * i, 1); await sleep(30) }
+      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', panFrom.x + 40 * i, panFrom.y + 20 * i, 1); await sleep(30) }
       const midPan = await ev(ZGEO)
-      await mouse('mouseReleased', panFrom.x + 276, panFrom.y + 132)
+      await mouse('mouseReleased', panFrom.x + 240, panFrom.y + 120)
       await sleep(60)
       const dragSettled = await ev(ZGEO)
-      const tp = /matrix\(([^)]+)\)/.exec(midPan.scale)
-      const pm = tp ? tp[1].split(',').map(Number) : []
-      check('while zoomed the photo pans with the pointer and keeps its magnification', pm.length >= 6 && Math.abs(pm[0] - G.zoomScale) < 0.01 && pm[4] > 30 && pm[5] > 10, { matrix: pm })
-      check('after the drag the photo stays where it was left (no snap-back)', dragSettled.zoomed === 'true' && (/matrix\(([^)]+)\)/.exec(dragSettled.scale) || [])[1] === (tp || [])[1], { released: dragSettled && dragSettled.scale })
-      // Zoom is a view, not a second modal: navigation and Escape must survive it. The arrow
-      // goes through the dialog's own keydown (the current photo is focusable and focused after
-      // a tap), so this checks the selection rule, not where a pointer release happens to land.
+      check('while zoomed the photo pans with the pointer and keeps its magnification', Math.abs(midPan.scale - G.zoomScale) < 0.01 && midPan.tx > 30 && midPan.ty > 10, { midPan })
+      check('after the drag the photo stays where it was left (no snap-back)', dragSettled.zoomed === 'true' && dragSettled.tx === midPan.tx && dragSettled.ty === midPan.ty, { released: [dragSettled.tx, dragSettled.ty], moved: [midPan.tx, midPan.ty] })
+      // The bound is what keeps the zoom inside the lightbox: dragging far past the edge stops at it
+      // instead of dragging the photo (or the document) with it.
+      await mouse('mouseMoved', panFrom.x, panFrom.y)
+      await mouse('mousePressed', panFrom.x, panFrom.y, 1)
+      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', panFrom.x + 600 * i, panFrom.y + 400 * i, 1); await sleep(30) }
+      const farPan = await ev(ZGEO)
+      await mouse('mouseReleased', panFrom.x + 3600, panFrom.y + 2400)
+      const further = await ev(ZGEO)
+      const coverX = farPan.frameW * G.zoomScale >= farPan.frameW
+      check('a drag past the edge stops at the photo\u2019s own bound instead of uncovering the frame', farPan.tx === further.tx && farPan.ty === further.ty && contained(farPan) && (!coverX || farPan.tx > 0) && farPan.overflow <= 1, { farPan, further, gaps: coverGaps(farPan) })
+
+      // Zoom is a view, not a second modal: navigation and Escape must survive it, and a photo swap
+      // must not carry the previous photo's magnification onto the next one.
       const selBeforeStep = await ev(SEL_IDX)
       await ev(ZFOCUS)
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 })
@@ -897,26 +1021,71 @@ const run = async () => {
       await waitFor(`(${SEL_IDX}) === ${(selBeforeStep + 1) % G.manyImages}`, 2500)
       await sleep(300) // let the swap's leave layer unmount before asking the current photo
       const afterStep = await ev(ZGEO)
-      check('next while zoomed advances the shared selection and resets the zoom', afterStep && !afterStep.zoomed && afterStep.scale === 'none' && (await ev(SEL_IDX)) === (selBeforeStep + 1) % G.manyImages, { afterStep, selBeforeStep })
-      await clickSelector(`${LB} [data-lightbox-zoom]`, `[data-zoomed]`)
-      await sleep(350)
-      check('the same control zooms back in on demand', (await ev(ZGEO)).zoomed === 'true')
-      await clickSelector(`${LB} [data-lightbox-zoom]`, 'true')
-      await sleep(350)
-      check('pressing it again returns the photo to the contained view', (await ev(ZGEO)).scale === 'none' && (await ev(ZGEO)).zoomed === null)
+      check('next while zoomed advances the shared selection and resets the zoom', !!afterStep && !afterStep.zoomed && afterStep.scale === 1 && Math.abs(afterStep.originFX - 0.5) < 0.01 && Math.abs(afterStep.originFY - 0.5) < 0.01 && (await ev(SEL_IDX)) === (selBeforeStep + 1) % G.manyImages, { afterStep, selBeforeStep })
+      const again = await clickPhoto(0.4, 0.6)
+      check('the photo zooms back in on demand', (await ev(ZGEO)).zoomed === 'true')
+      await clickAt(again.x, again.y)
+      await sleep(320)
+      check('a second click returns the photo to the contained view', (await ev(ZGEO)).scale === 1 && (await ev(ZGEO)).zoomed === null)
+      // The zoom is also a keyboard affordance: the control over the photo is a real button, and it is
+      // the only way to magnify a detail without a pointer position to lend it.
+      await ev('(() => { const b = document.querySelector(\'[data-lightbox] [data-lightbox-zoom-target]\'); if (b) b.focus(); return document.activeElement === b })()')
+      await press('Enter', 'Enter', 13, '\r')
+      await sleep(320) // the same 220ms entry the pointer path gets; read too early it is still at scale 1
+      const keyedZoom = await ev(ZGEO)
+      const keyedVisible = await ev('(() => { const b = document.querySelector(\'[data-lightbox] [data-lightbox-zoom-target]\'); return !!b && b === document.activeElement })()')
+      check('Enter on the zoom control magnifies the middle of the picture and keeps focus there', keyedZoom.zoomed === 'true' && Math.abs(keyedZoom.scale - G.zoomScale) < 0.01 && Math.abs(keyedZoom.originFX - 0.5) < 0.01 && Math.abs(keyedZoom.originFY - 0.5) < 0.01 && keyedVisible === true, { keyedZoom, keyedVisible })
+      await press('Enter', 'Enter', 13, '\r')
+      check('Enter again returns it, so the keyboard path round-trips', (await ev(ZGEO)).zoomed === null)
+      // Portrait, landscape and square: the same zoom asked of three different letters. The rig serves
+      // each fixture photo at a known intrinsic size, so the ratio the app derives from the loaded
+      // image can be checked against the ratio the file declares, and the anchoring and containment
+      // rules are re-asked for every one of them — a `scale()` about the centre passes none of this.
+      // The lightbox is wherever the checks above left it, so the sweep starts from the selection it
+      // actually finds and takes each declared size from that index: assuming index 0 here compares a
+      // portrait file's ratio against the landscape photo on screen and then waits out a full
+      // `clickSelector` timeout per step.
+      const startSel = await ev(SEL_IDX)
+      const shapes = []
+      for (let step = 0; step < G.manyImages; step++) {
+        const sel = (startSel + step) % G.manyImages
+        const before = await ev(ZGEO)
+        if (step > 0) { await clickSelector('[data-lightbox-next]', `(${SEL_IDX}) === ${sel}`); await photoReady(); await sleep(320) }
+        const fit = await ev(ZGEO)
+        const file = String(row(G.manyId).product_images[sel].storage_path).split('/').pop()
+        const [w, h] = sizeOfPhoto(file)
+        const anchor = await clickPhoto(0.85, 0.12)
+        const z = await ev(ZGEO)
+        const held = anchoredOrCentred(z, anchor)
+        shapes.push({
+          sel, file, want: w / h > 1.05 ? 'landscape' : w / h < 0.95 ? 'portrait' : 'square',
+          got: fit.ratio > 1.05 ? 'landscape' : fit.ratio < 0.95 ? 'portrait' : 'square',
+          natural: Math.round(fit.ratio * 100) === Math.round((w / h) * 100),
+          // A photo the frame cannot show at full width *and* full height must be letterboxed, which
+          // is what makes the painted box differ from the element box.
+          letterboxed: Math.abs(fit.paintW / fit.paintH - fit.ratio) < 0.02,
+          anchored: held.ok, how: held.how, dx: +held.dx.toFixed(2), dy: +held.dy.toFixed(2),
+          contained: contained(z),
+          // The zoom must not survive the swap that got us here: each photo opens contained.
+          resetOnSwap: !before.zoomed || step === 0
+        })
+        await clickAt(anchor.x, anchor.y)
+        await sleep(320)
+      }
+      check('every fixture photo is painted at the size the rig served it', shapes.every(s => s.natural && s.letterboxed), shapes.map(s => [s.sel, s.file, s.natural, s.letterboxed]))
+      check('the zoom anchors and stays contained on landscape, portrait and square photos', new Set(shapes.map(s => s.got)).size === 3 && shapes.every(s => s.anchored && s.contained && s.resetOnSwap), shapes)
       // Reduced motion keeps the magnification and the drag — the visitor's own hand moving the
       // photo is direct manipulation — and drops only the animated entry.
-      await clickSelector(`${LB} [data-lightbox-zoom]`, '[data-zoomed]')
+      await clickPhoto(0.5, 0.5)
       await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
       await sleep(120)
-      const rmFrom = { x: fit0.left + fit0.w / 2, y: fit0.top + fit0.h / 2 }
+      const rmFrom = anchorOf(await ev(ZGEO), 0.5, 0.5)
       await mouse('mouseMoved', rmFrom.x, rmFrom.y)
       await mouse('mousePressed', rmFrom.x, rmFrom.y, 1)
       for (let i = 1; i <= 4; i++) { await mouse('mouseMoved', rmFrom.x - 50 * i, rmFrom.y, 1); await sleep(30) }
       const rmPan = await ev(ZGEO)
       await mouse('mouseReleased', rmFrom.x - 200, rmFrom.y)
-      const rmMatrix = /matrix\(([^)]+)\)/.exec(rmPan ? rmPan.scale : '') 
-      check('under reduced motion the zoom arrives without a transition and still pans', !!rmPan && rmPan.zoomed === 'true' && rmPan.transition === '0s' && !!rmMatrix && Number(rmMatrix[1].split(',')[4]) < -50, rmPan && { scale: rmPan.scale, transition: rmPan.transition })
+      check('under reduced motion the zoom arrives without a transition and still pans', !!rmPan && rmPan.zoomed === 'true' && rmPan.transition === '0s' && rmPan.tx < -50, rmPan && { scale: rmPan.scale, transition: rmPan.transition, tx: rmPan.tx })
       await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
       await clickSelector(`${LB} [data-lightbox-close]`, `!document.querySelector(${JSON.stringify(LB)})`)
       await clickAt(zoomBox.x, zoomBox.y)
@@ -979,21 +1148,35 @@ const run = async () => {
     const mFit = await ev('(() => { const d = document.querySelector(\'[data-lightbox-main]\'); if (!d) return null; const r = d.getBoundingClientRect(); return { fits: r.left >= -1 && r.right <= innerWidth + 1 && r.width >= innerWidth * 0.7, w: Math.round(r.width) } })()')
     check('lightbox on touch: opens from the photo and fills the viewport without overflow', mOpen && !!mFit && mFit.fits, { mFit })
     check('no horizontal overflow with the lightbox open @390', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
-    // Touch zoom + pan: a tap on the zoom control magnifies in place, and a finger drag
-    // translates the magnified photo inside its own bounds — the page never scrolls sideways
-    // because of it, which is the same overflow number re-read, now mid-zoom. (A tap on the
-    // photo itself is the "keep the lightbox up, pull focus in" gesture, never a zoom.)
-    const mzBtn = (await ev(boxesExpr('[data-lightbox-zoom]')))[0]
-    await touch('touchStart', [{ x: mzBtn.x, y: mzBtn.y }])
-    await touch('touchEnd', [])
-    await sleep(400)
-    const mZoomed = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
-    check('a tap on the zoom control magnifies the lightbox photo on touch', mZoomed && !!mzBtn && mzBtn.w >= 36, { mZoomed, mzBtn })
+    // Touch zoom + pan: a tap on the enlarged photo magnifies it in place, a finger drag translates
+    // the magnified photo inside its own bounds — the page never scrolls sideways because of it, which
+    // is the same overflow number re-read, now mid-zoom — and a second tap without a drag returns it.
+    // There is no zoom control to aim at any more, which is the point of the first check.
+    const MTAP = '[data-lightbox] [data-lightbox-main]'
+    // Taps are aimed at the middle of the *frame*, not of the photo: while magnified the photo's own
+    // rect hangs outside the viewport, and a touch point sent below the fold is silently dropped —
+    // which reads exactly like a tap that the app ignored. The pan clamp guarantees the picture still
+    // covers the frame, so this point is always on the picture.
+    const tapAt = async (x, y) => { await touch('touchStart', [{ x, y }]); await touch('touchEnd', []); await sleep(320) }
+    const zoomedNow = () => ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
+    check('the lightbox photo itself takes the tap, with no standalone zoom control left', (await ev('document.querySelectorAll(\'[data-lightbox-zoom]\').length')) === 0 && await ev(`!!document.querySelector('${MTAP}')`))
+    await tapAt(195, 300)
+    check('a tap on the photo magnifies it in place on touch', await zoomedNow())
     await touch('touchStart', [{ x: 195, y: 420 }])
     for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: 195 - 30 * i, y: 420 }]); await sleep(30) }
-    const mPan = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const t = getComputedStyle(i).transform; const m = /matrix\\(([^)]+)\\)/.exec(t); return { tx: m ? +m[1].split(",")[4] : 0, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    const mPan = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const t = getComputedStyle(i).transform; const m = /matrix\\(([^)]+)\\)/.exec(t); return { tx: m ? +m[1].split(",")[4] : 0, zoomed: i.getAttribute("data-zoomed"), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
     await touch('touchEnd', [])
-    check('a finger drag pans the zoomed photo without moving the page', mPan.tx < -40 && mPan.overflow <= 1, { mPan })
+    check('a finger drag pans the zoomed photo without moving the page', mPan.zoomed === 'true' && mPan.tx < -40 && mPan.overflow <= 1, { mPan })
+    await tapAt(195, 420)
+    check('a second tap, with no drag behind it, returns the photo to the contained view', !(await zoomedNow()))
+    // The drag must not be mistaken for navigation, and navigation must not be lost to the drag: the
+    // arrows live outside the photo, so they answer a tap while it is magnified.
+    await tapAt(195, 420)
+    const selBeforeNav = await ev(SEL_IDX)
+    const mLbNext = (await ev(boxesExpr('[data-lightbox-next]')))[0]
+    await tapAt(mLbNext.x, mLbNext.y)
+    await sleep(200)
+    check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { selBeforeNav })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
@@ -1154,72 +1337,122 @@ const run = async () => {
     const rejected = await inlineMount()
     check('a clipboard write that rejects is reported as a failure, not a success', (await copies()).length === 0 && rejected.feedback === C.feedback.blocked, { feedback: rejected.feedback, copies: await copies() })
 
-    // ---- sharing ------------------------------------------------------------------------------
-    await clearFeedback()
-    await armShare('ok')
-    await armClipboard('ok')
-    await clickSelector('[data-share-cta]', 'true')
-    await sleep(900) // the sheet mock settles on a 400ms timer; the outcome must be in by now
-    const shared = await shares()
+    // ---- the Contact panel's enter and leave -------------------------------------------------
+    // The panel used to appear with nothing but a colour change and a spinning chevron. These record
+    // every frame of the flight rather than sampling at one guessed moment: a class that lives for
+    // 200ms is exactly what a settle-only check cannot see, and a single read taken too early lands on
+    // the frame *before* Vue attached the transition to the element (which reports `all 0s`) — the
+    // probe below is that lesson, written down.
+    const ctaBoxExpr = '(() => { const el = document.querySelector("[data-product-actions] [data-contact-cta]"); el.scrollIntoView({ block: "center", inline: "nearest" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()'
+    const panelGone = '!document.querySelector(\'[data-contact-panel]\')'
+    const START_FLIGHT = '(() => { window.__F = []; window.__Fdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = getComputedStyle(p); window.__F.push({ tr: c.transform, op: +c.opacity, tp: c.transitionProperty }); } if (performance.now() - t0 < 420) requestAnimationFrame(tick); else window.__Fdone = true; }; requestAnimationFrame(tick); return true })()'
+    const travelled = f => f.some(s => s.tr !== 'none' && s.tr !== '')
+    const faded = f => f.some(s => s.op < 1)
+    const namedTransform = f => f.some(s => /transform/.test(s.tp))
+    const namedOpacity = f => f.some(s => /opacity/.test(s.tp))
+
+    await press('Escape', 'Escape', 27)
+    await waitFor(panelGone)
+    // `scroll-behavior: smooth` is the trap here: `scrollIntoView` starts an animation, so a rect read
+    // in the same breath is a point the button is about to leave. Scroll, wait, re-measure, then start
+    // recording and click — and the button's own position also moves when the panel opens, because the
+    // sticky column grows with it.
+    const settleOnCta = async () => { await ev(ctaBoxExpr); await sleep(500); return await ev(ctaBoxExpr) }
+    const flight = async () => { const box = await settleOnCta(); await ev(START_FLIGHT); await clickAt(box.x, box.y); await waitFor('!!window.__Fdone', 4000); return await ev('window.__F || []') }
+    const enter = await flight()
+    check('the panel enters with a transform transition that actually runs', enter.length >= 3 && namedTransform(enter) && travelled(enter) && faded(enter) && enter[enter.length - 1].tr === 'none' && enter[enter.length - 1].op === 1, { frames: enter.length, first: enter[0], middle: enter[Math.floor(enter.length / 2)] })
+    const leave = await flight()
+    check('the panel leaves through the same transition rather than popping out', leave.length >= 3 && namedTransform(leave) && travelled(leave) && faded(leave), { frames: leave.length, first: leave[0] })
+    await waitFor(panelGone)
+    // Reduced motion keeps the fade and drops the travel: a region that appears with no signal at all
+    // is harder to follow than one that takes 120ms.
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    const reduced = await flight()
+    check('under reduced motion the panel still fades in, without travelling', reduced.length >= 3 && !travelled(reduced) && !namedTransform(reduced) && faded(reduced) && namedOpacity(reduced) && reduced[reduced.length - 1].op === 1, { frames: reduced.length, sample: reduced.slice(0, 3) })
+    await flight()
+    await waitFor(panelGone)
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+
+    // ---- the Share Sheet -------------------------------------------------------------------------
+    // The sheet is the product's share UI, so every claim below is about a surface the visitor can
+    // see: the platform's own share API must never be reached for (the trap records any call), the
+    // sheet must name the product it is sharing, and its rows must be the shop's *share* list rather
+    // than its contact list. The seeded shop makes that last one measurable rather than rhetorical:
+    // facebook is visible in the header but not contactable, tiktok is contactable but hidden, so a
+    // sheet that borrowed the other list would fail on membership alone.
+    const S = EXP.share
     const shareRow = row(G.manyId).product_translations[0]
-    check('share goes through the Web Share API with the product name, its summary and the canonical URL', shared.length === 1 && shared[0].title === shareRow.name && shared[0].text === shareRow.short_description && shared[0].url === canonical(G.manyId), { shared })
-    // Web Share only works when the call is made while the browser still holds the gesture. This is
-    // the check that keeps a future `await` in front of it from silently killing mobile sharing.
-    check('the sheet is opened from the click itself, while user activation is still live', shared.length === 1 && shared[0].activation === true, { activation: shared[0] && shared[0].activation })
-    // A sheet a human could have used speaks for itself on their screen; a sentence after it
-    // claims their private act, so the page stays silent — and copies nothing behind them.
-    check('a share whose sheet had time to be real claims nothing and copies nothing', (await copies()).length === 0 && (await inlineMount()).feedback === '', { copies: await copies(), feedback: (await inlineMount()).feedback })
+    const shareText = [shareRow.name, shareRow.short_description, canonical(G.manyId)].join('\n')
+    const expectSheetFeedback = value => '((document.querySelector("[data-share-feedback]") || {}).textContent || "").trim() === ' + value
+    const sheetOpen = '!!document.querySelector("[data-share-sheet]")'
+    // The enter transition moves the panel by its own height, so a rect read on the first frame is
+    // the sheet mid-slide — off the bottom of the viewport. Every geometry read waits for it to rest.
+    const sheetAtRest = '(() => { const s = document.querySelector("[data-share-sheet]"); return !!s && !s.getAnimations().length && getComputedStyle(s).transform === "none" })()'
+    const openSheet = async () => { await clickSelector('[data-share-cta]', sheetOpen); return await waitFor(sheetAtRest) }
+    const closeSheet = async () => { await press('Escape', 'Escape', 27); return await waitFor('!document.querySelector(\'[data-share-sheet]\')') }
 
-    await clearFeedback()
-    await armShare('abort')
+    // A clean visit: the copy failures above legitimately revealed the manual link for this product,
+    // and that reveal is kept until the product changes. Asking the sheet about its fallback states
+    // from that carry-over would be measuring the previous check, not this one.
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-share-cta]\')')
+    await armShareTrap()
     await armClipboard('ok')
-    await clickSelector('[data-share-cta]', 'true')
-    await sleep(1200) // the rejection is 400ms in; the silence must survive it, not merely lead it
-    check('a dismissed share sheet is treated as a decision, not a failure', (await inlineMount()).feedback === '' && (await copies()).length === 0, { feedback: (await inlineMount()).feedback })
-
-    // The phantom sheet, as reported from a real desktop browser: `share()` RESOLVES inside the
-    // human window without ever painting. A success claim there is a lie ("Shared through the
-    // sheet" with nothing shared), and silence is the dead button again — the clipboard is the
-    // only thing that actually happened to the visitor.
     await clearFeedback()
-    await armShare('resolve-fast')
-    await armClipboard('ok')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
-    const phantomCopied = await copies()
-    check('a share that resolves instantly copies the link instead of claiming a phantom sheet', phantomCopied.length === 1 && phantomCopied[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: phantomCopied })
+    await openSheet()
+    const openedSheet = await sheet()
+    check('the Share button opens the custom sheet, and the platform share API is never called', !!openedSheet && (await shareCalls()).length === 0, { calls: await shareCalls(), sheet: !!openedSheet })
+    check('the sheet is a fixed dialog named for the product it shares', !!openedSheet && openedSheet.position === 'fixed' && openedSheet.label === S.label.replace('{name}', shareRow.name) && openedSheet.text.includes(shareRow.name) && openedSheet.text.includes(shareRow.short_description), { label: openedSheet && openedSheet.label, position: openedSheet && openedSheet.position })
+    check('the sheet carries Copy link, Copy message and its own dismiss, in the page\u2019s words', !!openedSheet && openedSheet.hasCopyLink && openedSheet.hasCopyMessage && openedSheet.hasClose && openedSheet.copyLinkText === S.copyLink && openedSheet.copyMessageText === S.copyMessage && openedSheet.viaText.includes(S.viaLabel), { copyLink: openedSheet && openedSheet.copyLinkText, copyMessage: openedSheet && openedSheet.copyMessageText, via: openedSheet && openedSheet.viaText })
+    const wantShareHrefs = S.destinationHrefs.map(href => href.replace('{share}', encodeURIComponent(shareText)))
+    const rowsOf = m => (m && m.rows || []).map(r => r.href)
+    check('the destinations are exactly the shop\u2019s visible links, in stored order', JSON.stringify(rowsOf(openedSheet)) === JSON.stringify(wantShareHrefs) && JSON.stringify((openedSheet.rows || []).map(r => r.platform)) === JSON.stringify(S.destinationPlatforms), { hrefs: rowsOf(openedSheet), platforms: (openedSheet.rows || []).map(r => r.platform) })
+    check('share is not coupled to contact: the visible-but-not-contactable row appears, the hidden-but-contactable one does not', wantShareHrefs.some(h => h.includes('facebook.com')) && !wantShareHrefs.some(h => h.includes('tiktok')))
+    check('only the documented platform carries the text; the rest keep their stored URL byte-for-byte', JSON.stringify((openedSheet.rows || []).map(r => r.prefilled)) === JSON.stringify(S.destinationsPrefilled) && openedSheet.rows[0].href === 'https://facebook.com/raccoongearbin', { prefilled: (openedSheet.rows || []).map(r => r.prefilled) })
+    check('every destination opens in a new tab with a safe rel, named by the shared brand mark', (openedSheet.rows || []).every(r => r.target === '_blank' && /noopener/.test(r.rel || '') && /noreferrer/.test(r.rel || '') && r.svgs === 1 && r.fill === 'currentColor'), (openedSheet.rows || []).map(r => [r.target, r.rel, r.svgs, r.fill]))
 
-    await clearFeedback()
-    await armShare('resolve-fast')
+    // Copy is claimed only when the clipboard took it, and the sentence belongs to the surface the
+    // visitor is using: the sheet speaks, the row behind it stays silent.
+    await clickSelector('[data-share-copy-link]', expectSheetFeedback(JSON.stringify(C.feedback.link)))
+    const linkCopies = await copies()
+    const afterLinkCopy = await sheet()
+    check('Copy link writes the canonical URL and says so inside the sheet', linkCopies.length === 1 && linkCopies[0] === canonical(G.manyId) && afterLinkCopy.feedback === C.feedback.link, { copied: linkCopies, feedback: afterLinkCopy.feedback })
+    check('only one surface announces a copy', (await inlineMount()).feedback === '', { mountFeedback: (await inlineMount()).feedback })
+    await clickSelector('[data-share-copy-message]', expectSheetFeedback(JSON.stringify(C.feedback.copied)))
+    const messageCopies = await copies()
+    check('Copy message writes the product line and the link, in that order', messageCopies.length === 2 && messageCopies[1] === shareText, { copied: messageCopies.map(norm) })
+    check('a copy that worked leaves no manual fallback on either surface', (await sheet()).link === null && (await inlineMount()).shareLink === null, { sheetLink: (await sheet()).link })
+
     await armClipboard('missing')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shareFailed)))
-    const phantomNoClip = await inlineMount()
-    check('a phantom resolve with no clipboard reveals the manual link, not a success claim', phantomNoClip.shareLink === canonical(G.manyId) && phantomNoClip.feedback === C.feedback.shareFailed, { feedback: phantomNoClip.feedback })
+    await clickSelector('[data-share-copy-link]', expectSheetFeedback(JSON.stringify(C.feedback.blocked)))
+    const refusedSheet = await sheet()
+    check('a refused clipboard is reported as a failure, never as copied', (await copies()).length === 0 && refusedSheet.feedback === C.feedback.blocked, { feedback: refusedSheet.feedback })
+    check('and the sheet shows the very link its message asks the visitor to copy', refusedSheet.link === canonical(G.manyId) && refusedSheet.readonly === true, { link: refusedSheet.link })
+    check('the fallback is shown once, in the sheet the visitor is using', (await inlineMount()).shareLink === null, { mountLink: (await inlineMount()).shareLink })
     await armClipboard('ok')
 
-    // The Phase 1.2 defect, as a check: a platform whose `share()` aborts instantly (desktop Chrome
-    // on macOS answers exactly this way) must not read as "the visitor decided" — no sheet ever
-    // painted, so the fallback is the only thing the visitor can be given.
-    await clearFeedback()
-    await armShare('abort-fast')
-    await armClipboard('ok')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
-    const fastAborted = await copies()
-    check('an instantly-aborted share falls through to the clipboard instead of staying silent', fastAborted.length === 1 && fastAborted[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: fastAborted })
+    check('Escape closes the sheet and hands focus back to the Share button', await closeSheet() && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-share-cta") !== null })()'))
+    await openSheet()
+    await clickAt(12, 12)
+    check('a click outside the sheet closes it', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
+    await ev('(() => { const el = document.querySelector("[data-share-cta]"); if (el) el.focus(); return true })()')
+    await press('Enter', 'Enter', 13, '\r')
+    await waitFor(sheetAtRest)
+    const keyed = await sheet()
+    const shareBtnGeo = await ev('(() => { const el = [...document.querySelectorAll("[data-share-cta]")].find(b => b.getClientRects().length); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) } })()')
+    check('the keyboard opens the sheet, and the desktop popover stays inside the viewport', !!keyed && keyed.position === 'fixed' && keyed.left >= 0 && keyed.top >= 0 && keyed.right <= keyed.vw + 1 && keyed.bottom <= keyed.vh + 1 && keyed.overflow <= 1, { keyed })
+    // Anchored, not centred and not bottom-bleeding: the popover sits next to the control that opened
+    // it, which is the difference between a share popover and a modal dialog on a desktop.
+    check('the popover is anchored beside the Share control that opened it', !!keyed && !!shareBtnGeo && keyed.width > 100 && keyed.width < keyed.vw * 0.5 && (Math.abs(keyed.top - shareBtnGeo.bottom) < 40 || Math.abs(keyed.bottom - shareBtnGeo.top) < 40) && keyed.bottom < keyed.vh - 1, { keyed, shareBtnGeo })
+    await closeSheet()
+    check('the sheet never reached the platform share API during the whole visit', (await shareCalls()).length === 0, { calls: await shareCalls() })
 
     await clearFeedback()
-    await armShare('abort-fast')
-    await armClipboard('missing')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shareFailed)))
-    const bothDead = await inlineMount()
-    check('when the sheet aborts and there is no clipboard, the manual link is shown', bothDead.shareLink === canonical(G.manyId) && bothDead.feedback === C.feedback.shareFailed, { feedback: bothDead.feedback, shareLink: bothDead.shareLink })
     await armClipboard('ok')
-
-    await clearFeedback()
-    await armShare('absent')
-    await armClipboard('ok')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
-    const fallbackCopies = await copies()
-    check('with no share sheet, share falls back to copying the canonical URL and says so', fallbackCopies.length === 1 && fallbackCopies[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: fallbackCopies })
+    await openSheet()
+    await clickSelector('[data-share-copy-link]', expectSheetFeedback(JSON.stringify(C.feedback.link)))
+    const shareCopies = await copies()
+    await closeSheet()
 
     // ---- metadata -----------------------------------------------------------------------------
     const head = await ev(HEAD)
@@ -1227,7 +1460,7 @@ const run = async () => {
     check('the page publishes a title, description and canonical for the current product', head.title === headRow.name + C.titleSuffix && head.desc === headRow.short_description && head.canonical === canonical(G.manyId), { title: head.title, desc: head.desc, canonical: head.canonical })
     const gallerySrc = await ev('(() => { const i = document.querySelector("[data-gallery-main]"); return i ? i.src : null })()')
     check('Open Graph carries the product, and its image is the same catalog-mapped photo the gallery shows', head.ogType === 'product' && head.ogSite === C.appName && head.ogTitle === headRow.name && head.ogDesc === headRow.short_description && head.ogUrl === canonical(G.manyId) && head.ogImage === gallerySrc && head.ogImageAlt === row(G.manyId).product_images[0].alt_text, { ogType: head.ogType, ogImage: head.ogImage, gallerySrc, ogImageAlt: head.ogImageAlt })
-    check('the canonical in the head is the URL the message and the share both carried', head.canonical === wantIn.split('\n').pop() && head.canonical === fallbackCopies[0], { canonical: head.canonical })
+    check('the canonical in the head is the URL the message and the share both carried', head.canonical === wantIn.split('\n').pop() && head.canonical === shareCopies[0], { canonical: head.canonical })
 
     // ---- low stock and out of stock, reached by an in-app navigation ----------------------------
     // Using the page's own header search rather than a fresh load is deliberate: it is the
@@ -1274,12 +1507,19 @@ const run = async () => {
     await nav(detailUrl(G.manyId))
     await waitFor('!!document.querySelector(\'[data-share-cta]\')')
     const bare = await mounts()
-    check('a shop with no configured contact offers no contact action and no sticky bar', !(await ev('!!document.querySelector("[data-contact-cta]")')) && !(await ev('!!document.querySelector("[data-sticky-cta]")')) && !!bare.find(m => m.where === 'inline'), { mounts: bare.map(m => m.where + ':' + m.visible) })
+    // Sharing is not the contact flow's guest: a shop with no configured channel loses the contact
+    // action and keeps the share action, which is why the bar no longer disappears with the channels
+    // — an empty strip covering the product became a row that still has something to do.
+    check('a shop with no configured contact offers no contact action, and still offers Share', !(await ev('!!document.querySelector("[data-contact-cta]")')) && !!(await ev('!!document.querySelector("[data-share-cta]")')) && !!(await ev('!!document.querySelector("[data-sticky-cta] [data-share-cta]")')) && !!bare.find(m => m.where === 'inline'), { mounts: bare.map(m => m.where + ':' + m.visible) })
     check('nothing is invented in the missing channel’s place', !(await ev('document.body.innerHTML.includes("tel:")')) && !(await ev('document.body.innerText.includes("example.com")')) && (await ev('document.querySelector("main h1") ? (document.querySelector("main h1").textContent || "").trim() : ""')) === row(G.manyId).product_translations[0].name)
-    await armShare('absent')
+    await armShareTrap()
     await armClipboard('ok')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
+    await clickSelector('[data-share-cta]', '!!document.querySelector("[data-share-sheet]")')
+    const bareSheet = await sheet()
+    check('the sheet renders with no configured destination at all, rather than an empty group', !!bareSheet && bareSheet.rows.length === 0 && bareSheet.hasCopyLink && bareSheet.text.includes(row(G.manyId).product_translations[0].name), { rows: bareSheet && bareSheet.rows.length })
+    await clickSelector('[data-share-copy-link]', expectSheetFeedback(JSON.stringify(C.feedback.link)))
     check('sharing still works when there is no contact channel to configure', (await copies()).length === 1 && (await copies())[0] === canonical(G.manyId), { copied: await copies() })
+    await press('Escape', 'Escape', 27)
     await stopForNextDocument(bareScript)
 
     const noPhotoScript = await forNextDocument('window.__PRODUCTS[0].product_images = [];')
@@ -1303,12 +1543,78 @@ const run = async () => {
     // asked to choose between two identical actions. `getClientRects()` reads painted layout,
     // which is what a `display: none` mount honestly does not have.
     const ctaCount = await ev('(() => { let n = 0; for (const el of document.querySelectorAll("[data-contact-cta]")) if (el.getClientRects().length) n++; return n })()')
+    const shareCount = await ev('(() => { let n = 0; for (const el of document.querySelectorAll("[data-share-cta]")) if (el.getClientRects().length) n++; return n })()')
     check('exactly one Contact to Order CTA is visible at mobile width', ctaCount === 1, { ctaCount })
-    const geo = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const r = bar.getBoundingClientRect(); const c = getComputedStyle(bar); const inner = bar.querySelector("[data-product-actions]").getBoundingClientRect(); const ctl = bar.querySelector("[data-contact-cta]").getBoundingClientRect(); return { display: c.display, position: c.position, z: c.zIndex, pb: c.paddingBottom, top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height, vh: innerHeight, vw: innerWidth, insetLeft: Math.round(inner.left - r.left), insetRight: Math.round(r.right - inner.right), ctlH: Math.round(ctl.height), ctlW: Math.round(ctl.width), hasShare: !!bar.querySelector("[data-share-cta]"), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    check('exactly one Share CTA is visible at mobile width', shareCount === 1, { shareCount })
+    const geo = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const r = bar.getBoundingClientRect(); const c = getComputedStyle(bar); const inner = bar.querySelector("[data-product-actions]").getBoundingClientRect(); const ctl = bar.querySelector("[data-contact-cta]"); const shr = bar.querySelector("[data-share-cta]"); const cr = ctl.getBoundingClientRect(); const sr = shr.getBoundingClientRect(); const label = ctl.querySelector("span"); return { display: c.display, position: c.position, z: c.zIndex, pb: c.paddingBottom, top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height, vh: innerHeight, vw: innerWidth, insetLeft: Math.round(inner.left - r.left), insetRight: Math.round(r.right - inner.right), ctlH: Math.round(cr.height), ctlW: Math.round(cr.width), shrH: Math.round(sr.height), shrW: Math.round(sr.width), shrTop: Math.round(sr.top), shrBottom: Math.round(sr.bottom), rowH: Math.round(Math.max(cr.bottom, sr.bottom) - Math.min(cr.top, sr.top)), ctlClip: label ? label.scrollWidth - label.clientWidth : null, hasShare: !!shr, sameRow: Math.abs((cr.top + cr.height / 2) - (sr.top + sr.height / 2)) < 2, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
     check('the sticky bar is a fixed bottom row that stays inside the viewport', geo.position === 'fixed' && geo.display !== 'none' && Math.abs(geo.bottom - geo.vh) <= 1 && geo.left === 0 && geo.right === geo.vw, geo)
     check('the sticky bar does not widen the page, keeps the 44px control and its symmetric inset', geo.overflow <= 1 && geo.ctlH === C.sticky.controlHeight && geo.insetLeft === geo.insetRight && geo.ctlW + geo.insetLeft * 2 <= geo.vw, geo)
     check('the sticky bar reserves room for the home-indicator safe area', parseFloat(geo.pb) >= C.sticky.minPadding, { paddingBottom: geo.pb })
-    check('the sticky bar carries the primary action alone', geo.hasShare === false, { carriesShare: geo.hasShare })
+    // The mobile row is Contact and Share, in one row, of the same height, on the same centre line:
+    // the same `ProductActions`, not a phone-shaped copy of it.
+    check('the sticky bar carries Contact and Share as one row of equal-height controls', geo.hasShare && geo.sameRow && geo.shrH === C.sticky.controlHeight && geo.rowH === C.sticky.controlHeight && geo.shrBottom <= geo.vh, { geo })
+    // Adding Share to the phone row must not cost the primary action its wording: Share takes the
+    // room its own label needs, so "Contact to order" still reads whole at a common phone width.
+    check('the sticky row fits both actions and keeps the primary label unclipped', geo.overflow <= 1 && geo.shrTop >= 0 && geo.ctlW + geo.shrW + 2 * geo.insetLeft + 8 <= geo.vw && geo.ctlClip <= 0, { geo })
+
+    // ---- the Share Sheet on a phone -----------------------------------------------------------
+    // Bottom-anchored, full-bleed, safe-area aware, and dismissed by the backdrop — the shape a
+    // desktop popover is not, from the same component. Measured at the widths this project has already
+    // been bitten at.
+    await armShareTrap()
+    await armClipboard('ok')
+    const stickyShare = '[data-sticky-cta] [data-share-cta]'
+    await clickSelector(stickyShare, sheetOpen)
+    await waitFor(sheetAtRest)
+    const mSheet = await sheet()
+    check('the mobile Share button opens a bottom sheet, not a centred dialog', !!mSheet && mSheet.position === 'fixed' && Math.abs(mSheet.bottom - mSheet.vh) <= 1 && mSheet.left >= 0 && mSheet.right <= mSheet.vw + 1 && mSheet.width <= mSheet.vw, { mSheet })
+    check('the sheet is rounded across its top edge and clears the home indicator', !!mSheet && parseFloat(mSheet.radius) >= 16 && parseFloat(mSheet.pb) >= C.sticky.minPadding, { radius: mSheet && mSheet.radius, pb: mSheet && mSheet.pb })
+    check('the mobile sheet carries the product, the copy rows and the destinations', !!mSheet && mSheet.hasCopyLink && mSheet.hasCopyMessage && mSheet.hasClose && mSheet.rows.length === 2 && mSheet.text.includes(shareRow.name), { rows: mSheet && mSheet.rows.length })
+    check('the open sheet does not widen the page', mSheet.overflow <= 1, { overflow: mSheet && mSheet.overflow })
+    await clickSelector('[data-share-copy-link]', expectSheetFeedback(JSON.stringify(C.feedback.link)))
+    check('Copy link works from the sticky bar\u2019s sheet', (await copies()).length === 1 && (await copies())[0] === canonical(G.manyId) && (await sheet()).feedback === C.feedback.link, { copied: await copies() })
+    check('and the sticky bar\u2019s own line stays silent while the sheet speaks', (await stickyMount()).feedback === '', { barFeedback: (await stickyMount()).feedback })
+    // The backdrop, aimed beside the sheet rather than at the page's right edge: on a phone the sheet
+    // is full-bleed, so the band above it is the only thing that is backdrop.
+    await clickAt(195, 60)
+    check('the backdrop closes the mobile sheet', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
+    check('the sheet never reached the platform share API on mobile', (await shareCalls()).length === 0, { calls: await shareCalls() })
+
+    // The widths this project has already had an overflow defect at, asked of the open sheet rather
+    // than of the page: a bottom panel with two pills inside it is exactly where a 320px screen starts
+    // pushing the document sideways.
+    for (const [sw, sh] of [[320, 700], [390, 844], [640, 960]]) {
+      await metrics(sw, sh, sw < 500)
+      await sleep(350)
+      if (!await ev('!!document.querySelector("[data-share-sheet]")')) { await clickSelector(stickyShare, sheetOpen); await waitFor(sheetAtRest) }
+      const wide = await sheet()
+      const wideGeo = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const rows = [...s.querySelectorAll("a,button")].map(b => b.getBoundingClientRect()); return { left: Math.round(r.left), right: Math.round(r.right), widest: rows.length ? Math.round(Math.max(...rows.map(b => b.width))) : 0, over: rows.filter(b => b.right > innerWidth + 1 || b.left < -1).length, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, scrollable: s.scrollHeight > s.clientHeight + 1, vh: innerHeight, bottom: Math.round(r.bottom) } })()')
+      check(`the open sheet fits ${sw}px with no overflow and no clipped control`, !!wide && !!wideGeo && wideGeo.overflow <= 1 && wideGeo.over === 0 && wideGeo.left >= 0 && wideGeo.right <= sw + 1 && wideGeo.widest <= sw && Math.abs(wideGeo.bottom - wideGeo.vh) <= 1, { wideGeo })
+      check(`the sheet keeps its copy rows and destinations at ${sw}px`, !!wide && wide.hasCopyLink && wide.hasCopyMessage && wide.rows.length === 2, { rows: wide && wide.rows.length })
+    }
+    await press('Escape', 'Escape', 27)
+    await waitFor('!document.querySelector(\'[data-share-sheet]\')')
+    await metrics(390, 844, true)
+    await sleep(250)
+
+    // ---- the sheet in Khmer -------------------------------------------------------------------
+    // Every string in the sheet sits behind `t()`, and Khmer is the locale that proves it: the words
+    // are longer, and wide Latin letter-spacing tears Khmer clusters apart (the rule the storefront
+    // already follows for its eyebrows). The visit returns to English afterwards, because every check
+    // below this one reads English copy.
+    await nav(new URL('/km/products/' + G.manyId, appUrl).href)
+    await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
+    await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
+    await waitFor(sheetAtRest)
+    const kmSheet = await sheet()
+    const kmType = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const p = [...s.querySelectorAll("p")].find(x => /^ចែករំលែក/.test((x.textContent || "").trim())); if (!p) return null; const c = getComputedStyle(p); return { tracking: c.letterSpacing, transform: c.textTransform } })()')
+    check('the sheet speaks Khmer when the page does', !!kmSheet && kmSheet.text.includes('ចម្លងតំណ') && kmSheet.text.includes('ចែករំលែក'), { text: kmSheet && kmSheet.text.slice(0, 90) })
+    check('the Khmer sheet carries no wide Latin tracking and does not widen the page', !!kmType && kmType.transform === 'none' && (kmType.tracking === 'normal' || parseFloat(kmType.tracking) <= 0.5) && !!kmSheet && kmSheet.overflow <= 1, { kmType, overflow: kmSheet && kmSheet.overflow })
+    await press('Escape', 'Escape', 27)
+    await waitFor('!document.querySelector(\'[data-share-sheet]\')')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
+    check('the page is back in English for the checks that follow', (await stickyMount()).ctaText === C.cta.in, { cta: (await stickyMount()).ctaText })
 
     await ev('window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }); true')
     await sleep(450)
@@ -1362,15 +1668,21 @@ const run = async () => {
     const inlineSpeaker = speakers.find(m => m.where === 'inline') || { ...NO_MOUNT }
     check('only the mount the visitor used announces the copy', stickySpeaker.feedback === C.feedback.copied && inlineSpeaker.feedback === '', speakers.map(m => [m.where, m.feedback]))
 
+    const stickyPanelGone = '!document.querySelector("[data-sticky-cta] [data-contact-panel]")'
     await press('Escape', 'Escape', 27)
-    check('Escape closes the sticky panel and leaves focus on the control', !(await ev('!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')) && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'))
+    // The panel now leaves through a transition, so it is still in the DOM for a few frames after
+    // Escape. Every read that means "it is closed" has to wait for the departure, or it measures the
+    // animation rather than the state.
+    check('Escape closes the sticky panel and leaves focus on the control', await waitFor(stickyPanelGone) && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'))
     // Escape has to hand focus back to the control that opened the panel rather than dropping the
     // visitor at the top of the tab order. The inline block is no longer painted at this width,
     // so the bar's own panel is the one that answers — and a hidden field cannot take focus to be
     // accidentally closed from anyway.
+    await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
     await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-contact-message]"); if (el) el.focus(); return true })()')
     await press('Escape', 'Escape', 27)
-    check('Escape closes the mobile panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null && !document.querySelector("[data-sticky-cta] [data-contact-panel]") })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
+    await waitFor(stickyPanelGone)
+    check('Escape closes the mobile panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
     // Tab reaches the bar's own controls from its field, and every stop in the bar wears a ring:
     // with the inline block switched off at this width, the panel and its buttons are the tab
     // path through the bar, and one of the two surfaces the visitor can reach must be lit.
@@ -1388,6 +1700,7 @@ const run = async () => {
     const entered = await stickyMount()
     check('the keyboard opens the sticky channel panel', entered.panelOpen, { expanded: entered.expanded, panel: entered.panelOpen, mount: entered.where, panels: await ev('document.querySelectorAll("[data-contact-panel]").length'), active: await ev('(() => { const el = document.activeElement; return el ? el.tagName + " sticky:" + !!(el.closest && el.closest("[data-sticky-cta]")) : null })()') })
     await press('Escape', 'Escape', 27)
+    await waitFor(stickyPanelGone)
     await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-copy-message]") || document.querySelector("[data-sticky-cta] [data-contact-cta]"); if (el) el.focus(); return true })()')
     let leftBar = false
     for (let i = 0; i < 3 && !leftBar; i++) { await press('Tab', 'Tab', 9); leftBar = await ev('(() => { const el = document.activeElement; return !el || !el.closest || !el.closest("[data-sticky-cta]") })()') }

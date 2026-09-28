@@ -4,7 +4,7 @@ import type { ProductContactChannel } from '~/types/product-contact'
 import type { SiteInfo } from '~/types/site-info'
 import { copyToClipboard } from '~/utils/clipboard'
 import { getProductStockState } from '~/utils/product-stock'
-import { socialContactLink } from '~/utils/social-prefill'
+import { socialPrefillLink } from '~/utils/social-prefill'
 
 /**
  * The contact half of the product detail page's conversion: which channels the shop has actually
@@ -81,7 +81,8 @@ export const useProductContact = (
    * Where a channel actually goes, given the message it may be allowed to carry. The identity
    * half is `useSiteInfo`'s `contactLinks` — the links the shop marked contactable, which are not
    * the links the shop marked visible — and the destination half is the documented-prefill rule in
-   * `app/utils/social-prefill.ts`. Declared after `message`/`url` because it composes them.
+   * `app/utils/social-prefill.ts`, which the Share Sheet asks the same question of. Declared
+   * after `message`/`url` because it composes them.
    */
   const channels = computed<ProductContactChannel[]>(() => {
     const siteInfo = toValue(siteInfoSource)
@@ -94,7 +95,7 @@ export const useProductContact = (
       const stored = link.url.trim()
       // An unset channel is not a channel: nothing is offered in its place.
       if (!stored) continue
-      const target = socialContactLink(link, { phone: phone ?? '', message: prepared, productUrl: page })
+      const target = socialPrefillLink(link, { phone: phone ?? '', message: prepared, productUrl: page })
       resolved.push({ key: `${link.platform}-${stored}`, platform: link.platform, label: link.platform, href: target.href, value: '', external: true, prefilled: target.prefilled })
     }
     return resolved

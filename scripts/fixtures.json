@@ -258,8 +258,7 @@
       "feedback": {
         "copied": "Message copied.",
         "blocked": "Your browser blocked the copy — copy the link yourself.",
-        "link": "Product link copied.",
-        "shareFailed": "This product could not be shared."
+        "link": "Product link copied."
       },
       "appName": "Raccoon Gear Bin",
       "titleSuffix": " | Raccoon Gear Bin",
@@ -274,6 +273,17 @@
       "savedChannelHrefs": ["tel:+85599888777", "https://t.me/raccoongearbin?text={message}", "https://youtube.com/@raccoongearbin", "https://tiktok.com/@raccoongearbin.hidden"],
       "sticky": { "controlHeight": 44, "minPadding": 12, "lightboxZ": 70 }
     },
+    "share": {
+      "_comment": "The Share Sheet contract, stated here so the sheet's words and its destination list can only change deliberately. `label` is the English value of `shareSheetLabel`. `{share}` is filled by the check with the encodeURIComponent of the share text — the product's name, its own summary line, then the canonical URL, one per line (`lines`). The list is the shop's *visible* header links (facebook, telegram) and deliberately NOT its contact list (telegram, tiktok): the two settings answer different questions, so a sheet that borrowed the other's filter fails on membership alone. Only Telegram documents a prefill, so facebook's href must stay byte-for-byte the stored URL.",
+      "label": "Share {name}",
+      "viaLabel": "Share via",
+      "copyLink": "Copy link",
+      "copyMessage": "Copy message",
+      "lines": ["{name}", "{short}", "{url}"],
+      "destinationPlatforms": ["facebook", "telegram"],
+      "destinationHrefs": ["https://facebook.com/raccoongearbin", "https://t.me/raccoongearbin?text={share}"],
+      "destinationsPrefilled": [false, true]
+    },
     "stockBands": {
       "_comment": "The fixture quantities are 7, 3, 0, 12, 25, 4 against LOW_STOCK_THRESHOLD 5, so all three bands appear twice and the boundary is tested on both sides (4 and 5 would be low, 7 is not). The band now comes from app/utils/product-stock.ts instead of being re-derived inside the badge, so the check asserts the band, its label and its colour together — that is what proves the shared rule did not move a threshold or a class.",
       "in": { "label": "In Stock", "text": "text-zinc-400", "dot": "bg-zinc-400" },
@@ -287,7 +297,7 @@
     },
     "sortedPayloadColumns": "category_id,price,sku,slug,status,stock_quantity",
     "gallery": {
-      "_comment": "Photo-set shapes the detail gallery must handle: many (> visible window), two, and one. window must equal ProductGallery's VISIBLE_COUNT, zoomScale must equal its ZOOM_SCALE.",
+      "_comment": "Photo-set shapes the detail gallery must handle: many (> visible window), two, and one. window must equal ProductGallery's VISIBLE_COUNT, zoomScale must equal its ZOOM_SCALE — the magnification the enlarged photo opens at when it is clicked, anchored on the point that was clicked.",
       "manyId": "aaaaaaaa-0000-4000-8000-000000000001",
       "manyImages": 7,
       "twoId": "aaaaaaaa-0000-4000-8000-000000000002",
