@@ -385,7 +385,7 @@ and none of them are visible to the compiler or to `build`.
 | Share copy confirmation | `FEEDBACK_MS = 4000`, one speaker at a time (`inline` / `sticky` / `sheet`) | `ProductConversion.vue` |
 | Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
 | Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
-| Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; phone left of the centre line, location right of it | `index.vue` header, asserted by `verify-ui.mjs` |
+| Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; the contact pair stays one line, pinned to both margins, and neither label is ellipsised | `index.vue` header, asserted by `verify-ui.mjs` |
 
 `0.24` is trigger-height ÷ panel-height, so the panel grows out of the control instead of
 popping beside it. The exit uses an accelerating curve on purpose: a decelerating collapse
@@ -417,6 +417,13 @@ brand row: the emblem anchors the left, and the right edge is a column carrying 
 From `lg` the contact pair lifts 32 px (48 px at `xl`) off each container margin while its rule
 stays full-bleed. Pinned to the extremes, two labels on one line read as things that merely
 happen to share it; inset by the same amount at both ends, they read as a pair.
+
+"Reads as a pair" is asserted as *pinning plus no clipping*, never as a share of the line width. An
+earlier version required the phone to stay left of the centre and the location right of it, and that
+proxy held only while the Latin text was a specific webfont: the same markup passes on a macOS UI
+font and fails under a wider Linux one at 390 px, with both labels whole. The harness now measures
+whether either label's text box overflows its own visible box, and a control check squeezes the
+location span on purpose to prove that measurement can return true.
 
 The split is structural, not cosmetic: `site-info/` holds two presentational siblings —
 `SiteInfoContact` (phone + location) and `SiteInfoSocials` (the icon group) — both fed the same

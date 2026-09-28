@@ -427,6 +427,10 @@ const run = async () => {
     const row = h.lastElementChild;
     const col = row.querySelector(':scope > div');
     const socialsEl = h.querySelector('[data-site-socials]');
+    // A label whose text box is wider than the box that shows it has been squeezed into an ellipsis.
+    const clipped = el => { const s = el && el.querySelector('span'); return !!s && s.scrollWidth - s.clientWidth > 1 };
+    const phoneEl = h.querySelector('a[data-site-phone]');
+    const locationEl = h.querySelector('a[data-site-location]');
     const groups = [bx(logoEl), bx(col)].filter(Boolean);
     const rows = groups.slice().sort((a, b) => a.y - b.y);
     let wrapped = 1;
@@ -436,7 +440,7 @@ const run = async () => {
     for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) if (clash(groups[i], groups[j])) collide = true;
     return {
       header: bx(h), logo: groups[0], contact: bx(h.querySelector('[data-site-contact]')),
-      phone: bx(h.querySelector('a[data-site-phone]')), location: bx(h.querySelector('a[data-site-location]')),
+      phone: bx(phoneEl), location: bx(locationEl), phoneClipped: clipped(phoneEl), locationClipped: clipped(locationEl),
       utils: bx(col && col.firstElementChild), socials: bx(socialsEl),
       rows: wrapped, collide
     };
@@ -461,9 +465,12 @@ const run = async () => {
       const right = m.header.right - m.location.right
       if (Math.abs(left - right) > 2) f.push(`contact inset is asymmetric (${left.toFixed(1)} / ${right.toFixed(1)})`)
       if (Math.abs(left - CONTACT_INSET[w]) > 2) f.push(`contact inset ${left.toFixed(1)} want ${CONTACT_INSET[w]}`)
-      // Still a spread pair rather than a centred one: each stays on its own side of the line.
-      if (m.phone.right > m.header.x + m.header.w / 2) f.push('phone has crossed the centre line')
-      if (m.location.x < m.header.x + m.header.w / 2) f.push('location has crossed the centre line')
+      // The pair is spread because each end is pinned to its own margin (the inset checks above) and
+      // neither has been squeezed out of the line. Measuring "each stays left/right of the centre"
+      // instead made those margins a function of the runner's font: the same markup passes on a macOS
+      // UI font and fails under a wider Linux one, with both labels still whole and untruncated.
+      if (m.phoneClipped) f.push('the phone number is squeezed into an ellipsis')
+      if (m.locationClipped) f.push('the location label is squeezed into an ellipsis')
     }
     if (m.socials && m.utils) {
       if (m.socials.y < m.utils.bottom - 1) f.push('socials share the utility line')
@@ -726,8 +733,18 @@ const run = async () => {
       await sleep(600)
       check(`no horizontal overflow @${w}`, (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
       const m = await ev(MASTHEAD_EXPR)
-      check(`masthead reflows without losing its hierarchy @${w}`, mastheadFaults(m, w).length === 0, mastheadFaults(m, w))
+      const faults = mastheadFaults(m, w)
+      // A red run has to say what it measured, not only which rule it broke: this line's geometry is
+      // the one part of the masthead that font metrics move, so the numbers belong in the failure.
+      check(`masthead reflows without losing its hierarchy @${w}`, faults.length === 0, faults.length ? { faults, contact: m.contact && { x: +m.contact.x.toFixed(1), w: +m.contact.w.toFixed(1) }, phone: m.phone && { x: +m.phone.x.toFixed(1), w: +m.phone.w.toFixed(1), clipped: m.phoneClipped }, location: m.location && { x: +m.location.x.toFixed(1), w: +m.location.w.toFixed(1), clipped: m.locationClipped }, gap: +(m.location.x - m.phone.right).toFixed(1) } : [])
     }
+    // The control for that rule: a squeeze the probe must see. Without it, "nothing is ellipsised"
+    // could pass simply because the measurement never returns true, and the spread-pair rule would be
+    // guarding nothing.
+    await metrics(390, 844, true)
+    await sleep(400)
+    const squeeze = await ev('(() => { const s = document.querySelector(\'[data-site-location] span\'); if (!s) return null; s.style.maxWidth = "40px"; const m = ' + MASTHEAD_EXPR + '; const out = { location: m.locationClipped, phone: m.phoneClipped }; s.style.maxWidth = ""; return out })()')
+    check('the masthead clip probe fires on a real ellipsis', !!squeeze && squeeze.location === true && squeeze.phone === false, squeeze)
 
     // mobile dock: scroll reveal + indicator
     await metrics(390, 844, true)
