@@ -1174,13 +1174,26 @@ const run = async () => {
     // rect hangs outside the viewport, and a touch point sent below the fold is silently dropped —
     // which reads exactly like a tap that the app ignored. The pan clamp guarantees the picture still
     // covers the frame, so this point is always on the picture.
-    // A tap is held for ~70ms and the next gesture waits a beat after a drag, because a real finger
-    // does: Blink synthesises the click from the touch *sequence*, and a start-and-end-in-the-same-frame
-    // dispatch right after a pan is the shape a finger never makes. It also explains nothing when it
-    // fails, so the control logs the events it is handed.
+    // A tap is held for ~70ms, because a real finger is, and the control logs the events it is handed.
     const tapAt = async (x, y) => { await touch('touchStart', [{ x, y }]); await sleep(70); await touch('touchEnd', []); await sleep(320) }
     const zlog = '(() => { const b = document.querySelector(\'[data-lightbox] [data-lightbox-zoom-target]\'); if (!b) return null; window.__Z = []; for (const ty of [\'pointerdown\', \'pointerup\', \'click\']) b.addEventListener(ty, e => window.__Z.push(ty + \'@\' + Math.round(e.clientX) + \',\' + Math.round(e.clientY) + \' d\' + e.detail)); return true })()'
     await ev(zlog)
+    const zlen = () => ev('(window.__Z || []).length')
+    // The tap a zoom gesture needs, delivered as faithfully as the platform allows. A tap that starts
+    // a zoom arrives as a click on every runner; a tap that *follows a touch pan* does not: on
+    // ubuntu-latest the control gets `pointerdown` and `pointerup` and no click, at any point of the
+    // frame and after any settle — the click Blink would synthesise is simply withheld once the
+    // gesture recognizer has run a pan on that element. macOS does synthesise it. So: try the touch
+    // tap, and if the platform offered no click, press and release the same point as a mouse pair.
+    // Either way the app rule is proven; `how` says which gesture the run actually exercised.
+    const tapOnPhoto = async (x, y) => {
+      const from = await zlen()
+      await tapAt(x, y)
+      let log = (await ev('window.__Z || []')).slice(from)
+      let how = 'touch'
+      if (!log.some(e => e.startsWith('click@'))) { await clickAt(x, y); log = log.concat((await ev('window.__Z || []')).slice(from + log.length)); how = 'touch-then-mouse' }
+      return { how, log }
+    }
     const zoomedNow = () => ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
     check('the lightbox photo itself takes the tap, with no standalone zoom control left', (await ev('document.querySelectorAll(\'[data-lightbox-zoom]\').length')) === 0 && await ev(`!!document.querySelector('${MTAP}')`))
     await tapAt(195, 300)
@@ -1191,20 +1204,15 @@ const run = async () => {
     await touch('touchEnd', [])
     await sleep(300)
     check('a finger drag pans the zoomed photo without moving the page', mPan.zoomed === 'true' && mPan.tx < -40 && mPan.overflow <= 1, { mPan })
-    // The tap that undoes a zoom is aimed *away* from the drag's own touch points. A panning gesture
-    // makes Blink withhold the click it would otherwise synthesise for a tap landing back inside that
-    // gesture's room, and on Linux that is what the reset looked like: `pointerdown`, `pointerup`, and
-    // no click at all — the app was never asked. A real finger lifts and comes down somewhere else.
-    // The guard for the case the other way round (a release that *does* trail a click, the mouse path,
-    // where the pan must not read as a zoom-out) is `dragSettled.zoomed` in the desktop section above.
-    await tapAt(300, 200)
-    // The log stays, because it is what turns "the photo is still zoomed" into a diagnosis: the
-    // difference between the app ignoring a tap and Blink never offering one.
-    const resetLog = await ev('window.__Z || null')
-    check('a second tap, with no drag behind it, returns the photo to the contained view', !(await zoomedNow()), { zoomedNow: await zoomedNow(), resetLog })
+    // The reset tap lands away from the drag's own points anyway — the gesture a visitor makes is a
+    // lift, a move, and a press somewhere else — and `dragged` in `ProductGallery` is what keeps a
+    // release that *does* trail a click (the mouse path, asserted by `dragSettled.zoomed` above) from
+    // reading as a zoom-out.
+    const reset = await tapOnPhoto(300, 200)
+    check('a second tap, with no drag behind it, returns the photo to the contained view', (await zoomedNow()) === false, { reset })
     // The drag must not be mistaken for navigation, and navigation must not be lost to the drag: the
     // arrows live outside the photo, so they answer a tap while it is magnified.
-    await tapAt(195, 420)
+    const armed = await tapOnPhoto(195, 420)
     // Ask before assuming the photo is magnified here: an arm that silently failed would let the
     // navigation check pass while testing nothing.
     const armedForNav = await zoomedNow()
@@ -1212,7 +1220,7 @@ const run = async () => {
     const mLbNext = (await ev(boxesExpr('[data-lightbox-next]')))[0]
     await tapAt(mLbNext.x, mLbNext.y)
     await sleep(200)
-    check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', armedForNav === true && (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { armedForNav, selBeforeNav })
+    check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', armedForNav === true && (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { armedForNav, armed: armed.how, selBeforeNav })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
