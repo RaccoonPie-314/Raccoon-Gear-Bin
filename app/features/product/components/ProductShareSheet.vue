@@ -54,8 +54,10 @@ const readDesktop = () => { isDesktop.value = media?.matches ?? false }
 // so a reopened sheet can never be positioned by the previous product's geometry, and the panel
 // stays `visibility: hidden` for the frame it has no position yet — an unpositioned fixed element
 // sits at the viewport's top-left corner, and painting it there is the flash this guards against.
+// The side it landed on is recorded with the position because the fold belongs to that edge: the
+// panel scales open from whichever of its own edges touches the trigger, not from its centre.
 const panelEl = ref<HTMLElement | null>(null)
-const placed = ref<{ left: number, top: number } | null>(null)
+const placed = ref<{ left: number, top: number, side: 'below' | 'above' } | null>(null)
 
 const place = () => {
   const el = panelEl.value
@@ -65,8 +67,9 @@ const place = () => {
   const gap = 8
   const left = Math.min(Math.max(box.left, margin), Math.max(margin, innerWidth - el.offsetWidth - margin))
   const below = box.bottom + gap
-  const top = below + el.offsetHeight <= innerHeight - margin ? below : Math.max(margin, box.top - el.offsetHeight - gap)
-  placed.value = { left, top }
+  const fits = below + el.offsetHeight <= innerHeight - margin
+  const top = fits ? below : Math.max(margin, box.top - el.offsetHeight - gap)
+  placed.value = { left, top, side: fits ? 'below' : 'above' }
 }
 
 // The popover is anchored to a control that stays where the page put it, so a scroll or a resize has
@@ -86,6 +89,7 @@ const panelStyle = computed(() => {
   return {
     left: `${placed.value?.left ?? Math.max(12, (box?.left ?? 0))}px`,
     top: `${placed.value?.top ?? Math.max(12, (box?.bottom ?? 0) + 8)}px`,
+    'transform-origin': placed.value?.side === 'above' ? 'center bottom' : 'center top',
     visibility: placed.value ? 'visible' : 'hidden'
   }
 })
@@ -155,7 +159,7 @@ onBeforeUnmount(() => {
           tabindex="-1"
           class="flex min-w-0 flex-col border border-zinc-200/80 bg-white text-zinc-950 shadow-xl outline-none dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white"
           :class="isDesktop
-            ? 'fixed w-72 rounded-2xl p-3'
+            ? 'fixed w-72 max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-2xl p-3'
             : 'fixed inset-x-0 bottom-0 max-h-[85dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-3xl pb-[max(1rem,env(safe-area-inset-bottom))]'"
           :style="panelStyle"
         >
@@ -180,11 +184,14 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="min-w-0 space-y-1.5">
+          <!-- One shared 16px content inset for every interactive row: the sheet's own p-3 plus this
+               px-2 puts the Copy rows' icons on the same vertical line as the destination pills' icons
+               below, so the whole panel reads as one column of controls rather than two systems. -->
+          <div class="min-w-0 space-y-1.5 px-2">
             <button
               type="button"
               data-share-copy-link
-              class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+              class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full bg-zinc-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
               @click="emit('copyLink')"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -194,7 +201,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               data-share-copy-message
-              class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full border border-zinc-300/80 bg-white px-4 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/70 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
+              class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full border border-zinc-300/80 bg-white px-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/70 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
               @click="emit('copyMessage')"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
@@ -204,12 +211,17 @@ onBeforeUnmount(() => {
 
           <!-- The destinations are the shop's own configured accounts, and only the platforms with
                a documented prefill carry the product's line. The rest open where they were stored
-               and say so, beside the Copy rows above that actually do it. -->
+               and say so, beside the Copy rows above that actually do it.
+               A grid, not a wrapping row of intrinsic-width pills: every destination gets the same
+               intentional cell — aligned with the Copy rows' own inset above — so one, two, three
+               or four platforms all read as a settled group rather than a ragged edge. The column
+               count comes from the container, not from a breakpoint, because the popover and the
+               sheet give the same list different widths. -->
           <template v-if="destinations.length">
             <p class="mt-4 px-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
               {{ t('shareVia') }}
             </p>
-            <ul class="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-2 px-2">
+            <ul class="mt-2 grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2 px-2">
               <li v-for="destination in destinations" :key="destination.key" class="min-w-0">
                 <a
                   :href="destination.href"
@@ -217,7 +229,7 @@ onBeforeUnmount(() => {
                   rel="noopener noreferrer"
                   :data-share-destination="destination.platform"
                   :data-share-prefilled="destination.prefilled"
-                  class="flex h-11 min-w-0 max-w-full items-center gap-2 rounded-full border border-zinc-200/80 bg-white px-4 text-sm font-semibold text-zinc-800 transition-colors hover:border-zinc-300 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-white dark:focus-visible:ring-white"
+                  class="flex h-11 w-full min-w-0 max-w-full items-center justify-center gap-2 rounded-full border border-zinc-200/80 bg-white px-4 text-sm font-semibold text-zinc-800 transition-colors hover:border-zinc-300 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-white dark:focus-visible:ring-white"
                 >
                   <SocialBrandIcon :platform="destination.platform" class="shrink-0 opacity-70" />
                   <span class="min-w-0 truncate">{{ platformLabel(destination.platform) }}</span>
@@ -273,8 +285,10 @@ onBeforeUnmount(() => {
   transform: translateY(100%);
 }
 
-/* The popover unfolds from the control that opened it — the same idiom the catalog's select panels
-   use, kept small enough that it reads as a control rather than a dialog. */
+/* The popover unfolds from the control that opened it and collapses back through it: the enter and
+   the leave carry the same transform (the old one-sided rule faded the panel out in place, which
+   is not how it arrived), and the inline `transform-origin` pins the fold to whichever edge faces
+   the trigger. Small and quick, so it reads as a control rather than a dialog. */
 .share-pop-enter-active,
 .share-pop-leave-active {
   transition: opacity 140ms ease;
@@ -287,7 +301,8 @@ onBeforeUnmount(() => {
 .share-pop-leave-to {
   opacity: 0;
 }
-.share-pop-enter-from [data-share-sheet] {
+.share-pop-enter-from [data-share-sheet],
+.share-pop-leave-to [data-share-sheet] {
   transform: translateY(-6px) scale(0.96);
 }
 
@@ -304,7 +319,8 @@ onBeforeUnmount(() => {
   }
   .share-sheet-enter-from [data-share-sheet],
   .share-sheet-leave-to [data-share-sheet],
-  .share-pop-enter-from [data-share-sheet] {
+  .share-pop-enter-from [data-share-sheet],
+  .share-pop-leave-to [data-share-sheet] {
     transform: none;
   }
 }

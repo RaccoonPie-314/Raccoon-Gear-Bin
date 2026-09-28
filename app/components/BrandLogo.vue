@@ -27,14 +27,14 @@ const sizeClasses: Record<BrandLogoSize, string> = {
     <img
       src="/rgb-logo-light.png"
       :alt="$t('appName')"
-      class="w-auto object-contain transition-all duration-200 dark:hidden"
+      class="w-auto object-contain dark:hidden"
       :class="sizeClasses[size]"
     />
     <!-- Dark Mode Logo -->
     <img
       src="/rgb-logo-dark.png"
       :alt="$t('appName')"
-      class="w-auto object-contain transition-all duration-200 hidden dark:block"
+      class="w-auto object-contain hidden dark:block"
       :class="sizeClasses[size]"
     />
   </span>

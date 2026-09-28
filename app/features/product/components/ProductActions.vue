@@ -164,7 +164,9 @@ const channelName = platformLabel
 
          The enter names the direction the panel actually travels: the inline block opens downward
          from the row it sits under, the sticky one rises out of the bar it is anchored above.
-         Transform and opacity only, so the page behind never moves. -->
+         Transform and opacity only, so the page behind never moves. The scale pivots on the edge
+         the panel is anchored to (`origin-top` / `origin-bottom`), so the panel grows out of the
+         control it belongs to instead of shrinking in mid-air about its own centre. -->
     <Transition :name="compact ? 'panel-rise' : 'panel-fall'">
       <div
         v-if="isOpen && channels.length"
@@ -174,7 +176,7 @@ const channelName = platformLabel
         :aria-label="ctaLabel"
         tabindex="0"
         class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
-        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70'"
+        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900 origin-bottom' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70 origin-top'"
       >
         <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
              a browser that refuses the clipboard still leaves them something to select. The field

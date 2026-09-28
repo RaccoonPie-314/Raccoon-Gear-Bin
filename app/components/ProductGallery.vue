@@ -396,7 +396,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
           :data-selected="selectedIndex === windowStart + offset ? 'true' : undefined"
           :aria-current="selectedIndex === windowStart + offset ? 'true' : undefined"
           :aria-label="image.altText || name"
-          class="h-14 w-14 shrink-0 cursor-pointer overflow-hidden rounded-xl border bg-zinc-50 p-1 transition-all focus-visible:outline-none sm:h-16 sm:w-16 lg:h-20 lg:w-20 dark:bg-zinc-900"
+          class="h-14 w-14 shrink-0 cursor-pointer overflow-hidden rounded-xl border bg-zinc-50 p-1 transition-[opacity,border-color] focus-visible:outline-none sm:h-16 sm:w-16 lg:h-20 lg:w-20 dark:bg-zinc-900"
           :class="[
             selectedIndex === windowStart + offset
               ? 'border-zinc-950 dark:border-white ring-2 ring-zinc-950/20 dark:ring-white/20'
