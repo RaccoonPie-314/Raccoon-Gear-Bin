@@ -10,8 +10,9 @@ three times, most recently emptying the module tree to three files mid-session. 
 directory as a local cache: useful, never authoritative, possibly absent. Where it disagrees
 with this file, **this file wins**, and the disagreement is a bug to fix here first.
 
-Agents: read [AGENTS.md](AGENTS.md) for the operational rules (verification commands, hands-off
-list, git conventions) and this file for the design they come from.
+Agents: read [AGENTS.md](AGENTS.md) for the operational rules and [docs/rules/](docs/rules/) for
+the long-form touch restrictions, verification specs and git conventions — then this file for the
+design they come from.
 
 Sections marked **PROPOSED** are not implemented; do not assume a capability exists because a
 generated wiki page describes it.

@@ -1,0 +1,73 @@
+# Touch restrictions
+
+Areas that work, are invisible to the compiler, and have no `build`-time protection. Do not edit
+them *without a specific reason* — and if there is a reason, measure the result afterwards
+(see [TESTING_SPECS.md](TESTING_SPECS.md)).
+
+Design rationale for everything below lives in
+[../../ARCHITECTURE.md](../../ARCHITECTURE.md); this file is the "don't" list, not the "why" list.
+
+## Hands off
+
+| Area | Why it is fragile |
+|---|---|
+| `app/components/SearchDock.vue` — morph / measure logic | Two cooperating engines: the overlay FLIP (matrix inversion, settle-token arbitration, per-axis radius compensation) and the scroll-collapse fixed-box rAF flight that re-aims from the live box on a mid-flight reversal. Both were tuned by measurement; neither is readable from the diff. |
+| `app/components/category/CategoryDesktop.vue` + `CategoryMobile.vue` — drag + indicator | Tuned input models that are *deliberately* different (mouse Y-axis with `grabOffsetY` vs. touch X-axis with axis-lock detection and `scrollLeft` compensation). Merging them is a regression, not a cleanup. |
+| `app/assets/css/main.css` — select-morph keyframes | `0.24` is trigger-height ÷ panel-height, so the panel grows out of the control. The exit uses an accelerating curve on purpose: a decelerating collapse leaves an opaque remnant under the pill, which reads as a hang. |
+| `app/app.config.ts` | Single owner of the pill control language. It emits **3 pre-existing `tsc` errors** (its `base` key belongs under `slots.base` in Nuxt UI 4) — known, unfixed; do not "fix" them as a drive-by. If you touch the file, re-measure the pill styling. |
+| `supabase/migrations/**` | Schema + RLS *are* the security model. Migrations are never edited after they are pushed — write a new migration instead. |
+| The `backup/*` tags and `.verify-base` worktrees | They are the baseline that proves a refactor is behaviour-preserving. |
+
+## String contracts with no type checking
+
+`tsc` cannot read `.vue`, so these bindings fail at runtime (or silently) only:
+
+- **`[data-search-anchor]`** — `SearchDock` measures this element to decide when to collapse, and
+  the scroll-collapse morph animates *this element's own* `width` in place. It also supplies both
+  endpoints of the launcher flight (last on-screen rect = collapse origin; live rect = restore
+  landing). Rename or move the element **in the same commit** as the change, never across two.
+- **The editor's two entry points** — `index.vue` types its `adminEditor` ref against
+  `openAddEditor()` / `openEditEditor(product)` from the feature's `defineExpose`. Nothing in CI
+  proves the names still match; the IDE language server and the harness do.
+- **`useAdminProductEditor`'s ten exposed names** (`editorForm`, `editorOpen`, `deleteTarget`,
+  `isSaving`, `actionError`, `openAddEditor`, `openEditEditor`, `handleImageSelection`,
+  `saveProduct`, `confirmDelete`) — kept identical to the moved markup for exactly this reason.
+- **`CategoryMobile` teleports itself to `body`** — DOM order ≠ visual order.
+
+## Auto-import trap
+
+`app/features/**` is invisible to Nuxt's auto-import until `nuxt.config.ts` registers it:
+composables in `imports.dirs`, components in `components.dirs`. **Naming `components.dirs`
+replaces Nuxt's own scan**, so `~/components` must stay in that list or every shared component
+silently stops resolving — the build stays green and the page renders without them. Adding a second
+feature means adding its two dirs and keeping `~/components`.
+
+## Never do these as a side quest
+
+- Add `as any` to a Supabase client or query — it re-hides the two silent typing failures
+  documented in [../../AGENTS.md](../../AGENTS.md).
+- Introduce a service-role client to fix a permission error. Authorisation is RLS in Postgres; the
+  browser holds only the anon key, and the fix belongs in a new migration.
+- Treat `useAdminProductEditor`'s `canMutate` argument as a security boundary. It is a UI guard;
+  RLS is the boundary.
+- Move browsing state, a catalog read, or a row mapping into a component in `app/components/`.
+- Extract a shared abstraction from the two category drag engines, or from the indicator geometry
+  scaffolding (observers, `fonts.ready`, watches): they observe different elements and write
+  different geometry — only the *shape of the code* looks alike.
+- Consolidate `SearchDock`'s duplicate of the scroll-direction rule (`60` / `6`) into
+  `useScrollReveal`. Its scroll pass is interleaved with the morph/collapse logic in a hands-off
+  component; migrating it is a separate change with its own measurement budget.
+- Edit the duplicated `tel:` digit rule (`phone.replace(/[^\d+]/g, '')`) in `SiteInfoContact.vue`
+  as part of an unrelated pass. It is duplicated on purpose; one owner under `app/utils/` is a
+  dedicated site-info change.
+- Trust `.qoder/repowiki/`. It is gitignored, generated, and has overwritten hand edits three
+  times; several of its pages document realtime, tests, caching and monitoring that are **not**
+  implemented.
+
+## Tuned numbers
+
+The exact numbers worth not breaking — morph durations and easings, hysteresis thresholds,
+magnification profile, indicator curve, emblem heights and insets, the `44px` single-line control
+height, the two dark surface rungs (`zinc-950` vs. Nuxt UI's `--ui-bg` `zinc-900`) — are tabulated
+in [../../ARCHITECTURE.md](../../ARCHITECTURE.md) → **Interaction invariants** and **Control
+language**. Changing one is a design decision, not a refactor.
