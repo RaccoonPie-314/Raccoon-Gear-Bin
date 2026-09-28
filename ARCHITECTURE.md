@@ -206,14 +206,16 @@ Two details in there are contracts rather than style:
   lightbox is `z-[70]`; nothing in the feature reads or owns gallery state, and the harness proves
   the ordering with `elementFromPoint` over the bar's own centre while the lightbox is open.
 
-`useProductShare` answers an instant platform abort differently from a slow human dismissal
-because the browser gives no other signal: a platform with no sheet rejects `navigator.share()`
-with an `AbortError` inside the click's own turn (measured on desktop Chrome — headless Chrome
-answers every real `share()` call this way), while a visitor closing an opened sheet takes at
-least a second. Under `PLATFORM_ABORT_MS` an abort is "nothing to show" and falls through to the
-clipboard; over it, it is a decision and stays silent. `canShare()` is consulted before calling,
-a share whose sheet took the payload says so, and only a failure both paths could not recover
-from reveals the manual link.
+`useProductShare` asks one question of every `navigator.share()` settle — *could a human have
+caused this?* — because the browser gives no other signal. Measured in a visible Chrome window, a
+real sheet stays pending until the visitor leaves it (~1s at the fastest), and platforms with no
+sheet answer *instantly*: either an `AbortError` (headless Chrome, desktop Chrome where the OS
+share service is absent) or a **phantom resolve** that paints nothing (reported from a desktop
+browser that "succeeded" with no popover). Both instants — reject *or* resolve under
+`HUMAN_SHEET_MS` — are the platform answering for the visitor, and fall through to the clipboard
+with its true sentence ("Product link copied."). Anything slower was a sheet the visitor used or
+closed, and both of those stay silent: the page never claims an act the visitor watched happen,
+and never contradicts one they chose not to. `canShare()` is consulted before calling.
 
 Platform capability lives in one pure function, `socialContactLink` in `app/utils/social-prefill.ts`,
 and its rule is: use a documented prefill where the platform publishes one, and otherwise open the
@@ -346,7 +348,7 @@ and none of them are visible to the compiler or to `build`.
 | Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
 | Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion); pan clamped to ±(s−1)/(2s) of the photo's layout box | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
-| Share abort window | `PLATFORM_ABORT_MS = 250` — below it an `AbortError` is the platform, above it the visitor | `useProductShare.ts` |
+| Share settle window | `HUMAN_SHEET_MS = 250` — any settle (resolve or abort) under it is the platform answering, not the visitor | `useProductShare.ts` |
 | Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
 | Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
 | Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; phone left of the centre line, location right of it | `index.vue` header, asserted by `verify-ui.mjs` |

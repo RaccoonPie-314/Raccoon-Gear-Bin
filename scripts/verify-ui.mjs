@@ -322,12 +322,15 @@ const run = async () => {
     // the only way to tell "called from the click" apart from "called after an await that cost the
     // activation" — a sheet that silently stops opening on mobile is exactly that failure, and no
     // amount of reading the code afterwards proves the timing.
-    // Both settling mocks settle on a *timer*, not a microtask: a real share sheet lives for at
-    // least a second before it resolves or is dismissed, and the app now reads the speed of an
-    // AbortError as the difference between "the visitor closed my sheet" and "this platform has
-    // no sheet and aborted instantly". A mock that settled synchronously would test a browser that
-    // does not exist.
+    // Both settling mocks settle on a *timer*, not a microtask: a real share sheet takes ~1s
+    // before it can resolve or be dismissed (measured in a visible Chrome window), and the app
+    // now reads the SPEED of any settle as "the visitor had a sheet" vs "the platform answered
+    // for them". A mock that settled synchronously would mock a browser that does not exist —
+    // and the app must treat that shape (fast resolve or fast abort) as a phantom: no sheet ever
+    // painted, so the clipboard fallback is the only honest outcome.
     ok: 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return new Promise(function (resolve) { setTimeout(function () { window.__SHARE_SETTLED = "shared"; resolve(); }, 400) }); }',
+    // The reported defect, as a mock: the method exists, "succeeds" instantly, and no UI paints.
+    'resolve-fast': 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return Promise.resolve(); }',
     abort: 'function () { return new Promise(function (_, reject) { setTimeout(function () { var e = new Error("dismissed"); e.name = "AbortError"; window.__SHARE_SETTLED = "aborted"; reject(e); }, 400) }); }',
     // The desktop-Chrome-on-macOS case measured in Phase 1.2: the method exists, and it rejects
     // with an AbortError so fast the sheet never painted.
@@ -1155,15 +1158,17 @@ const run = async () => {
     await clearFeedback()
     await armShare('ok')
     await armClipboard('ok')
-    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shared)))
-    await sleep(150) // let the sheet mock's 400ms settle land before reading the ledger
+    await clickSelector('[data-share-cta]', 'true')
+    await sleep(900) // the sheet mock settles on a 400ms timer; the outcome must be in by now
     const shared = await shares()
     const shareRow = row(G.manyId).product_translations[0]
     check('share goes through the Web Share API with the product name, its summary and the canonical URL', shared.length === 1 && shared[0].title === shareRow.name && shared[0].text === shareRow.short_description && shared[0].url === canonical(G.manyId), { shared })
     // Web Share only works when the call is made while the browser still holds the gesture. This is
     // the check that keeps a future `await` in front of it from silently killing mobile sharing.
     check('the sheet is opened from the click itself, while user activation is still live', shared.length === 1 && shared[0].activation === true, { activation: shared[0] && shared[0].activation })
-    check('a share whose sheet took the payload says so, and copies nothing behind it', (await copies()).length === 0 && (await inlineMount()).feedback === C.feedback.shared, { copies: await copies(), feedback: (await inlineMount()).feedback })
+    // A sheet a human could have used speaks for itself on their screen; a sentence after it
+    // claims their private act, so the page stays silent — and copies nothing behind them.
+    check('a share whose sheet had time to be real claims nothing and copies nothing', (await copies()).length === 0 && (await inlineMount()).feedback === '', { copies: await copies(), feedback: (await inlineMount()).feedback })
 
     await clearFeedback()
     await armShare('abort')
@@ -1171,6 +1176,25 @@ const run = async () => {
     await clickSelector('[data-share-cta]', 'true')
     await sleep(1200) // the rejection is 400ms in; the silence must survive it, not merely lead it
     check('a dismissed share sheet is treated as a decision, not a failure', (await inlineMount()).feedback === '' && (await copies()).length === 0, { feedback: (await inlineMount()).feedback })
+
+    // The phantom sheet, as reported from a real desktop browser: `share()` RESOLVES inside the
+    // human window without ever painting. A success claim there is a lie ("Shared through the
+    // sheet" with nothing shared), and silence is the dead button again — the clipboard is the
+    // only thing that actually happened to the visitor.
+    await clearFeedback()
+    await armShare('resolve-fast')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
+    const phantomCopied = await copies()
+    check('a share that resolves instantly copies the link instead of claiming a phantom sheet', phantomCopied.length === 1 && phantomCopied[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: phantomCopied })
+
+    await clearFeedback()
+    await armShare('resolve-fast')
+    await armClipboard('missing')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shareFailed)))
+    const phantomNoClip = await inlineMount()
+    check('a phantom resolve with no clipboard reveals the manual link, not a success claim', phantomNoClip.shareLink === canonical(G.manyId) && phantomNoClip.feedback === C.feedback.shareFailed, { feedback: phantomNoClip.feedback })
+    await armClipboard('ok')
 
     // The Phase 1.2 defect, as a check: a platform whose `share()` aborts instantly (desktop Chrome
     // on macOS answers exactly this way) must not read as "the visitor decided" — no sheet ever

@@ -61,11 +61,11 @@ const handleCopy = async (mount: ActionsMount) => {
 
 const handleShare = async (payload: ProductSharePayload, mount: ActionsMount) => {
   const outcome = await share(payload)
-  // A sheet that took the payload gets told about it — the visitor watched the sheet close, so a
-  // quiet success reads as a dead button on every platform whose sheet they cannot see. A sheet
-  // the visitor closed was a decision and gets nothing behind it. Only the copy paths speak.
-  if (outcome === 'shared') say(t('shareCompleted'), mount)
-  else if (outcome === 'copied') say(t('linkCopied'), mount)
+  // A sheet the visitor actually used — or closed — has already said everything worth saying in
+  // the one place they could trust it, their own screen; a sentence after it claims a private
+  // act on their behalf. `shared` therefore stays silent, like `cancelled`. Only the copy paths
+  // speak, because those are the outcomes the visitor cannot see happening.
+  if (outcome === 'copied') say(t('linkCopied'), mount)
   else if (outcome === 'failed') { revealLink.value = true; say(t('shareFailed'), mount) }
 }
 </script>

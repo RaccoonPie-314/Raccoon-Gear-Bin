@@ -18,15 +18,17 @@ export type ProductSharePayload = {
  */
 export type ProductShareOutcome = 'shared' | 'cancelled' | 'copied' | 'failed'
 
-// The one number this file adds is a time budget, and it exists because of a measured browser
-// behaviour: a platform that cannot share answers `navigator.share()` with an *immediate*
-// AbortError — headless Chrome, and desktop Chrome on a platform without a share service, reject
-// within the same activation turn — while a visitor who opened the real sheet and dismissed it
-// settles no sooner than they could have read it. A share rejected inside this window is therefore
-// the platform aborting, not the visitor deciding, and it must fall through to the clipboard
-// instead of ending as a silent 'cancelled'. Measured head-to-side: the abort lands under ~10ms,
-// a human dismissal is a second or more away; 250ms separates them with an order of magnitude.
-const PLATFORM_ABORT_MS = 250
+// One number, one question: could this settle have been a *human* leaving the sheet? Measured on
+// real Chrome (visible window, macOS): the native popover takes ~1s to even appear, the promise
+// stays pending while the visitor is in it, and it settles — resolve or AbortError — only after
+// they chose or dismissed. So any settle inside this window came from the platform, not the
+// visitor: a no-sheet platform rejects instantly (headless Chrome, desktop Chrome where the OS
+// share service is absent) or "resolves" instantly without ever painting (the phantom sheet a
+// plain success claim would report as shared). Both fall through to the clipboard. Slower than
+// the window: the visitor had a sheet and used or closed it — their decision is answered with
+// silence, never with a claim behind them. 250ms sits at least ~750ms below the fastest real
+// settle, so the two cases cannot overlap.
+const HUMAN_SHEET_MS = 250
 
 /**
  * Share through the platform's own sheet when the browser offers one, and fall back to the one
@@ -54,13 +56,16 @@ export const useProductShare = () => {
         // The await sits *on* the call, never before it: the sheet only opens while the click's
         // user activation is still live.
         await navigator.share(data)
-        return 'shared'
+        // A resolve inside the window is the platform claiming success without ever showing the
+        // sheet — the phantom the plain-'shared' report used to hand the visitor a sentence about
+        // a popover they never saw. Only a resolve a human could have caused is a real outcome.
+        if (performance.now() - openedAt >= HUMAN_SHEET_MS) return 'shared'
       } catch (error: any) {
         // A rejection that took its time is the visitor closing a sheet they opened. That is a
         // decision, not an error, and it must not be answered by silently copying behind their
         // back. Anything else — AbortError arriving instantly, NotAllowedError, a data error no
         // name was invented for — is the platform not sharing, and joins the clipboard path.
-        if (error?.name === 'AbortError' && performance.now() - openedAt >= PLATFORM_ABORT_MS) return 'cancelled'
+        if (error?.name === 'AbortError' && performance.now() - openedAt >= HUMAN_SHEET_MS) return 'cancelled'
       }
     }
 
