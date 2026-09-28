@@ -93,7 +93,7 @@ unmodified build is a broken check, not a regression** — fix the check before 
 
 ## Traps when extending the harness
 
-All four have already been paid for once:
+All five have already been paid for once:
 
 1. **The stub exists only in the browser.** Nuxt's SSR fetches run on the server, un-stubbed, so a
    hard reload into a fake session yields a genuine hydration mismatch and unverifiable reads.
@@ -107,7 +107,15 @@ All four have already been paid for once:
    at.
 4. **CDP responses all wrap their payload in `result`**, and `Runtime.evaluate` with
    `returnByValue: true` only serialises JSON-safe values — a `Set` arrives as `{}`, so return
-   `Array.from(...)`. Both mistakes read as "element not found".
+   `Array.from(...)`.
+5. **A `touchStart` + `touchEnd` pair is not guaranteed a `click`, and the failure looks exactly like
+   an app that ignored the tap.** After a touch *pan* on the lightbox zoom control, `ubuntu-latest`
+   delivered `pointerdown` + `pointerup` with no click on two runs in a row and delivered the click on
+   the third, at the same point, with the same timings. Nothing in the app can act on an event that
+   never arrived, so a touch-only assertion is intermittently red for a reason the code does not own.
+   Hand the gesture to a logged probe: record the events the control receives, and when the platform
+   offered pointer events but no click, press and release the same point as a mouse pair — then print
+   which path proved the rule (`how: touch` vs `touch-then-mouse`) so the fallback stays visible.
 
 ## Measure, don't eyeball
 

@@ -1179,13 +1179,13 @@ const run = async () => {
     const zlog = '(() => { const b = document.querySelector(\'[data-lightbox] [data-lightbox-zoom-target]\'); if (!b) return null; window.__Z = []; for (const ty of [\'pointerdown\', \'pointerup\', \'click\']) b.addEventListener(ty, e => window.__Z.push(ty + \'@\' + Math.round(e.clientX) + \',\' + Math.round(e.clientY) + \' d\' + e.detail)); return true })()'
     await ev(zlog)
     const zlen = () => ev('(window.__Z || []).length')
-    // The tap a zoom gesture needs, delivered as faithfully as the platform allows. A tap that starts
-    // a zoom arrives as a click on every runner; a tap that *follows a touch pan* does not: on
-    // ubuntu-latest the control gets `pointerdown` and `pointerup` and no click, at any point of the
-    // frame and after any settle — the click Blink would synthesise is simply withheld once the
-    // gesture recognizer has run a pan on that element. macOS does synthesise it. So: try the touch
-    // tap, and if the platform offered no click, press and release the same point as a mouse pair.
-    // Either way the app rule is proven; `how` says which gesture the run actually exercised.
+    // The tap a zoom gesture needs, delivered as faithfully as the platform allows, and logged so the
+    // run says which gesture proved the rule. A touch tap that *starts* a zoom has always arrived as a
+    // click here; a tap that *follows a touch pan* has not, on this runner, reliably: two CI runs gave
+    // `pointerdown` + `pointerup` and no click at all, the next gave `click d1` at the same point with
+    // the same timings. Blink owning that decision means the check would be intermittently red for a
+    // reason no line of app code can fix, so: try the touch tap, and when the platform offered pointer
+    // events but no click, press and release the same point as a mouse pair. `how` is printed either way.
     const tapOnPhoto = async (x, y) => {
       const from = await zlen()
       await tapAt(x, y)
