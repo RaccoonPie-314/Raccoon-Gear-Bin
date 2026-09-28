@@ -296,6 +296,9 @@ const run = async () => {
     await clickAt(box.x, box.y)
     return waitExpr ? waitFor(waitExpr) : true
   }
+  // A `keydown` carrying no `text` produces no `keypress`, and it is the keypress that activates
+  // a native button in Blink — without it Enter lands on the control and nothing happens.
+  const press = async (code, key, vk, text) => { await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code, key, windowsVirtualKeyCode: vk, text: text }); await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code, key }) }
   const byLabel = (label, value) => '(() => { const dlg = document.querySelector(\'[role="dialog"]\'); if (!dlg) return "NODIALOG"; const lbl = [...dlg.querySelectorAll("label")].find(l => (l.textContent || "").trim().replace(/[*\\s]+$/, "").trim() === ' + JSON.stringify(label) + '); if (!lbl) return "NOLABEL"; const el = dlg.querySelector("#" + (window.CSS ? CSS.escape(lbl.htmlFor) : lbl.htmlFor)) || (lbl.parentElement && lbl.parentElement.querySelector("input, textarea")); if (!el) return "NOFIELD"; const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value").set.call(el, ' + JSON.stringify(value) + '); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return el.value })()'
   const allW = async () => (await ev('window.__W || []'))
   const writes = async () => (await allW()).filter(w => w.method !== 'GET' && !w.p.startsWith('/auth/'))
@@ -319,8 +322,16 @@ const run = async () => {
     // the only way to tell "called from the click" apart from "called after an await that cost the
     // activation" — a sheet that silently stops opening on mobile is exactly that failure, and no
     // amount of reading the code afterwards proves the timing.
-    ok: 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return Promise.resolve(); }',
-    abort: 'function () { var e = new Error("dismissed"); e.name = "AbortError"; return Promise.reject(e); }',
+    // Both settling mocks settle on a *timer*, not a microtask: a real share sheet lives for at
+    // least a second before it resolves or is dismissed, and the app now reads the speed of an
+    // AbortError as the difference between "the visitor closed my sheet" and "this platform has
+    // no sheet and aborted instantly". A mock that settled synchronously would test a browser that
+    // does not exist.
+    ok: 'function (data) { window.__SHARES.push(Object.assign({}, data, { activation: !!(navigator.userActivation && navigator.userActivation.isActive) })); return new Promise(function (resolve) { setTimeout(function () { window.__SHARE_SETTLED = "shared"; resolve(); }, 400) }); }',
+    abort: 'function () { return new Promise(function (_, reject) { setTimeout(function () { var e = new Error("dismissed"); e.name = "AbortError"; window.__SHARE_SETTLED = "aborted"; reject(e); }, 400) }); }',
+    // The desktop-Chrome-on-macOS case measured in Phase 1.2: the method exists, and it rejects
+    // with an AbortError so fast the sheet never painted.
+    'abort-fast': 'function () { return Promise.reject(Object.assign(new Error("abort"), { name: "AbortError" })); }',
     absent: 'undefined'
   }
   const armClipboard = mode => ev('(() => { window.__COPIES = []; Object.defineProperty(navigator, "clipboard", { configurable: true, value: ' + CLIPBOARD[mode] + ' }); return true })()')
@@ -836,6 +847,82 @@ const run = async () => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       check('Escape closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
 
+      // ---- second-stage zoom: photo → lightbox → zoom, inside the same dialog ----
+      // Explicit about the motion preference: headless Chrome answers the reduced-motion query
+      // with `reduce` by default, and "running with motion" is a precondition of these checks,
+      // not an accident of the rig.
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+      await clickAt(zoomBox.x, zoomBox.y)
+      await waitFor(`!!document.querySelector(${JSON.stringify(LB)} [data-lightbox-zoom])`)
+      const zBtn = (await ev(boxesExpr(`${LB} [data-lightbox-zoom]`)))[0]
+      // The *current* lightbox photo, never the outgoing layer of a swap still running (the same
+      // MAIN_SRC rule the gallery checks follow): a leave-active ghost is first in document order,
+      // absolutely positioned and perfectly zoomable — measuring it would measure yesterday's photo.
+      const ZGEO = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const b = document.querySelector('${LB} [data-lightbox-zoom]'); if (!i || !b) return null; const r = i.getBoundingClientRect(); const c = getComputedStyle(i); return { zoomed: i.getAttribute('data-zoomed'), pressed: b.getAttribute('aria-pressed'), scale: c.transform, transition: c.transitionDuration, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, w: r.width, left: r.left, right: r.right, h: r.height, top: r.top, bottom: r.bottom, vw: innerWidth, vh: innerHeight } })()`
+      const ZFOCUS = `(() => { const ls = [...document.querySelectorAll('${LB} [data-lightbox-main]')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; if (i) i.focus(); return true })()`
+      check('the lightbox carries one zoom control that starts unpressed', !!zBtn && (await ev(`document.querySelectorAll(${JSON.stringify(LB + ' [data-lightbox-zoom]')}).length`)) === 1 && (await ev(`document.querySelector(${JSON.stringify(LB + ' [data-lightbox-zoom]')}).getAttribute('aria-pressed')`)) === 'false')
+      const fit0 = await ev(ZGEO)
+      await clickAt(zBtn.x, zBtn.y)
+      await sleep(350) // the 220ms zoom transition must settle before the matrix is read
+      const zin = await ev(ZGEO)
+      check('the zoom control magnifies the one enlarged photo in place', zin && zin.zoomed === 'true' && zin.pressed === 'true' && zin.scale.startsWith('matrix') && Math.abs(Number(zin.scale.slice(7).split(',')[0]) - G.zoomScale) < 0.01, { zin })
+      check('the zoomed photo cannot make the page scroll sideways', zin.overflow <= 1, { overflow: zin.overflow })
+      // Pan: press, drag, and the translate part of the matrix follows the pointer while the
+      // scale part stays pinned at the one magnification. The drag starts at the centre of the
+      // *contained* box (the zoomed rect hangs outside the viewport and its corners are buttons)
+      // and travels down-right: from the centre, every intermediate of a ±(s−1)/2·w pan stays
+      // inside the viewport, so no step of the gesture can land on a floating control.
+      const panFrom = { x: fit0.left + fit0.w / 2, y: fit0.top + fit0.h / 2 }
+      await mouse('mouseMoved', panFrom.x, panFrom.y)
+      await mouse('mousePressed', panFrom.x, panFrom.y, 1)
+      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', panFrom.x + 46 * i, panFrom.y + 22 * i, 1); await sleep(30) }
+      const midPan = await ev(ZGEO)
+      await mouse('mouseReleased', panFrom.x + 276, panFrom.y + 132)
+      await sleep(60)
+      const dragSettled = await ev(ZGEO)
+      const tp = /matrix\(([^)]+)\)/.exec(midPan.scale)
+      const pm = tp ? tp[1].split(',').map(Number) : []
+      check('while zoomed the photo pans with the pointer and keeps its magnification', pm.length >= 6 && Math.abs(pm[0] - G.zoomScale) < 0.01 && pm[4] > 30 && pm[5] > 10, { matrix: pm })
+      check('after the drag the photo stays where it was left (no snap-back)', dragSettled.zoomed === 'true' && (/matrix\(([^)]+)\)/.exec(dragSettled.scale) || [])[1] === (tp || [])[1], { released: dragSettled && dragSettled.scale })
+      // Zoom is a view, not a second modal: navigation and Escape must survive it. The arrow
+      // goes through the dialog's own keydown (the current photo is focusable and focused after
+      // a tap), so this checks the selection rule, not where a pointer release happens to land.
+      const selBeforeStep = await ev(SEL_IDX)
+      await ev(ZFOCUS)
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'ArrowRight', key: 'ArrowRight' })
+      await waitFor(`(${SEL_IDX}) === ${(selBeforeStep + 1) % G.manyImages}`, 2500)
+      await sleep(300) // let the swap's leave layer unmount before asking the current photo
+      const afterStep = await ev(ZGEO)
+      check('next while zoomed advances the shared selection and resets the zoom', afterStep && !afterStep.zoomed && afterStep.scale === 'none' && (await ev(SEL_IDX)) === (selBeforeStep + 1) % G.manyImages, { afterStep, selBeforeStep })
+      await clickSelector(`${LB} [data-lightbox-zoom]`, `[data-zoomed]`)
+      await sleep(350)
+      check('the same control zooms back in on demand', (await ev(ZGEO)).zoomed === 'true')
+      await clickSelector(`${LB} [data-lightbox-zoom]`, 'true')
+      await sleep(350)
+      check('pressing it again returns the photo to the contained view', (await ev(ZGEO)).scale === 'none' && (await ev(ZGEO)).zoomed === null)
+      // Reduced motion keeps the magnification and the drag — the visitor's own hand moving the
+      // photo is direct manipulation — and drops only the animated entry.
+      await clickSelector(`${LB} [data-lightbox-zoom]`, '[data-zoomed]')
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+      await sleep(120)
+      const rmFrom = { x: fit0.left + fit0.w / 2, y: fit0.top + fit0.h / 2 }
+      await mouse('mouseMoved', rmFrom.x, rmFrom.y)
+      await mouse('mousePressed', rmFrom.x, rmFrom.y, 1)
+      for (let i = 1; i <= 4; i++) { await mouse('mouseMoved', rmFrom.x - 50 * i, rmFrom.y, 1); await sleep(30) }
+      const rmPan = await ev(ZGEO)
+      await mouse('mouseReleased', rmFrom.x - 200, rmFrom.y)
+      const rmMatrix = /matrix\(([^)]+)\)/.exec(rmPan ? rmPan.scale : '') 
+      check('under reduced motion the zoom arrives without a transition and still pans', !!rmPan && rmPan.zoomed === 'true' && rmPan.transition === '0s' && !!rmMatrix && Number(rmMatrix[1].split(',')[4]) < -50, rmPan && { scale: rmPan.scale, transition: rmPan.transition })
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+      await clickSelector(`${LB} [data-lightbox-close]`, `!document.querySelector(${JSON.stringify(LB)})`)
+      await clickAt(zoomBox.x, zoomBox.y)
+      await waitFor(`!!document.querySelector(${JSON.stringify(LB)} [data-lightbox-main])`)
+      check('closing resets the zoom: reopening starts from the contained photo', !(await ev(ZGEO)).zoomed)
+      await press('Escape', 'Escape', 27)
+      await waitFor(`!document.querySelector(${JSON.stringify(LB)})`)
+      await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+
       // ---- a burst of clicks must settle on the latest photo, never stack layers ----
       const beforeBurst = await ev(SEL_IDX)
       const rb = (await ev(boxesExpr('[data-gallery-next]')))[0]
@@ -889,6 +976,21 @@ const run = async () => {
     const mFit = await ev('(() => { const d = document.querySelector(\'[data-lightbox-main]\'); if (!d) return null; const r = d.getBoundingClientRect(); return { fits: r.left >= -1 && r.right <= innerWidth + 1 && r.width >= innerWidth * 0.7, w: Math.round(r.width) } })()')
     check('lightbox on touch: opens from the photo and fills the viewport without overflow', mOpen && !!mFit && mFit.fits, { mFit })
     check('no horizontal overflow with the lightbox open @390', (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+    // Touch zoom + pan: a tap on the zoom control magnifies in place, and a finger drag
+    // translates the magnified photo inside its own bounds — the page never scrolls sideways
+    // because of it, which is the same overflow number re-read, now mid-zoom. (A tap on the
+    // photo itself is the "keep the lightbox up, pull focus in" gesture, never a zoom.)
+    const mzBtn = (await ev(boxesExpr('[data-lightbox-zoom]')))[0]
+    await touch('touchStart', [{ x: mzBtn.x, y: mzBtn.y }])
+    await touch('touchEnd', [])
+    await sleep(400)
+    const mZoomed = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
+    check('a tap on the zoom control magnifies the lightbox photo on touch', mZoomed && !!mzBtn && mzBtn.w >= 36, { mZoomed, mzBtn })
+    await touch('touchStart', [{ x: 195, y: 420 }])
+    for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: 195 - 30 * i, y: 420 }]); await sleep(30) }
+    const mPan = await ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; const t = getComputedStyle(i).transform; const m = /matrix\\(([^)]+)\\)/.exec(t); return { tx: m ? +m[1].split(",")[4] : 0, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    await touch('touchEnd', [])
+    check('a finger drag pans the zoomed photo without moving the page', mPan.tx < -40 && mPan.overflow <= 1, { mPan })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
@@ -1053,22 +1155,42 @@ const run = async () => {
     await clearFeedback()
     await armShare('ok')
     await armClipboard('ok')
-    await clickSelector('[data-share-cta]', 'true')
-    await sleep(300)
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shared)))
+    await sleep(150) // let the sheet mock's 400ms settle land before reading the ledger
     const shared = await shares()
     const shareRow = row(G.manyId).product_translations[0]
     check('share goes through the Web Share API with the product name, its summary and the canonical URL', shared.length === 1 && shared[0].title === shareRow.name && shared[0].text === shareRow.short_description && shared[0].url === canonical(G.manyId), { shared })
     // Web Share only works when the call is made while the browser still holds the gesture. This is
     // the check that keeps a future `await` in front of it from silently killing mobile sharing.
     check('the sheet is opened from the click itself, while user activation is still live', shared.length === 1 && shared[0].activation === true, { activation: shared[0] && shared[0].activation })
-    check('a share that opened its sheet claims nothing behind it', (await copies()).length === 0 && (await inlineMount()).feedback === '', { copies: await copies(), feedback: (await inlineMount()).feedback })
+    check('a share whose sheet took the payload says so, and copies nothing behind it', (await copies()).length === 0 && (await inlineMount()).feedback === C.feedback.shared, { copies: await copies(), feedback: (await inlineMount()).feedback })
 
+    await clearFeedback()
     await armShare('abort')
     await armClipboard('ok')
     await clickSelector('[data-share-cta]', 'true')
-    await sleep(300)
+    await sleep(1200) // the rejection is 400ms in; the silence must survive it, not merely lead it
     check('a dismissed share sheet is treated as a decision, not a failure', (await inlineMount()).feedback === '' && (await copies()).length === 0, { feedback: (await inlineMount()).feedback })
 
+    // The Phase 1.2 defect, as a check: a platform whose `share()` aborts instantly (desktop Chrome
+    // on macOS answers exactly this way) must not read as "the visitor decided" — no sheet ever
+    // painted, so the fallback is the only thing the visitor can be given.
+    await clearFeedback()
+    await armShare('abort-fast')
+    await armClipboard('ok')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
+    const fastAborted = await copies()
+    check('an instantly-aborted share falls through to the clipboard instead of staying silent', fastAborted.length === 1 && fastAborted[0] === canonical(G.manyId) && (await inlineMount()).feedback === C.feedback.link, { copied: fastAborted })
+
+    await clearFeedback()
+    await armShare('abort-fast')
+    await armClipboard('missing')
+    await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.shareFailed)))
+    const bothDead = await inlineMount()
+    check('when the sheet aborts and there is no clipboard, the manual link is shown', bothDead.shareLink === canonical(G.manyId) && bothDead.feedback === C.feedback.shareFailed, { feedback: bothDead.feedback, shareLink: bothDead.shareLink })
+    await armClipboard('ok')
+
+    await clearFeedback()
     await armShare('absent')
     await armClipboard('ok')
     await clickSelector('[data-share-cta]', expectFeedback(JSON.stringify(C.feedback.link)))
@@ -1113,7 +1235,6 @@ const run = async () => {
     // A document script mutates the stub's own collections before the app boots, so the app reads
     // this data through exactly the same REST path as any other: the alternative is a seventh
     // product row that every card and price count in this file would then have to chase.
-    const press = async (code, key, vk, text) => { await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code, key, windowsVirtualKeyCode: vk, text: text }); await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code, key }) }
 
     const odd = 'Rüç “Koï” 100% <b> & € ✦ Keyboard'
     const oddScript = await forNextDocument('window.__PRODUCTS[0].product_translations[0].name = ' + JSON.stringify(odd) + ';')
@@ -1153,6 +1274,12 @@ const run = async () => {
     await metrics(390, 844, true)
     await nav(detailUrl(G.manyId))
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-contact-cta]\')')
+    // One visible Contact CTA per breakpoint: the inline block is `hidden lg:block` on purpose,
+    // so a second painted CTA at phone width means that contract broke and the visitor is being
+    // asked to choose between two identical actions. `getClientRects()` reads painted layout,
+    // which is what a `display: none` mount honestly does not have.
+    const ctaCount = await ev('(() => { let n = 0; for (const el of document.querySelectorAll("[data-contact-cta]")) if (el.getClientRects().length) n++; return n })()')
+    check('exactly one Contact to Order CTA is visible at mobile width', ctaCount === 1, { ctaCount })
     const geo = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const r = bar.getBoundingClientRect(); const c = getComputedStyle(bar); const inner = bar.querySelector("[data-product-actions]").getBoundingClientRect(); const ctl = bar.querySelector("[data-contact-cta]").getBoundingClientRect(); return { display: c.display, position: c.position, z: c.zIndex, pb: c.paddingBottom, top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height, vh: innerHeight, vw: innerWidth, insetLeft: Math.round(inner.left - r.left), insetRight: Math.round(r.right - inner.right), ctlH: Math.round(ctl.height), ctlW: Math.round(ctl.width), hasShare: !!bar.querySelector("[data-share-cta]"), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
     check('the sticky bar is a fixed bottom row that stays inside the viewport', geo.position === 'fixed' && geo.display !== 'none' && Math.abs(geo.bottom - geo.vh) <= 1 && geo.left === 0 && geo.right === geo.vw, geo)
     check('the sticky bar does not widen the page, keeps the 44px control and its symmetric inset', geo.overflow <= 1 && geo.ctlH === C.sticky.controlHeight && geo.insetLeft === geo.insetRight && geo.ctlW + geo.insetLeft * 2 <= geo.vw, geo)
@@ -1161,8 +1288,11 @@ const run = async () => {
 
     await ev('window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }); true')
     await sleep(450)
-    const clearance = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const act = document.querySelectorAll("[data-product-actions]")[0]; const b = bar.getBoundingClientRect(); const a = act.getBoundingClientRect(); return { atEnd: window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2, barTop: Math.round(b.top), actBottom: Math.round(a.bottom), gap: Math.round(b.top - a.bottom) } })()')
-    check('at the end of the page the sticky bar leaves the product content clear of itself', clearance.atEnd && clearance.actBottom <= clearance.barTop + 1, clearance)
+    // The last real content above the fold (the specifications block) is what the bar must leave
+    // clear: the inline conversion block sits under it, but below `lg` that block is not painted
+    // and the sticky bar *is* the conversion UI, so the page has to end in something readable.
+    const clearance = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const dl = document.querySelector("main dl") || document.querySelector("main pre"); const b = bar.getBoundingClientRect(); const d = dl ? dl.getBoundingClientRect() : null; return { atEnd: window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2, barTop: Math.round(b.top), dlBottom: d ? Math.round(d.bottom) : null, gap: d ? Math.round(b.top - d.bottom) : null } })()')
+    check('at the end of the page the sticky bar leaves the product content clear of itself', clearance.atEnd && clearance.dlBottom !== null && clearance.dlBottom <= clearance.barTop + 1, clearance)
 
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true')
     await sleep(350)
@@ -1175,8 +1305,18 @@ const run = async () => {
     check('Escape still closes the lightbox with the sticky bar on screen', await waitFor('!document.querySelector("[data-lightbox]")'))
 
     // Same action, not a second implementation of it: the sticky panel must offer what the inline
-    // block offers and its copy must go through the same code path.
+    // block offers and its copy must go through the same code path. The inline block cannot be
+    // opened at this width any more — it is the mount the breakpoint switched off — so the
+    // comparison is built from a fresh desktop visit that opens it where it does live.
+    await metrics(1440, 900, false)
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-contact-cta]\')')
     const inlineNow = await openInlinePanel()
+    // Dismiss it before resizing: `display: none` hides the inline panel without unmounting it,
+    // and a stale node would let the next wait expression pass without the sticky click doing anything.
+    await press('Escape', 'Escape', 27)
+    await metrics(390, 844, true)
+    await sleep(250)
     await armClipboard('ok')
     await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
     const stickyOpen = await stickyMount()
@@ -1201,17 +1341,25 @@ const run = async () => {
     await press('Escape', 'Escape', 27)
     check('Escape closes the sticky panel and leaves focus on the control', !(await ev('!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')) && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'))
     // Escape has to hand focus back to the control that opened the panel rather than dropping the
-    // visitor at the top of the tab order. It is also the only way to make the bar reachable from
-    // the page: while the inline panel is open its own field is the next tab stop.
-    await ev('(() => { const el = document.querySelector("[data-product-actions] [data-contact-message]"); if (el) el.focus(); return true })()')
+    // visitor at the top of the tab order. The inline block is no longer painted at this width,
+    // so the bar's own panel is the one that answers — and a hidden field cannot take focus to be
+    // accidentally closed from anyway.
+    await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-contact-message]"); if (el) el.focus(); return true })()')
     await press('Escape', 'Escape', 27)
-    check('Escape closes the inline panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null && !document.querySelector("[data-product-actions] [data-contact-panel]") })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
-    await ev('(() => { const el = document.querySelector("[data-share-cta]"); if (el) el.focus(); return true })()')
+    check('Escape closes the mobile panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null && !document.querySelector("[data-sticky-cta] [data-contact-panel]") })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
+    // Tab reaches the bar's own controls from its field, and every stop in the bar wears a ring:
+    // with the inline block switched off at this width, the panel and its buttons are the tab
+    // path through the bar, and one of the two surfaces the visitor can reach must be lit.
+    await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
+    await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-contact-message]"); if (el) el.focus(); return true })()')
     await press('Tab', 'Tab', 9)
-    const focused = await ev('(() => { const el = document.activeElement; const c = getComputedStyle(el); return { inSticky: !!(el.closest && el.closest("[data-sticky-cta]")), isCta: el.getAttribute("data-contact-cta") !== null, tag: el.tagName, shadow: c.boxShadow, outline: c.outlineWidth + " " + c.outlineStyle } })()')
-    check('Tab reaches the sticky CTA from the page and it shows a visible focus ring', focused.inSticky && focused.isCta && (focused.shadow !== 'none' || !/^0px none/.test(focused.outline)), focused)
+    const focused = await ev('(() => { const el = document.activeElement; const c = getComputedStyle(el); return { inSticky: !!(el.closest && el.closest("[data-sticky-cta]")), painted: el.getClientRects().length > 0, tag: el.tagName, shadow: c.boxShadow, outline: c.outlineWidth + " " + c.outlineStyle } })()')
+    check('Tab moves through the sticky bar onto a painted control with a visible focus ring', focused.inSticky && focused.painted && focused.tag === 'BUTTON' && (focused.shadow !== 'none' || !/^0px none/.test(focused.outline)), focused)
     // A `keydown` carrying no `text` produces no `keypress`, and it is the keypress that activates
     // a native button in Blink — without it Enter lands on the control and nothing happens.
+    // Close first, so Enter is genuinely opening the panel here rather than toggling it shut.
+    await press('Escape', 'Escape', 27)
+    await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-contact-cta]"); if (el) el.focus(); return true })()')
     await press('Enter', 'Enter', 13, '\r')
     const entered = await stickyMount()
     check('the keyboard opens the sticky channel panel', entered.panelOpen, { expanded: entered.expanded, panel: entered.panelOpen, mount: entered.where, panels: await ev('document.querySelectorAll("[data-contact-panel]").length'), active: await ev('(() => { const el = document.activeElement; return el ? el.tagName + " sticky:" + !!(el.closest && el.closest("[data-sticky-cta]")) : null })()') })
@@ -1236,10 +1384,14 @@ const run = async () => {
         await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: scheme }] })
         await metrics(w, h, w < 500)
         await sleep(600)
-        const r = await ev('(() => { const dark = document.documentElement.classList.contains("dark"); const bar = document.querySelector("[data-sticky-cta]"); const cta = document.querySelector("[data-contact-cta]"); const share = document.querySelector("[data-share-cta]"); const cr = cta ? cta.getBoundingClientRect() : null; const cc = cta ? getComputedStyle(cta) : null; const sc = share ? getComputedStyle(share) : null; const bc = bar ? getComputedStyle(bar) : null; const br = bar ? bar.getBoundingClientRect() : null; return { dark, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, ctaH: cr ? Math.round(cr.height) : 0, ctaW: cr ? Math.round(cr.width) : 0, ctaBg: cc ? cc.backgroundColor : null, ctaFg: cc ? cc.color : null, shareBg: sc ? sc.backgroundColor : null, barShown: !!bar && br.width > 0 && bc.display !== "none", barBg: bc ? bc.backgroundColor : null, pageBg: getComputedStyle(document.body).backgroundColor, ctaText: cta ? (cta.textContent || "").trim() : null } })()')
+        // The CTA question is asked of whichever mount the breakpoint paints: below `lg` that is
+        // the bar's, at `lg` and above the inline block's — the hidden one has no rect and would
+        // read as a 0px control if it were measured blindly.
+        const r = await ev('(() => { const dark = document.documentElement.classList.contains("dark"); const bar = document.querySelector("[data-sticky-cta]"); const cta = (bar && bar.getClientRects().length && bar.querySelector("[data-contact-cta]")) || [...document.querySelectorAll("[data-contact-cta]")].find(el => el.getClientRects().length) || null; const share = document.querySelector("[data-share-cta]"); const cr = cta ? cta.getBoundingClientRect() : null; const cc = cta ? getComputedStyle(cta) : null; const sc = share ? getComputedStyle(share) : null; const bc = bar ? getComputedStyle(bar) : null; const br = bar ? bar.getBoundingClientRect() : null; return { dark, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, ctaShown: !!cta && cta.getClientRects().length > 0, ctaH: cr ? Math.round(cr.height) : 0, ctaW: cr ? Math.round(cr.width) : 0, ctaBg: cc ? cc.backgroundColor : null, ctaFg: cc ? cc.color : null, shareBg: sc ? sc.backgroundColor : null, barShown: !!bar && br.width > 0 && bc.display !== "none", barBg: bc ? bc.backgroundColor : null, pageBg: getComputedStyle(document.body).backgroundColor, ctaText: cta ? (cta.textContent || "").trim() : null } })()')
         if (!surfaces[scheme]) surfaces[scheme] = { bar: r.barBg, cta: r.ctaBg, share: r.shareBg, page: r.pageBg }
         const faults = []
         if (r.overflow > 1) faults.push(`${r.overflow}px of horizontal overflow`)
+        if (!r.ctaShown) faults.push(`no Contact CTA is painted at ${w}px`)
         if (r.ctaH !== C.sticky.controlHeight) faults.push(`the CTA is ${r.ctaH}px, a storefront control is ${C.sticky.controlHeight}px`)
         if (r.ctaW > r.vw - 32) faults.push(`the CTA is ${r.ctaW}px inside a ${r.vw}px viewport`)
         if (!r.ctaText) faults.push('the primary action has no name')

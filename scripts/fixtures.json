@@ -258,7 +258,9 @@
       "feedback": {
         "copied": "Message copied.",
         "blocked": "Your browser blocked the copy — copy the link yourself.",
-        "link": "Product link copied."
+        "link": "Product link copied.",
+        "shared": "Shared through the sheet.",
+        "shareFailed": "This product could not be shared."
       },
       "appName": "Raccoon Gear Bin",
       "titleSuffix": " | Raccoon Gear Bin",
@@ -286,14 +288,15 @@
     },
     "sortedPayloadColumns": "category_id,price,sku,slug,status,stock_quantity",
     "gallery": {
-      "_comment": "Photo-set shapes the detail gallery must handle: many (> visible window), two, and one. window must equal ProductGallery's VISIBLE_COUNT.",
+      "_comment": "Photo-set shapes the detail gallery must handle: many (> visible window), two, and one. window must equal ProductGallery's VISIBLE_COUNT, zoomScale must equal its ZOOM_SCALE.",
       "manyId": "aaaaaaaa-0000-4000-8000-000000000001",
       "manyImages": 7,
       "twoId": "aaaaaaaa-0000-4000-8000-000000000002",
       "twoImages": 2,
       "singleId": "aaaaaaaa-0000-4000-8000-000000000003",
       "controllerId": "aaaaaaaa-0000-4000-8000-000000000004",
-      "window": 5
+      "window": 5,
+      "zoomScale": 2.5
     },
     "siteInfo": {
       "phoneText": "+855 12 345 678",

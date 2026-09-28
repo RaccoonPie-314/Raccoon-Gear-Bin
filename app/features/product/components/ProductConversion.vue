@@ -61,17 +61,23 @@ const handleCopy = async (mount: ActionsMount) => {
 
 const handleShare = async (payload: ProductSharePayload, mount: ActionsMount) => {
   const outcome = await share(payload)
-  // A sheet that opened has already said everything worth saying, and a sheet the visitor closed
-  // was a decision — neither gets a message behind it. Only the copy paths need one.
-  if (outcome === 'copied') say(t('linkCopied'), mount)
+  // A sheet that took the payload gets told about it — the visitor watched the sheet close, so a
+  // quiet success reads as a dead button on every platform whose sheet they cannot see. A sheet
+  // the visitor closed was a decision and gets nothing behind it. Only the copy paths speak.
+  if (outcome === 'shared') say(t('shareCompleted'), mount)
+  else if (outcome === 'copied') say(t('linkCopied'), mount)
   else if (outcome === 'failed') { revealLink.value = true; say(t('shareFailed'), mount) }
 }
 </script>
 
 <template>
   <!-- Inline: under the product's own information, in the column that is sticky on a desktop, so
-       the action is already reachable without a floating control. -->
+       the action is already reachable without a floating control. Below `lg` it is switched off
+       here rather than in the page: the sticky bar below is the same component, so a visitor must
+       never see two Contact to Order controls — one visible mount per breakpoint, both driven by
+       this one file. -->
   <ProductActions
+    class="hidden lg:block"
     :product="product"
     :state="stock"
     :channels="channels"
