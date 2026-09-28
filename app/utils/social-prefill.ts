@@ -7,8 +7,6 @@ export type SocialContactLink = {
   prefilled: boolean
 }
 
-const encode = (value: string) => encodeURIComponent(value)
-
 /**
  * Which stored contact link can carry the product message on its own.
  *
@@ -27,7 +25,7 @@ export const socialContactLink = (
 ): SocialContactLink => {
   const stored = link.url.trim()
   const platform = link.platform.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const text = encode(context.message)
+  const text = encodeURIComponent(context.message)
 
   if (platform === 'whatsapp') {
     // WhatsApp's click-to-chat form is `https://wa.me/<number>?text=<urlencoded>`, where the number
@@ -50,7 +48,7 @@ export const socialContactLink = (
     // A stored `t.me/share/…` link is already a compose endpoint, so filling in its documented
     // `url` and `text` parameters keeps the destination and adds the message.
     if (first && first.toLowerCase() === 'share') {
-      return { href: `https://t.me/share/url?url=${encode(context.productUrl)}&text=${text}`, prefilled: true }
+      return { href: `https://t.me/share/url?url=${encodeURIComponent(context.productUrl)}&text=${text}`, prefilled: true }
     }
     // An invite, a saved-message link, anything unrecognised: it stays where it pointed.
     return { href: stored, prefilled: false }

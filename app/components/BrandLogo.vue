@@ -1,7 +1,7 @@
 <script setup lang="ts">
-type BrandLogoSize = 'sm' | 'md' | 'masthead' | 'lg' | 'hero'
+type BrandLogoSize = 'sm' | 'md' | 'masthead' | 'hero'
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   size?: BrandLogoSize
 }>(), { size: 'hero' })
 
@@ -14,11 +14,8 @@ const sizeClasses: Record<BrandLogoSize, string> = {
   sm: 'h-12 sm:h-16',
   md: 'h-20 sm:h-28 md:h-36',
   masthead: 'h-24 sm:h-28 xl:h-32',
-  lg: 'h-24 sm:h-36 md:h-48 lg:h-56 max-h-[30vh]',
   hero: 'h-24 sm:h-36 md:h-48 lg:h-56 max-h-[30vh]'
 }
-
-const heightClass = computed(() => sizeClasses[props.size])
 </script>
 
 <template>
@@ -31,14 +28,14 @@ const heightClass = computed(() => sizeClasses[props.size])
       src="/rgb-logo-light.png"
       :alt="$t('appName')"
       class="w-auto object-contain transition-all duration-200 dark:hidden"
-      :class="heightClass"
+      :class="sizeClasses[size]"
     />
     <!-- Dark Mode Logo -->
     <img
       src="/rgb-logo-dark.png"
       :alt="$t('appName')"
       class="w-auto object-contain transition-all duration-200 hidden dark:block"
-      :class="heightClass"
+      :class="sizeClasses[size]"
     />
   </span>
 </template>

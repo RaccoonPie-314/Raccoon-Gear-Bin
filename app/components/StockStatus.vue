@@ -8,10 +8,10 @@ const { t } = useI18n()
 // The band is asked for, not calculated: this component used to hold the `<= 0` / `<= threshold`
 // rule itself, and the contact CTA held a second copy of it. The presentation below is keyed by
 // the band instead of re-testing the quantity, so the badge cannot drift from the rule.
-const PRESENTATION: Record<ProductStockState, { label: () => string, className: string, dotClass: string }> = {
-  out: { label: () => t('outOfStock'), className: 'text-zinc-950 dark:text-white', dotClass: 'bg-zinc-950 dark:bg-white' },
-  low: { label: () => t('lowStock'), className: 'text-zinc-500 dark:text-zinc-300', dotClass: 'bg-zinc-500 dark:bg-zinc-300' },
-  in: { label: () => t('inStock'), className: 'text-zinc-400 dark:text-zinc-500', dotClass: 'bg-zinc-400 dark:bg-zinc-500' }
+const PRESENTATION: Record<ProductStockState, { labelKey: string, className: string, dotClass: string }> = {
+  out: { labelKey: 'outOfStock', className: 'text-zinc-950 dark:text-white', dotClass: 'bg-zinc-950 dark:bg-white' },
+  low: { labelKey: 'lowStock', className: 'text-zinc-500 dark:text-zinc-300', dotClass: 'bg-zinc-500 dark:bg-zinc-300' },
+  in: { labelKey: 'inStock', className: 'text-zinc-400 dark:text-zinc-500', dotClass: 'bg-zinc-400 dark:bg-zinc-500' }
 }
 
 // Resolved here rather than in the template so `status.label` stays the string it has always been.
@@ -20,7 +20,7 @@ const PRESENTATION: Record<ProductStockState, { label: () => string, className: 
 const status = computed(() => {
   const state = getProductStockState(props.quantity)
   const presentation = PRESENTATION[state]
-  return { state, label: presentation.label(), className: presentation.className, dotClass: presentation.dotClass }
+  return { state, label: t(presentation.labelKey), className: presentation.className, dotClass: presentation.dotClass }
 })
 </script>
 
