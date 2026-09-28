@@ -30,3 +30,11 @@ supabase/.temp
 # regeneration, and hand edits to it are lost. Treat it as a local cache.
 # The hand-maintained source of truth is ARCHITECTURE.md (see also AGENTS.md).
 .qoder/
+
+# AI-agent skill installs. `npx skills add` mirrors every skill into .claude/skills as a
+# symlink farm for Claude Code, and graphify writes its generated graph (graph.html, graph.json,
+# GRAPH_REPORT.md and its incremental cache) into a graphify-out/ next to whatever it scanned —
+# the repo root and app/ both have one. Both are derived local state; the tracked skill sources
+# live under .agents/skills/, so there is nothing here worth committing.
+.claude/
+graphify-out/

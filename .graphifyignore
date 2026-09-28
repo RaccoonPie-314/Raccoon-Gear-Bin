@@ -1,0 +1,22 @@
+# graphify scan excludes — keeps the knowledge graph pointed at this project.
+#
+# .agents/ is the installed AI-skill library (34 skills + their reference checklists).
+# It is ~92 markdown files of third-party process prose: left in the corpus it becomes
+# the largest community structure in the graph and every doc in it needs a semantic
+# extraction pass (LLM tokens) to describe instructions that have nothing to do with
+# the storefront. graphify's own SKILL.md/references are still read by the agent that
+# runs it, so excluding them from the *map* costs nothing.
+#
+# The logo/image entries are brand assets, not knowledge: each image forces its own
+# extraction chunk (vision can't be batched), so two PNGs would cost two subagents to
+# produce a node reading "a raccoon emblem".
+.agents/
+Logo/
+*.png
+*.ico
+
+# Already skipped via .gitignore (detect honors it by default), listed for clarity in
+# case someone runs `graphify --no-gitignore`.
+.claude/
+.qoder/
+graphify-out/
