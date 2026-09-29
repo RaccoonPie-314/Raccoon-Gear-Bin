@@ -618,13 +618,47 @@ const run = async () => {
       check('search launcher appears on scroll', true)
       const launch = await ev(launchExpr)
       await clickAt(launch.x, launch.y)
-      check('spotlight opens with a live morph', await waitFor(`(() => { const p = document.querySelector('[role="dialog"][aria-label="Search products"] .h-14'); if (!p) return false; const r = p.getBoundingClientRect(); const t = getComputedStyle(p).transform; return p.getAnimations().length >= 1 || (r.width < 400 && t && t !== 'none' && t !== 'matrix(1, 0, 0, 1, 0, 0)') })()`, 1500))
-      const settled = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
-      const panel = await ev('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); if (!p) return null; const r = p.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })()')
+      // Live size-morph proof: catch a mid-flight frame where the panel is at an intermediate width
+      // (between the ~44px icon and the ~576px field) AND its corner radius tracks half the height —
+      // i.e. it is a true pill the whole way, not a scale-FLIP squashed into a rounded rectangle.
+      check('spotlight opens with a live morph', await waitFor(`(() => { const p = document.querySelector('[role="dialog"][aria-label="Search products"] [data-search-panel]'); if (!p) return false; const r = p.getBoundingClientRect(); const rad = parseFloat(getComputedStyle(p).borderTopLeftRadius) || 0; return r.width > 60 && r.width < 520 && Math.abs(rad - r.height / 2) <= 3 })()`, 1500))
+      const settled = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
+      const panel = await ev('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); if (!p) return null; const r = p.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })()')
       check('spotlight panel settles as a wide field', settled && !!panel && panel.w > 400 && panel.h > 40, panel)
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       check('spotlight closes on Escape', await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')'))
+      // Reverse-window guard: Escape DURING the expansion (openPlaying true) reverses the panel back
+      // to the icon and still completes — the dialog must go away, not hang mid-reverse. (Scroll-lock
+      // release is asserted by the early-Escape check below; this one deliberately leaves scroll.)
+      {
+        const l3 = await ev(launchExpr)
+        await clickAt(l3.x, l3.y)
+        await sleep(150)
+        await press('Escape', 'Escape', 27)
+        const goneR = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')', 3000)
+        check('Escape mid-expansion reverses the panel and still completes (no hang)', goneR, { goneR })
+      }
+      // Regression guard: Escape landing DURING the opening must release the scroll lock. Click to
+      // open, then Escape 25ms later — while the open spring is still running and the panel may not
+      // even be mounted. Then a programmatic scrollTo only sticks if unlockScroll ran (while locked,
+      // the keepScrollPosition listener snaps it straight back to the locked offset).
+      {
+        const l2 = await ev(launchExpr)
+        await clickAt(l2.x, l2.y)
+        await sleep(25)
+        await press('Escape', 'Escape', 27)
+        const gone = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')', 3000)
+        await sleep(200)
+        const scrollFree = await ev('(() => { window.scrollTo({ top: 9999, behavior: "instant" }); const y = window.scrollY; window.scrollTo({ top: 0, behavior: "instant" }); return y > 200 })()')
+        check('Escape during the opening releases the scroll lock (no permanent freeze)', gone && scrollFree, { gone, scrollFree })
+        // The fast Escape could also leave `launcherTaken` stuck true (openOverlay resumed after the
+        // instant close and hid the launcher). Re-collapse and confirm the launcher is interactive again.
+        await ev('(() => { const a = document.querySelector(\'[data-search-anchor]\'); const top = a.getBoundingClientRect().top + window.scrollY; window.scrollTo({ top: top + a.offsetHeight + 160, behavior: "instant" }); return true })()')
+        await sleep(700)
+        const launcherBack = await ev('(() => [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].some(b => { const r = b.getBoundingClientRect(); return r.width > 0 && getComputedStyle(b).pointerEvents === "auto" }))()')
+        check('Fast Escape does not leave the launcher stuck taken', launcherBack, { launcherBack })
+      }
     }
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(400)
 
@@ -742,13 +776,39 @@ const run = async () => {
     if (!launch2.present) check('launcher present for the overlay check', false)
     else {
       await clickAt(launch2.x, launch2.y)
-      const opened = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
+      const opened = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
+      // The user-visible symptom: the field must actually be painted and focused, not just mounted at
+      // resting width — assert the input has size, reached full opacity, and taken focus.
+      const inputLive = await waitFor('(() => { const i = document.querySelector(\'[role="dialog"][aria-label="Search products"] input\'); if (!i) return false; const r = i.getBoundingClientRect(); return r.width > 0 && +getComputedStyle(i).opacity > 0.9 && document.activeElement === i })()', 4000)
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       const closed = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')')
       const restClean = await ev(LAUNCH)
-      check('launcher→overlay morph stays intact after a collapse', opened && closed && restClean.anims === 0, { opened, closed })
+      check('launcher→overlay morph stays intact after a collapse', opened && inputLive && closed && restClean.anims === 0, { opened, inputLive, closed })
     }
+
+    // Reported bug: run the flight more than once (down → up → down), THEN click the sidebar icon.
+    // The overlay must still expand to the full field with a visible input — not mount stuck at the
+    // collapsed scale, where the field is a ~44px box on top of the icon and typed letters go nowhere.
+    await ev(scrollTop); await sleep(200)
+    await ev(scrollCollapse); await sleep(520)
+    await ev(scrollTop); await sleep(520)
+    await ev(scrollCollapse); await sleep(700)
+    const launchR = await ev(LAUNCH)
+    if (!launchR.present) {
+      check('re-collapse: sidebar launcher present', false, launchR)
+    }
+    else {
+      await clickAt(launchR.x, launchR.y)
+      const expanded = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); return !!p && p.getBoundingClientRect().width > 500 })()', 5000)
+      const liveInput = await waitFor('(() => { const i = document.querySelector(\'[role="dialog"][aria-label="Search products"] input\'); if (!i) return false; const r = i.getBoundingClientRect(); return r.width > 200 && +getComputedStyle(i).opacity > 0.9 })()', 3000)
+      const stuckPanelW = await ev('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); return p ? Math.round(p.getBoundingClientRect().width) : -1 })()')
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
+      await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')')
+      check('a second flight then click still expands the field to full width (not stuck on the icon)', expanded && liveInput, { expanded, liveInput, stuckPanelW })
+    }
+    await ev(scrollTop); await sleep(400)
 
     // Desktop stable, mobile restrained: no cross-screen travelling pill
     await metrics(390, 844, true)

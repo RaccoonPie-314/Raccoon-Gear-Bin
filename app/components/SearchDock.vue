@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { animate, useReducedMotion } from 'motion-v'
-import { arrival, spotlight } from '~/utils/motion'
+import { arrival } from '~/utils/motion'
 
 const searchQuery = defineModel<string>({ default: '' })
 
@@ -29,6 +29,9 @@ const ARC_BOW_PX = 80
 // Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
 // Ease-out-cubic spreads the same motion across the whole duration.
 const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
+// The spotlight FLIP is a CSS transition (compositor-driven), settled on a timer — see openOverlay.
+const OPEN_MORPH_MS = 420
+const CLOSE_MORPH_MS = 380
 const BACKDROP_IN_MS = 260
 const BACKDROP_OUT_MS = 200
 const CONTENT_IN_MS = 220
@@ -70,39 +73,43 @@ const backdropTransition = ref(`opacity ${BACKDROP_IN_MS}ms ease`)
 const contentOpacity = ref(0)
 const contentTransition = ref(`opacity ${CONTENT_IN_MS}ms ease ${CONTENT_DELAY_MS}ms`)
 const panelOpacity = ref(1)
-const panelTransform = ref('none')
-const panelTransition = ref('none')
-const panelRadius = ref('')
-const flyerTransform = ref('none')
+const flyerColor = ref('')
 const flyerTransition = ref('none')
 const flyerBox = ref<{ left: string, top: string, size: string } | null>(null)
+// The flyer rides the SAME layout clock as the panel (left/top/width/height), so the glyph and the
+// circle stay in lockstep. A transform-based glyph runs on the compositor and outruns the
+// main-thread box animation (the "icon is faster than the circle" desync).
+let panelGlyphBox = { left: '0px', top: '0px', size: '20px' }
+let iconGlyphBox = { left: '0px', top: '0px', size: '20px' }
 
 const desktopLauncherRef = ref<HTMLButtonElement | null>(null)
 const mobileLauncherRef = ref<HTMLButtonElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
+const panelSizerRef = ref<HTMLElement | null>(null)
 const overlayInputRef = ref<HTMLInputElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 const realGlyphRef = ref<HTMLElement | null>(null)
-const flyerRef = ref<HTMLElement | null>(null)
 const reduced = useReducedMotion()
-// Phase E: the overlay FLIP is played by Motion, not a CSS transition + transitionend/settle timer.
-// animate() writes the panel/flyer inline transform + radius directly; the reactive transform refs
-// stay pinned at the start for the length of the spring (Vue only rewrites a style key whose bound
-// value changed, so it never clobbers the running animation) and are snapped to the end value on
-// `.finished`. Handles are kept so an interrupted morph is stopped and re-aimed, not stacked.
-type OverlayAnim = { stop(): void, finished: Promise<unknown> }
-let panelAnim: OverlayAnim | null = null
-let flyerAnim: OverlayAnim | null = null
+// The overlay morph is played by a CSS transition on the panel's REAL box (left/top/width/height +
+// border-radius = height/2), driven imperatively, and settled by a timer sized to the transition.
+// motion-v is deliberately NOT used here: neither its imperative `animate()` nor declarative
+// layout-property (:animate left/top/width/height) animation advances in the user's dev/HMR browser,
+// which strands the field; a CSS transition runs there (the opacity fades rely on it), and morphing
+// real width/height (not a non-uniform scale) keeps the surface a true pill the whole way.
+let openTimer = 0
+let closeTimer = 0
+// True only while the open expansion is actually transitioning (after its rAF has armed the CSS
+// transition). An ESC during that window reverses from the live box instead of snapping shut; an
+// ESC earlier (still measuring/parked, invisible) has nothing to reverse and closes instantly.
+let openPlaying = false
 
-const panelStartTransform = ref('none')
-const flyerStartTransform = ref('none')
-const flyerColor = ref('')
+// Resting box (from the in-flow sizer) and collapsed box (the launcher), in viewport px.
+let restGeom = { left: 0, top: 0, width: 0, height: 0 }
+let startGeom = { left: 0, top: 0, width: 0, height: 0 }
 
 let searchFieldEl: HTMLElement | null = null
 let launcherGlyphColor = ''
 let panelGlyphColor = ''
-let collapsedRadius = ''
-let restingRadius = ''
 let originClickEvent: Event | null = null
 let restoreFrame = 0
 // Unified launcher flight (BOTH directions): one drift-free `position:fixed` rAF engine lerping the
@@ -461,8 +468,16 @@ const catchLanding = () => {
   const el = desktopLauncherRef.value
   if (!el || reduced.value) return
   suppressLauncherMotion.value = true
+  const done = () => {
+    suppressLauncherMotion.value = false
+    el.style.transform = ''
+  }
+  // Fail-safe: if Motion's ticker stalls (as the spotlight did), `.finished` never fires and
+  // `suppressLauncherMotion` would stay stuck on — so a timer guarantees the launcher's own CSS
+  // transition is restored and Motion hands the transform back to the reactive binding.
+  const t = window.setTimeout(done, 500)
   const a = animate(el, { scale: [...arrival.keyframes] }, arrival.transition)
-  void a.finished.then(() => { suppressLauncherMotion.value = false })
+  void a.finished.then(() => { clearTimeout(t); done() }).catch(() => { clearTimeout(t); done() })
 }
 
 // Full teardown (overlay open, resize, unmount): stop the flight and reveal any field hidden for a
@@ -554,30 +569,16 @@ const activeLauncherEl = () => {
   return window.matchMedia(DESKTOP_QUERY).matches ? desktopLauncherRef.value : mobileLauncherRef.value
 }
 
-// During a morph the panel reports its *transformed* box, and neutralising it through refs
-// cannot flush before the read. Instead invert the panel's own matrix: origin is top left, so
-// screen = layout + translate and size * scale.
-const toLayoutRect = (rect: DOMRect, panelRect: DOMRect, m: DOMMatrix) => ({
-  left: panelRect.left - m.e + (rect.left - panelRect.left) / m.a,
-  top: panelRect.top - m.f + (rect.top - panelRect.top) / m.d,
-  width: rect.width / m.a,
-  height: rect.height / m.d
-})
-
 const measureScene = () => {
-  const panel = panelRef.value
+  const sizer = panelSizerRef.value
   const glyph = realGlyphRef.value
-  if (!panel || !glyph) return null
-
-  const panelRect = panel.getBoundingClientRect()
-  const computed = getComputedStyle(panel).transform
-  const m = computed === 'none' ? new DOMMatrix() : new DOMMatrix(computed)
-  const glyphRect = toLayoutRect(glyph.getBoundingClientRect(), panelRect, m)
+  if (!sizer || !glyph) return null
+  const sr = sizer.getBoundingClientRect()
+  if (!sr.width) return null
   panelGlyphColor = getComputedStyle(glyph).color
-
   return {
-    panelRect: toLayoutRect(panelRect, panelRect, m),
-    glyphRect
+    panelRect: { left: sr.left, top: sr.top, width: sr.width, height: sr.height },
+    glyphRect: glyph.getBoundingClientRect()
   }
 }
 
@@ -600,15 +601,17 @@ const captureScene = (launcherEl: HTMLElement) => {
   launcherEl.style.transition = previousTransition
   if (!launcherRect.width || !scene.panelRect.width || !scene.glyphRect.width) return false
 
-  panelStartTransform.value = `translate3d(${launcherRect.left - scene.panelRect.left}px, ${launcherRect.top - scene.panelRect.top}px, 0) scale(${launcherRect.width / scene.panelRect.width}, ${launcherRect.height / scene.panelRect.height})`
-  flyerStartTransform.value = `translate3d(${launcherGlyphRect.left + launcherGlyphRect.width / 2 - (scene.glyphRect.left + scene.glyphRect.width / 2)}px, ${launcherGlyphRect.top + launcherGlyphRect.height / 2 - (scene.glyphRect.top + scene.glyphRect.height / 2)}px, 0) scale(${launcherGlyphRect.width / scene.glyphRect.width})`
-  flyerBox.value = { left: `${scene.glyphRect.left}px`, top: `${scene.glyphRect.top}px`, size: `${scene.glyphRect.width}px` }
+  // Resting box (from the in-flow sizer) and collapsed box (the launcher) drive the panel's real
+  // left/top/width/height; border-radius is height/2 at both ends, so the pill never distorts.
+  restGeom = { left: scene.panelRect.left, top: scene.panelRect.top, width: scene.panelRect.width, height: scene.panelRect.height }
+  startGeom = { left: launcherRect.left, top: launcherRect.top, width: launcherRect.width, height: launcherRect.height }
 
-  // A non-uniform scale squashes `rounded-full` into a rounded rectangle, so the radii are
-  // pre-compensated per axis: the pill stays a pill and the icon lands on a true circle.
-  const screenRadius = Math.min(launcherRect.width, launcherRect.height) / 2
-  collapsedRadius = `${screenRadius * scene.panelRect.width / launcherRect.width}px / ${screenRadius * scene.panelRect.height / launcherRect.height}px`
-  restingRadius = `${scene.panelRect.height / 2}px`
+  // The glyph flyer travels icon↔panel by animating its own left/top/size (layout), matching the
+  // panel's box clock. flyerBox is the live position; icon/panel boxes are its two endpoints.
+  panelGlyphBox = { left: `${scene.glyphRect.left}px`, top: `${scene.glyphRect.top}px`, size: `${scene.glyphRect.width}px` }
+  iconGlyphBox = { left: `${launcherGlyphRect.left}px`, top: `${launcherGlyphRect.top}px`, size: `${launcherGlyphRect.width}px` }
+  flyerBox.value = iconGlyphBox
+  flyerColor.value = launcherGlyphColor
 
   return true
 }
@@ -648,8 +651,21 @@ const focusOverlayInput = () => {
 }
 
 const finishOpen = () => {
+  openPlaying = false
+  if (openTimer) { clearTimeout(openTimer); openTimer = 0 }
   if (overlayClosing.value || !morphing.value) return
   morphing.value = false
+}
+
+// Write the panel's box imperatively; border-radius tracks height/2 so the surface is always a pill.
+const applyPanelGeom = (g: { left: number, top: number, width: number, height: number }) => {
+  const p = panelRef.value
+  if (!p) return
+  p.style.left = `${g.left}px`
+  p.style.top = `${g.top}px`
+  p.style.width = `${g.width}px`
+  p.style.height = `${g.height}px`
+  p.style.borderRadius = `${g.height / 2}px`
 }
 
 const isInsidePanel = (node: EventTarget | null) => {
@@ -711,93 +727,90 @@ const openOverlay = async (event: MouseEvent) => {
   overlayClosing.value = false
   morphing.value = true
   panelOpacity.value = 1
-  panelTransform.value = 'none'
-  panelTransition.value = 'none'
-  panelRadius.value = ''
-  flyerTransform.value = 'none'
   flyerTransition.value = 'none'
   backdropOpacity.value = 0
   backdropTransition.value = `opacity ${BACKDROP_IN_MS}ms ease`
   contentOpacity.value = 0
   contentTransition.value = `opacity ${CONTENT_IN_MS}ms ease ${CONTENT_DELAY_MS}ms`
+  // Park the panel at a collapsed size (invisible until overlayActive); geometry is filled from the
+  // sizer below. Nothing is bound reactively — the panel's box is written imperatively.
 
   lockScroll()
   window.addEventListener('keydown', handleKeydown)
   document.addEventListener('click', handleDocumentClick)
 
   await nextTick()
-  if (overlayClosing.value) return
+  if (!overlayMounted.value || overlayClosing.value) { finishClose(); return }
+
+  // Measure the resting box from the in-flow sizer and park the panel there (no transition) so the
+  // glyph inside it can then be measured for the flyer.
+  const sizer = panelSizerRef.value
+  if (!sizer) { finishClose(); return }
+  const sr = sizer.getBoundingClientRect()
+  if (!sr.width) { finishClose(); return }
+  restGeom = { left: sr.left, top: sr.top, width: sr.width, height: sr.height }
+  const parked = panelRef.value
+  if (parked) parked.style.transition = 'none'
+  applyPanelGeom(restGeom)
+  await nextTick()
+  if (!overlayMounted.value || overlayClosing.value) { finishClose(); return }
 
   if (!captureScene(launcherEl)) {
+    // Fallback: no measurable launcher — open at rest instantly.
     overlayActive.value = true
     launcherTaken.value = true
     morphing.value = false
-    panelRadius.value = ''
     backdropOpacity.value = 1
     contentOpacity.value = 1
     focusOverlayInput()
     return
   }
 
-  // Start from the launcher's exact pixels: the pill and glyph take over the icon's place.
-  panelTransform.value = panelStartTransform.value
-  panelRadius.value = collapsedRadius
-  flyerTransform.value = flyerStartTransform.value
-  flyerColor.value = launcherGlyphColor
+  // Jump the panel onto the launcher's box (still no transition), then CSS-transition it to rest.
+  applyPanelGeom(startGeom)
+  // The flyer is already parked on the icon (flyerBox = iconGlyphBox, transition none) from captureScene.
   overlayActive.value = true
   launcherTaken.value = true
 
   await nextTick()
-  if (overlayClosing.value) return
+  if (!overlayMounted.value || overlayClosing.value) { finishClose(); return }
   focusOverlayInput()
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (!overlayMounted.value || overlayClosing.value) return
-    // Motion plays the FLIP: the pill (transform + radius) and the glyph flyer (transform + color)
-    // spring from the launcher's exact pixels to their resting spots. Backdrop and content keep their
-    // own opacity fades, so text never stretches while the surface grows. Reduced motion swaps the
-    // frame spring for a short eased duration. The reactive transform refs stay at the start for the
-    // length of the spring (Vue skips rewriting an unchanged style key) and are snapped on finish.
+    if (!overlayMounted.value) return
+    if (!overlayMounted.value || overlayClosing.value) { finishClose(); return }
     backdropOpacity.value = 1
     contentOpacity.value = 1
-    const frame = reduced.value ? { duration: 0.2, ease: [0.16, 1, 0.3, 1] } : spotlight.frame
+    const ms = reduced.value ? 200 : OPEN_MORPH_MS
     const panel = panelRef.value
-    const flyer = flyerRef.value
     if (panel) {
-      const a = animate(
-        panel,
-        { transform: [panelStartTransform.value, 'translate3d(0px, 0px, 0) scale(1, 1)'], borderRadius: [collapsedRadius, restingRadius] },
-        frame
-      )
-      panelAnim = a
-      void a.finished.then(() => {
-        if (panelAnim !== a) return
-        panelAnim = null
-        panelTransform.value = 'translate3d(0px, 0px, 0) scale(1, 1)'
-        panelRadius.value = restingRadius
-        finishOpen()
-      })
-    } else {
+      panel.style.transition = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, border-radius ${ms}ms ${MORPH_EASE}`
+      panel.style.willChange = 'left, top, width, height'
+    }
+    applyPanelGeom(restGeom)
+    openPlaying = true
+    // Fly the glyph on the same layout clock as the panel (left/top/size), not a compositor transform.
+    flyerTransition.value = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, color ${ms}ms ${MORPH_EASE}`
+    flyerBox.value = panelGlyphBox
+    flyerColor.value = panelGlyphColor
+    clearTimeout(openTimer)
+    openTimer = window.setTimeout(() => {
+      openTimer = 0
+      if (panel) { panel.style.transition = ''; panel.style.willChange = '' }
       finishOpen()
-    }
-    if (flyer) {
-      const g = animate(
-        flyer,
-        { transform: [flyerStartTransform.value, 'translate3d(0px, 0px, 0) scale(1)'], color: [launcherGlyphColor, panelGlyphColor] },
-        frame
-      )
-      flyerAnim = g
-      void g.finished.then(() => {
-        if (flyerAnim !== g) return
-        flyerAnim = null
-        flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
-        flyerColor.value = panelGlyphColor
-      })
-    }
+    }, ms + 40)
   }))
 }
 
 const finishClose = () => {
+  openPlaying = false
+  if (openTimer) { clearTimeout(openTimer); openTimer = 0 }
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0 }
+  // Teardown-first and idempotent: the listeners come off and the scroll lock releases no matter
+  // what state the overlay is in, so an interrupted open can never strand the wheel/touch block.
+  window.removeEventListener('keydown', handleKeydown)
+  document.removeEventListener('click', handleDocumentClick)
+  unlockScroll()
   if (!overlayMounted.value) return
   overlayMounted.value = false
   overlayActive.value = false
@@ -805,7 +818,6 @@ const finishClose = () => {
   morphing.value = false
   suppressLauncherMotion.value = true
   launcherTaken.value = false
-  unlockScroll()
   restoreFrame = requestAnimationFrame(() => requestAnimationFrame(() => {
     suppressLauncherMotion.value = false
     restoreFrame = 0
@@ -813,11 +825,38 @@ const finishClose = () => {
 }
 
 const closeOverlay = async () => {
-  if (!overlayMounted.value || overlayClosing.value) return
+  if (!overlayMounted.value) { unlockScroll(); return }
+  if (overlayClosing.value) return
   overlayClosing.value = true
-  window.removeEventListener('keydown', handleKeydown)
-  document.removeEventListener('click', handleDocumentClick)
   originClickEvent = null
+
+  if (!panelRef.value) { finishClose(); return }
+
+  // Interrupted while opening.
+  if (morphing.value) {
+    // Before the expansion started (still measuring / parked / invisible) there is nothing to
+    // reverse — release the lock and unmount instantly so an Escape during the open can't strand it.
+    if (!openPlaying) { finishClose(); return }
+    // Mid-expansion: retarget both the panel and the flyer from their current interpolated value
+    // (a running CSS transition already eases from where it is) — no freeze, no forced reflow, so the
+    // glyph and the circle start their reverse on the SAME frame and land together. Teardown timer is
+    // armed here (not in a rAF) so a throttled frame can never strand the panel.
+    if (openTimer) { clearTimeout(openTimer); openTimer = 0 }
+    contentTransition.value = `opacity ${CONTENT_OUT_MS}ms ease`
+    contentOpacity.value = 0
+    backdropTransition.value = `opacity ${BACKDROP_OUT_MS}ms ease`
+    backdropOpacity.value = 0
+    const ms = reduced.value ? 160 : CLOSE_MORPH_MS
+    const panel = panelRef.value
+    if (panel) panel.style.transition = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, border-radius ${ms}ms ${MORPH_EASE}`
+    applyPanelGeom(startGeom)
+    flyerTransition.value = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, color ${ms}ms ${MORPH_EASE}`
+    flyerBox.value = iconGlyphBox
+    flyerColor.value = launcherGlyphColor
+    clearTimeout(closeTimer)
+    closeTimer = window.setTimeout(() => { closeTimer = 0; finishClose() }, ms + 40)
+    return
+  }
 
   contentTransition.value = `opacity ${CONTENT_OUT_MS}ms ease`
   contentOpacity.value = 0
@@ -826,58 +865,43 @@ const closeOverlay = async () => {
 
   const launcherEl = activeLauncherEl()
   const launcherRect = launcherEl?.getBoundingClientRect()
-  const frame = reduced.value ? { duration: 0.2, ease: [0.16, 1, 0.3, 1] } : spotlight.frame
-  panelAnim?.stop()
-  flyerAnim?.stop()
+  const ms = reduced.value ? 160 : CLOSE_MORPH_MS
+  if (openTimer) { clearTimeout(openTimer); openTimer = 0 }
 
   // Fallback: no launcher to snap back onto — shrink in place and fade out, then unmount.
   if (!launcherEl || !launcherRect?.width || !captureScene(launcherEl)) {
     const panel = panelRef.value
     if (panel) {
-      const a = animate(panel,
-        { transform: ['translate3d(0px, 0px, 0) scale(1, 1)', 'translate3d(0px, 0px, 0) scale(0.97, 0.97)'], opacity: 0 },
-        frame)
-      panelAnim = a
-      void a.finished.then(() => { if (panelAnim === a) panelAnim = null; finishClose() })
-    } else {
-      finishClose()
+      panel.style.transition = `width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, border-radius ${ms}ms ${MORPH_EASE}, opacity ${ms}ms ease`
+      panel.style.opacity = '0'
+      applyPanelGeom({ left: restGeom.left, top: restGeom.top, width: restGeom.width * 0.97, height: restGeom.height * 0.97 })
     }
+    clearTimeout(closeTimer)
+    closeTimer = window.setTimeout(() => { closeTimer = 0; finishClose() }, ms + 40)
     return
   }
 
-  // Park the glyph at identity (its resting spot) unless a morph is already mid-flight carrying it.
-  const wasMorphing = morphing.value
+  // Re-show the glyph flyer (it unmounts once the open settles) so it can ride back to the icon.
   morphing.value = true
-  if (!wasMorphing) {
-    flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
-    flyerColor.value = panelGlyphColor
-  }
 
   await nextTick()
   if (!overlayMounted.value) return
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!overlayMounted.value) return
-    // The reverse FLIP: pill + glyph spring from their resting spots back onto the launcher's live
-    // pixels, so a close that interrupts an open retraces the identical path (velocity-continuous).
+    // The reverse morph: the panel CSS-transitions from its resting box back onto the launcher's live
+    // box, border-radius tracking height/2 so it stays a pill↔circle the whole way home.
     const panel = panelRef.value
-    const flyer = flyerRef.value
     if (panel) {
-      const a = animate(panel,
-        { transform: ['translate3d(0px, 0px, 0) scale(1, 1)', panelStartTransform.value], borderRadius: [restingRadius, collapsedRadius] },
-        frame)
-      panelAnim = a
-      void a.finished.then(() => { if (panelAnim === a) panelAnim = null; finishClose() })
-    } else {
-      finishClose()
+      panel.style.transition = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, border-radius ${ms}ms ${MORPH_EASE}`
+      panel.style.willChange = 'left, top, width, height'
     }
-    if (flyer) {
-      const g = animate(flyer,
-        { transform: ['translate3d(0px, 0px, 0) scale(1)', flyerStartTransform.value], color: [panelGlyphColor, launcherGlyphColor] },
-        frame)
-      flyerAnim = g
-      void g.finished.then(() => { if (flyerAnim === g) flyerAnim = null })
-    }
+    applyPanelGeom(startGeom)
+    flyerTransition.value = `left ${ms}ms ${MORPH_EASE}, top ${ms}ms ${MORPH_EASE}, width ${ms}ms ${MORPH_EASE}, height ${ms}ms ${MORPH_EASE}, color ${ms}ms ${MORPH_EASE}`
+    flyerBox.value = iconGlyphBox
+    flyerColor.value = launcherGlyphColor
+    clearTimeout(closeTimer)
+    closeTimer = window.setTimeout(() => { closeTimer = 0; finishClose() }, ms + 40)
   }))
 }
 
@@ -906,8 +930,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('click', handleDocumentClick)
-  panelAnim?.stop()
-  flyerAnim?.stop()
+  if (openTimer) { clearTimeout(openTimer); openTimer = 0 }
+  if (closeTimer) { clearTimeout(closeTimer); closeTimer = 0 }
   if (restoreFrame) cancelAnimationFrame(restoreFrame)
   fieldIdleClear()
   flyClear()
@@ -992,10 +1016,14 @@ onUnmounted(() => {
       />
 
       <div class="pointer-events-none relative flex h-full flex-col items-center justify-start px-4 pt-[14vh]">
+        <!-- In-flow sizer reserves the resting field's box so the results line never shifts while the
+             fixed panel morphs its real width/height; its rect is the resting geometry. -->
+        <div ref="panelSizerRef" class="h-14 w-full max-w-xl" aria-hidden="true" />
         <div
           ref="panelRef"
-          class="pointer-events-auto flex h-14 w-full max-w-xl origin-top-left items-center gap-3 rounded-full border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 dark:border-zinc-800/80 dark:bg-zinc-900"
-          :style="{ transform: panelTransform, transition: panelTransition, borderRadius: panelRadius, opacity: panelOpacity, willChange: 'transform' }"
+          data-search-panel
+          class="pointer-events-auto fixed flex items-center gap-3 border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 dark:border-zinc-800/80 dark:bg-zinc-900"
+          :style="{ opacity: panelOpacity }"
         >
           <span
             ref="realGlyphRef"
@@ -1067,7 +1095,6 @@ onUnmounted(() => {
       <!-- The launcher glyph in flight while the pill expands into the search field -->
       <span
         v-if="morphing && flyerBox"
-        ref="flyerRef"
         class="pointer-events-none fixed flex items-center justify-center"
         :style="{
           left: flyerBox.left,
@@ -1075,7 +1102,6 @@ onUnmounted(() => {
           width: flyerBox.size,
           height: flyerBox.size,
           color: flyerColor,
-          transform: flyerTransform,
           transition: flyerTransition
         }"
         aria-hidden="true"
