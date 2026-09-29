@@ -800,6 +800,11 @@ const run = async () => {
       const src0 = await ev(MAIN_SRC)
       await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 1`)
       check('next arrow advances the selection', await waitFor(`(${SEL_IDX}) === 1`))
+      // Wait for the Motion crossfade to settle to a single layer before asserting the current photo.
+      // During the overlap two [data-gallery-main] are alive, and with no old CSS leave-* class to
+      // key off, MAIN_SRC could read the outgoing layer. "The selected photo is showing" is a
+      // settled-state fact; the mid-flight two-layer travel is asserted separately by midSwap below.
+      await waitFor(`document.querySelectorAll('[data-product-gallery] [data-gallery-main]').length === 1`, 2000)
       check('main photo swaps when the selection moves', !!src0 && (await ev(MAIN_SRC)) !== src0)
       await clickSelector('[data-gallery-next]', `(${SEL_IDX}) === 2`)
       check('arrows never navigate the page', await ev(pathnameIs(G.manyId)))

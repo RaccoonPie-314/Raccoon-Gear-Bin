@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import type { CatalogImage } from '~/types/catalog'
+import { AnimatePresence, animate, motion, useReducedMotion } from 'motion-v'
+import { lightbox as lightboxPreset } from '~/utils/motion'
 
 const props = defineProps<{ images: CatalogImage[]; name: string }>()
 const { t } = useI18n()
+// Reactive prefers-reduced-motion (false during SSR, synced on mount) — one source for every
+// softened duration here, replacing the per-call `matchMedia` reads.
+const reduced = useReducedMotion()
 
 // How many thumbs the strip shows at once. The strip renders exactly this many buttons no
 // matter how large the photo set is, so a product with dozens of photos never grows the page.
@@ -29,6 +34,8 @@ const windowImages = computed(() => props.images.slice(windowStart.value, window
 // numbers say "previous").
 const transitionDirection = ref<'next' | 'previous'>('next')
 const swapTransition = computed(() => `gallery-${transitionDirection.value}`)
+// One swap cadence for the inline main photo (Motion) and, kept in sync, the lightbox CSS swap.
+const swapDuration = computed(() => (reduced.value ? 0.15 : 0.22))
 
 const select = (index: number) => {
   if (index === selectedIndex.value) return
@@ -61,7 +68,6 @@ watch(() => props.images, () => {
 watch(windowStart, (to, from) => {
   const strip = stripEl.value
   if (!strip || to === from || strip.children.length === 0) return
-  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   const children = Array.from(strip.children) as HTMLElement[]
   const first = children[0]
   const second = children[1]
@@ -69,11 +75,13 @@ watch(windowStart, (to, from) => {
     ? second.getBoundingClientRect().left - first.getBoundingClientRect().left
     : (first?.getBoundingClientRect().width ?? 0)
   if (!stepPx) return
-  const travel = (to > from ? stepPx : -stepPx) * (reduced ? 0.66 : 1)
-  strip.animate(
-    [{ transform: `translateX(${travel.toFixed(2)}px)` }, { transform: 'translateX(0px)' }],
-    { duration: reduced ? 170 : 240, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
-  )
+  const travel = (to > from ? stepPx : -stepPx) * (reduced.value ? 0.66 : 1)
+  // Motion owns this transform now (Phase D): same ±one-slot travel from the freshly rendered
+  // window back to rest, same duration/ease, so the slide reads identically — but it is one motion
+  // engine across the app instead of a lone WAAPI call.
+  animate(strip, { x: [travel, 0] }, reduced.value
+    ? { duration: 0.17, ease: 'easeOut' }
+    : { duration: 0.24, ease: [0.33, 1, 0.68, 1] })
 }, { flush: 'post' })
 
 // Left/right arrows drive the selection while the gallery (or anything in it) has focus.
@@ -440,15 +448,20 @@ const onDialogKeydown = (event: KeyboardEvent) => {
         class="relative flex h-full w-full cursor-zoom-in items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
         @click="openLightbox"
       >
-        <Transition :name="swapTransition">
-          <img
+        <AnimatePresence>
+          <motion.img
+            v-if="selectedImage"
             :key="selectedImage.id"
             data-gallery-main
             :src="selectedImage.url"
             :alt="selectedImage.altText || name"
-            class="h-full w-full object-contain"
+            class="absolute inset-0 h-full w-full object-contain"
+            :initial="{ opacity: 0, x: transitionDirection === 'next' ? '18%' : '-18%' }"
+            :animate="{ opacity: 1, x: 0 }"
+            :exit="{ opacity: 0, x: transitionDirection === 'next' ? '-18%' : '18%' }"
+            :transition="{ duration: swapDuration, ease: [0.33, 1, 0.68, 1] }"
           />
-        </Transition>
+        </AnimatePresence>
       </button>
       <div v-else class="flex h-full items-center justify-center text-xs uppercase tracking-[0.2em] text-zinc-400">
         {{ t('noImage') }}
@@ -523,9 +536,10 @@ const onDialogKeydown = (event: KeyboardEvent) => {
          sold. It is opacity-only and on the dialog root, so it never touches the `<img>`'s own
          transform: the focal-point zoom, the pan bound and the swap transitions all keep exactly
          the geometry they were measured against. -->
-    <Transition name="lightbox">
-      <div
+    <AnimatePresence>
+      <motion.div
         v-if="isLightboxOpen"
+        key="lightbox"
         ref="dialogEl"
         data-lightbox
         role="dialog"
@@ -533,6 +547,10 @@ const onDialogKeydown = (event: KeyboardEvent) => {
         tabindex="-1"
         :aria-label="t('photos')"
         class="fixed inset-0 z-[70] flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm outline-none"
+        :initial="{ opacity: 0 }"
+        :animate="{ opacity: 1 }"
+        :exit="{ opacity: 0 }"
+        :transition="lightboxPreset.transition"
         @click.self="closeLightbox"
         @keydown="onDialogKeydown"
       >
@@ -609,8 +627,8 @@ const onDialogKeydown = (event: KeyboardEvent) => {
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
       </button>
-      </div>
-    </Transition>
+      </motion.div>
+    </AnimatePresence>
   </Teleport>
 </template>
 
@@ -696,17 +714,8 @@ const onDialogKeydown = (event: KeyboardEvent) => {
   .lightbox-zoomed { transition: none; }
 }
 
-/* The lightbox over the page, not into it: a 200ms opacity fade on the fixed container, which is
-   the entire enter and exit. No transform anywhere in this rule — the zoom maths reads the `<img>`
-   and the frame's rects, and a scaled ancestor would corrupt both mid-flight. Reduced motion keeps
-   the fade (a hard cut to full-screen is a flash, not a movement) and the fade is already no
-   movement, so there is nothing here to take away. */
-.lightbox-enter-active,
-.lightbox-leave-active {
-  transition: opacity 200ms ease;
-}
-.lightbox-enter-from,
-.lightbox-leave-to {
-  opacity: 0;
-}
+/* The lightbox's enter/exit is now a Motion opacity fade on the dialog root (the `<AnimatePresence>`
+   above + the `lightbox` preset in app/utils/motion.ts). It stays opacity-only, never transform: the
+   zoom maths reads the `<img>` and the frame's untransformed rects, and a scaled ancestor would
+   corrupt both mid-flight — the same reason the old CSS carried no transform on this rule. */
 </style>

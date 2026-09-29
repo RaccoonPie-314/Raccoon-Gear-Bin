@@ -68,3 +68,15 @@ export const sheet = {
 export const popover = {
   transition: { type: 'spring', stiffness: 380, damping: 34 }
 } as const
+
+/**
+ * `lightbox` — the full-screen photo dialog's entry/exit. Opacity only, never transform:
+ * the zoom maths reads the enlarged `<img>`'s and its frame's untransformed rects, and a
+ * scaled/translated ancestor of that image would corrupt the focal-point geometry mid-flight
+ * (this is a hard architectural invariant, not a taste call — see TOUCH_RESTRICTIONS).
+ * So a modal that could otherwise pop on a spring deliberately just fades. A hard cut to
+ * full-screen is a flash, not a movement, so the fade survives prefers-reduced-motion too.
+ */
+export const lightbox = {
+  transition: { duration: 0.2, ease: [0.33, 1, 0.68, 1] }
+} as const
