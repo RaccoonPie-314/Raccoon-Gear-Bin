@@ -107,8 +107,11 @@ useHead(() => {
 
 <template>
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-    <!-- Sticky Translucent Minimalist Header -->
-    <header class="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80 transition-colors">
+    <!-- Sticky Translucent Minimalist Header. `data-detail-header` is a measured contract: the
+         desktop Contact CTA scrolls the panel it opens to sit just below this header, and reads
+         this element's live height to do it (see ProductActions.vue's toggle). Rename it in the
+         same commit as that scroll, never across two. -->
+    <header data-detail-header class="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80 transition-colors">
       <!-- The search sits between the brand and the utility group from `sm` up, and drops to
            its own full-width line below that — the same reflow valve the masthead uses, so a
            control that no longer fits adds a row instead of widening the page. -->
@@ -173,7 +176,10 @@ useHead(() => {
              grid item's default `min-width:auto` lets the conversion row's intrinsic width (pill
              padding + label + icons) stretch the whole page instead of letting the label truncate —
              measured at 320px it was 5px of horizontal scroll before this was added. -->
-        <div class="min-w-0 lg:sticky lg:top-24 self-start">
+        <!-- `data-detail-info-col` marks the sticky partner of the `data-detail-header` contract:
+             while the desktop Contact panel is being revealed, the scroll code pins this column
+             in place for exactly one frame so its measurement is not taken mid-unstick. -->
+        <div data-detail-info-col class="min-w-0 lg:sticky lg:top-24 self-start">
           <p class="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
             {{ product.categoryName ?? t('uncategorized') }}
           </p>

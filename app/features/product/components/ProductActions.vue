@@ -44,18 +44,173 @@ const panelId = useId()
 const messageId = useId()
 const isOpen = ref(false)
 const ctaBtn = ref<HTMLElement | null>(null)
+const panelEl = ref<HTMLElement | null>(null)
 const isSheetOpen = ref(false)
 const shareBtn = ref<HTMLElement | null>(null)
 
 // Out of stock must not read as "buy now": the same action, worded as the question it actually is.
 const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability') : t('contactToOrder'))
 
-const toggle = () => { isOpen.value = !isOpen.value }
+// Opening the desktop panel also reveals it: the page scrolls down just enough that the panel
+// comes to rest directly under the sticky header, which carries the CTA's own content off the
+// top edge. The compact (sticky-bar) mount is deliberately excluded — its panel already floats
+// above the bar at the viewport edge, so there is nothing to reveal.
+const REVEAL_GAP = 12
+// Exactly one of this mount's two surfaces is open at a time: opening the panel closes the sheet
+// and vice-versa. They are separate affordances but stacking a dropdown under a modal popover (or
+// the reverse) reads as a bug, and Escape already assumes a topmost surface.
+const toggle = () => {
+  const opening = !isOpen.value
+  if (opening) isSheetOpen.value = false
+  isOpen.value = opening
+}
+
+// The info column is `lg:sticky`, and a sticky element keeps re-resolving its own offset as the
+// page scrolls — so a panel inside it would drift away from wherever a one-shot measurement aimed.
+// The reliable move is to take the column out of the stickiness for exactly as long as the panel
+// is open: pin it to `static`, scroll to the now-stable destination, and restore the class-driven
+// position on close (or unmount, or a product swap). `[data-detail-info-col]` and
+// `[data-detail-header]` are page contracts owned by [id].vue — this component reads them, it
+// does not style them.
+const pinnedCol = ref<{ el: HTMLElement, prev: string } | null>(null)
+const unpinColumn = () => {
+  if (!pinnedCol.value) return
+  pinnedCol.value.el.style.position = pinnedCol.value.prev
+  pinnedCol.value = null
+}
+const pinColumnStatic = (panel: HTMLElement) => {
+  const column = panel.closest('[data-detail-info-col]') as HTMLElement | null
+  if (column && !pinnedCol.value) {
+    pinnedCol.value = { el: column, prev: column.style.position }
+    column.style.position = 'static'
+  }
+}
+
+// Only the scroll waits for the settled layout; the column pin happens synchronously in the
+// enter hook, before the FLIP measures anything (see below).
+watch(isOpen, (open) => {
+  if (props.compact) return
+  if (!open) { unpinColumn(); return }
+  void nextTick(() => {
+    const panel = panelEl.value
+    if (!panel) return
+    // The panel is mid-FLIP by now — its rect is the morph, not the destination. Its layout
+    // position is still exact: `offsetTop` inside the untransformed `[data-product-actions]`
+    // host, added to the host's document position, names the settled top for the reveal.
+    const host = panel.closest('[data-product-actions]') as HTMLElement | null
+    if (!host) return
+    const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
+    const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
+  })
+})
+
+onBeforeUnmount(unpinColumn)
+
+// ---- Contact panel: FLIP expand out of the button ----
+// The panel grows from the CTA's own footprint on both axes — the same shared-element morph the
+// search dock's spotlight plays (SearchDock measures the launcher rect and scales the panel from
+// it) — instead of a vertical squash, which distorts the message text, or a fade. Measure the
+// button and the panel's settled box, invert the panel onto the button with a translate + scale,
+// then play it back to identity. Each mount is measured against its own button, so the inline
+// panel expands down out of the row and the sticky one up out of the bar, and closing retracts it
+// back down into the button it came from. Driven by JS hooks, not CSS classes, because the start
+// transform is measured, not known ahead of time.
+//
+// The translate is what makes it land *on the button* rather than collapsing toward some corner, so
+// it runs under reduced motion too — this is a short, contained morph of one element, not the
+// large-area travel reduced motion exists to suppress. Reduced motion only trims the duration.
+const FLIP_IN_MS = 480
+const FLIP_OUT_MS = 380
+const FLIP_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
+const REDUCED_IN_MS = 340
+const REDUCED_OUT_MS = 260
+const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+// The panel's settled box mapped onto the button's: translate its top-left to the button's top-left
+// and scale it down to the button's size. Played forward that is grow-out-of-the-button; played in
+// reverse (leave) it is retract-back-into-the-button, on both mounts, because the button's live
+// rect is the anchor.
+const flipCss = (el: HTMLElement) => {
+  const t = ctaBtn.value?.getBoundingClientRect()
+  const p = el.getBoundingClientRect()
+  if (!t || !p.width || !p.height) return null
+  return `translate(${t.left - p.left}px, ${t.top - p.top}px) scale(${t.width / p.width}, ${t.height / p.height})`
+}
+// A FLIP inverts the element's *settled* box, so the box must be measured at rest. Toggling the
+// panel mid-flight leaves the previous transition's partial transform on the element: measuring
+// through it compounds two inverses, which is what made an interrupted exit land at an arbitrary
+// scale and position instead of back on the button. Freeze any running transition, clear the
+// in-flight transform, and force the reflow that commits the rest geometry — every later rect in
+// this tick is then the layout box, never a half-morphed one.
+const settleForMeasurement = (p: HTMLElement) => {
+  p.style.transition = 'none'
+  p.style.transform = ''
+  p.style.opacity = ''
+  void p.offsetWidth // the write above only becomes a measurable rect after this read flushes it
+  p.style.transition = ''
+}
+// The fallback timeout is the direction's own duration plus one frame's grace: a leave that reused
+// the enter's longer budget would hold the unmount hostage for the difference.
+const onceSettled = (el: HTMLElement, ms: number, done: () => void) => {
+  const finish = (e?: TransitionEvent) => {
+    if (e && e.target !== el) return
+    el.removeEventListener('transitionend', finish)
+    done()
+  }
+  el.addEventListener('transitionend', finish)
+  setTimeout(finish, ms + 220) // a zero-size or hidden element may never fire transitionend
+}
+// The enter is measured in the `enter` hook, not `before-enter`: Vue calls `before-enter` while
+// the panel is still a detached node, and its rect there is all zeros — an inversion computed from
+// it silently degrades the entry to a fade. The reveal scroll therefore aims at the panel's
+// layout position via `offsetTop`, which no in-flight transform can distort (see the watch above).
+const onPanelEnter = (el: Element, done: () => void) => {
+  const p = el as HTMLElement
+  // Pin before the first measurement: the column goes `static` synchronously, so the settled box
+  // the flip inverts is the one the panel will actually hold for the reveal scroll.
+  if (!props.compact) pinColumnStatic(p)
+  settleForMeasurement(p)
+  p.style.transformOrigin = 'top left'
+  p.style.opacity = '0'
+  const start = flipCss(p)
+  if (start) p.style.transform = start
+  void p.offsetWidth // commit the inversion — without this flush the transition's "from" is the rest box
+  const ms = prefersReduced() ? REDUCED_IN_MS : FLIP_IN_MS
+  p.style.transition = `transform ${ms}ms ${FLIP_EASE}, opacity 220ms ease`
+  p.style.transform = 'translate(0px, 0px) scale(1, 1)'
+  p.style.opacity = '1'
+  onceSettled(p, ms, done)
+}
+const onPanelAfterEnter = (el: Element) => {
+  const p = el as HTMLElement
+  p.style.transition = ''
+  p.style.transform = ''
+  p.style.opacity = ''
+  p.style.transformOrigin = ''
+}
+const onPanelLeave = (el: Element, done: () => void) => {
+  const p = el as HTMLElement
+  // Settle first, then aim: the exit is computed from the same rest box the entry was, and against
+  // the button's live rect, so a close that interrupts an open retraces the identical path home.
+  settleForMeasurement(p)
+  p.style.transformOrigin = 'top left'
+  const end = flipCss(p)
+  const ms = prefersReduced() ? REDUCED_OUT_MS : FLIP_OUT_MS
+  p.style.transition = `transform ${ms}ms ${FLIP_EASE}, opacity ${ms}ms ease`
+  if (end) p.style.transform = end
+  p.style.opacity = '0'
+  onceSettled(p, ms, done)
+}
 
 // The sheet is opened by this mount's own Share button, which stays its anchor: a desktop popover is
 // placed beside the control the visitor just pressed, and a phone's bottom sheet is anchored to the
-// viewport instead and needs no measurement at all.
-const openSheet = () => { isSheetOpen.value = true }
+// viewport instead and needs no measurement at all. Opening it closes the contact panel (one surface
+// at a time).
+const openSheet = () => {
+  isOpen.value = false
+  isSheetOpen.value = true
+}
 
 // Escape closes the topmost thing this mount opened, and only that one: the sheet floats above the
 // panel, so pressing it once should take the sheet away and leave the panel. Both hand focus back to
@@ -96,7 +251,7 @@ const channelName = platformLabel
         data-contact-cta
         :aria-expanded="isOpen"
         :aria-controls="panelId"
-        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white shadow-xs transition-colors duration-200 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white shadow-xs transition-[scale,background-color,color,border-color] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
         :class="compact ? 'flex-1' : 'flex-1 sm:flex-none'"
         @click="toggle"
       >
@@ -115,7 +270,7 @@ const channelName = platformLabel
         type="button"
         data-share-cta
         :aria-expanded="isSheetOpen"
-        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full border border-zinc-300/80 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-xs transition-colors duration-200 hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:border-zinc-700/70 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full border border-zinc-300/80 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-xs transition-[scale,background-color,color,border-color] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:border-zinc-700/70 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
         :class="compact ? (channels.length ? 'shrink-0' : 'flex-1') : 'flex-1 sm:flex-none'"
         @click="openSheet"
       >
@@ -162,21 +317,25 @@ const channelName = platformLabel
          activation left and is popup-blocked). Firing the copy and navigating anyway would leave
          the visitor unable to tell whether the copy worked, which is worse than not offering it.
 
-         The enter names the direction the panel actually travels: the inline block opens downward
-         from the row it sits under, the sticky one rises out of the bar it is anchored above.
-         Transform and opacity only, so the page behind never moves. The scale pivots on the edge
-         the panel is anchored to (`origin-top` / `origin-bottom`), so the panel grows out of the
-         control it belongs to instead of shrinking in mid-air about its own centre. -->
-    <Transition :name="compact ? 'panel-rise' : 'panel-fall'">
+         The enter is a FLIP morph out of the button (see the JS hooks above): the panel is measured
+         against the CTA and scaled up from its footprint on both axes, so it reads as the surface
+         expanding out of the control rather than a box appearing nearby. Transform and opacity only,
+         so the page behind never moves. -->
+    <Transition
+      @enter="onPanelEnter"
+      @after-enter="onPanelAfterEnter"
+      @leave="onPanelLeave"
+    >
       <div
         v-if="isOpen && channels.length"
         :id="panelId"
+        ref="panelEl"
         data-contact-panel
         role="group"
         :aria-label="ctaLabel"
         tabindex="0"
         class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
-        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900 origin-bottom' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70 origin-top'"
+        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70'"
       >
         <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
              a browser that refuses the clipboard still leaves them something to select. The field
@@ -274,42 +433,3 @@ const channelName = platformLabel
   </div>
 </template>
 
-<style scoped>
-/* The panel arrives from the edge it is anchored to and leaves back through it: a few pixels of
-   travel, an opacity ramp that starts opaque enough to avoid a flash, and nothing else. Both
-   directions are transform + opacity, so the panel never reflows the page or the sticky bar around
-   it, and the chevron's own `rotate-180` transition stays the thing that reads as "toggled". */
-.panel-fall-enter-active,
-.panel-fall-leave-active,
-.panel-rise-enter-active,
-.panel-rise-leave-active {
-  transition: transform 200ms cubic-bezier(0.33, 1, 0.68, 1), opacity 160ms ease;
-}
-.panel-fall-enter-from,
-.panel-fall-leave-to {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-}
-.panel-rise-enter-from,
-.panel-rise-leave-to {
-  opacity: 0;
-  transform: translateY(6px) scale(0.98);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* The panel still fades — a region that appears and disappears with no signal at all is harder to
-     follow than one that takes 120ms. It just stops travelling. */
-  .panel-fall-enter-active,
-  .panel-fall-leave-active,
-  .panel-rise-enter-active,
-  .panel-rise-leave-active {
-    transition: opacity 120ms ease;
-  }
-  .panel-fall-enter-from,
-  .panel-fall-leave-to,
-  .panel-rise-enter-from,
-  .panel-rise-leave-to {
-    transform: none;
-  }
-}
-</style>

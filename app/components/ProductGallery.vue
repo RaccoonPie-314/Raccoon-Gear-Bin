@@ -226,6 +226,13 @@ const zoomStyle = computed(() => isZoomed.value
     }
   : undefined)
 
+// One style binding for the enlarged photo: the magnified transform owns it while zoomed, the
+// swipe offset owns it while contained. The two gestures are mutually exclusive by construction
+// (a swipe starts only from the contained view), so they never compete for the same property.
+const lightboxImgStyle = computed(() => isZoomed.value
+  ? zoomStyle.value
+  : (swipeY.value ? { transform: `translateY(${swipeY.value}px)` } : undefined))
+
 // Drag-to-pan, mouse and touch through one Pointer Events path. Reduced motion is honoured by the
 // stylesheet (the zoom entry loses its transition) — the drag itself stays available under that flag,
 // because moving content *by the visitor's own hand* is direct manipulation, not an animation the
@@ -239,8 +246,96 @@ let startX = 0
 let startY = 0
 const dragged = { value: false }
 
+// ---- swipe-to-close (contained view) ----
+// The same overlay that pans while magnified is the swipe surface while contained: a vertical
+// finger drag follows the pointer with a pure `translateY` on the `<img>` (never on the dialog —
+// the zoom maths reads untransformed rects and a scaled or translated ancestor would corrupt the
+// focal geometry mid-flight), and a release past the distance or velocity threshold closes the
+// lightbox in the swipe's own direction. A mostly-horizontal drag is abandoned to the browser:
+// left/right is the photo swap's axis, not an exit gesture. Mouse drags are never swipes — on a
+// desktop the press is the zoom, and an old drag must not start moving the photo.
+const SWIPE_CLOSE_MIN_PX = 72
+const SWIPE_CLOSE_MIN_VEL = 0.45 // px/ms on the last sample — a flick closes where a slow pull does not
+const SWIPE_CLOSE_MIN_TRAVEL = 12 // a flick must have actually moved the photo to count
+const swipeY = ref(0)
+let swipeId: number | null = null
+let swipeStartX = 0
+let swipeStartY = 0
+let swipeLastY = 0
+let swipeLastT = 0
+let swipeVel = 0
+let swipeLocked = false
+
+const endSwipe = () => {
+  swipeId = null
+  swipeLocked = false
+}
+
+const onSwipePointerDown = (event: PointerEvent) => {
+  if (isZoomed.value || event.pointerType === 'mouse') return
+  swipeId = event.pointerId
+  swipeStartX = event.clientX
+  swipeStartY = event.clientY
+  swipeLastY = event.clientY
+  swipeLastT = event.timeStamp
+  swipeVel = 0
+  swipeLocked = false
+  swipeY.value = 0
+  try { (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId) } catch { /* the pointer is already released */ }
+}
+
+const onSwipePointerMove = (event: PointerEvent) => {
+  if (swipeId === null || event.pointerId !== swipeId) return
+  const dx = event.clientX - swipeStartX
+  const dy = event.clientY - swipeStartY
+  const dt = event.timeStamp - swipeLastT
+  if (dt > 0) swipeVel = (event.clientY - swipeLastY) / dt
+  swipeLastY = event.clientY
+  swipeLastT = event.timeStamp
+  if (!swipeLocked) {
+    // Axis lock at the same 4px the pan uses: commit to the swipe only once the move is
+    // unmistakably vertical. A mostly-horizontal drag is abandoned — left/right belongs to the
+    // photo swap, and a crooked tap must keep its zoom meaning.
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    if (Math.abs(dx) > Math.abs(dy)) { endSwipe(); return }
+    swipeLocked = true
+  }
+  swipeY.value = dy
+}
+
+const onSwipePointerUp = (event: PointerEvent) => {
+  if (swipeId === null || event.pointerId !== swipeId) return
+  if (!swipeLocked) { endSwipe(); return }
+  const travel = swipeY.value
+  const flick = Math.abs(travel) > SWIPE_CLOSE_MIN_TRAVEL && Math.abs(swipeVel) > SWIPE_CLOSE_MIN_VEL
+  dragged.value = true // whatever click trails this gesture is the end of a swipe, not a zoom
+  const img = lightboxImgEl.value
+  if (Math.abs(travel) > SWIPE_CLOSE_MIN_PX || flick) {
+    const dir = travel > 0 ? 1 : -1
+    if (img) {
+      img.animate(
+        [{ transform: `translateY(${travel}px)` }, { transform: `translateY(${dir * innerHeight}px)` }],
+        { duration: 200, easing: 'cubic-bezier(0.33, 1, 0.68, 1)', fill: 'forwards' }
+      )
+    }
+    swipeY.value = 0
+    endSwipe()
+    closeLightbox()
+  } else {
+    // Snap back: the photo returns to the contained box on its own; the dialog's fade is untouched.
+    if (img && travel !== 0) {
+      img.animate(
+        [{ transform: `translateY(${travel}px)` }, { transform: 'translateY(0px)' }],
+        { duration: 180, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
+      )
+    }
+    swipeY.value = 0
+    endSwipe()
+  }
+}
+
 const onZoomPointerDown = (event: PointerEvent) => {
-  if (!isZoomed.value) return
+  if (!isZoomed.value) { onSwipePointerDown(event); return }
   dragId = event.pointerId
   dragMoved = false
   dragX = panX.value
@@ -253,7 +348,7 @@ const onZoomPointerDown = (event: PointerEvent) => {
 }
 
 const onZoomPointerMove = (event: PointerEvent) => {
-  if (dragId === null || event.pointerId !== dragId) return
+  if (dragId === null || event.pointerId !== dragId) { onSwipePointerMove(event); return }
   const dx = event.clientX - startX
   const dy = event.clientY - startY
   if (!dragMoved && Math.hypot(dx, dy) < 4) return
@@ -264,7 +359,7 @@ const onZoomPointerMove = (event: PointerEvent) => {
 }
 
 const onZoomPointerUp = (event: PointerEvent) => {
-  if (dragId === null || event.pointerId !== dragId) return
+  if (dragId === null || event.pointerId !== dragId) { onSwipePointerUp(event); return }
   dragged.value = dragMoved
   dragId = null
 }
@@ -272,8 +367,11 @@ const onZoomPointerUp = (event: PointerEvent) => {
 const openLightbox = () => { isLightboxOpen.value = true }
 const closeLightbox = () => {
   // Zoom is a view inside one lightbox visit: leaving the visit — by any of the three exits —
-  // resets it, so reopening always starts from the contained photo the frame showed.
+  // resets it, so reopening always starts from the contained photo the frame showed. A swipe in
+  // progress is part of the same visit and resets with it.
   resetZoom()
+  swipeY.value = 0
+  endSwipe()
   isLightboxOpen.value = false
   void nextTick(() => photoBtn.value?.focus())
 }
@@ -418,19 +516,26 @@ const onDialogKeydown = (event: KeyboardEvent) => {
   <Teleport to="body">
     <!-- Backdrop click closes (the click has to land on the root itself: the photo box and
          its buttons do not). The photo never covers the whole viewport, so there is always a
-         real backdrop band to click, and clicking inside the photo box keeps the photo up. -->
-    <div
-      v-if="isLightboxOpen"
-      ref="dialogEl"
-      data-lightbox
-      role="dialog"
-      aria-modal="true"
-      tabindex="-1"
-      :aria-label="t('photos')"
-      class="fixed inset-0 z-[70] flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm outline-none"
-      @click.self="closeLightbox"
-      @keydown="onDialogKeydown"
-    >
+         real backdrop band to click, and clicking inside the photo box keeps the photo up.
+
+         The fade is on the whole fixed container — backdrop and photo arrive and leave together,
+         which is the "the page transitions into a focused viewing state" read the hard cut never
+         sold. It is opacity-only and on the dialog root, so it never touches the `<img>`'s own
+         transform: the focal-point zoom, the pan bound and the swap transitions all keep exactly
+         the geometry they were measured against. -->
+    <Transition name="lightbox">
+      <div
+        v-if="isLightboxOpen"
+        ref="dialogEl"
+        data-lightbox
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        :aria-label="t('photos')"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm outline-none"
+        @click.self="closeLightbox"
+        @keydown="onDialogKeydown"
+      >
       <div ref="frameEl" class="relative flex h-[82dvh] w-[92vw] max-w-5xl items-center justify-center overflow-hidden">
         <Transition :name="swapTransition">
           <img
@@ -442,7 +547,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
             draggable="false"
             :src="selectedImage.url"
             :alt="selectedImage.altText || name"
-            :style="zoomStyle"
+            :style="lightboxImgStyle"
             class="h-full w-full object-contain"
             :class="isZoomed ? 'lightbox-zoomed' : ''"
           />
@@ -460,7 +565,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
           data-lightbox-zoom-target
           :aria-label="isZoomed ? t('zoomOut') : t('zoomIn')"
           class="absolute inset-0 cursor-zoom-in focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-          :class="isZoomed ? 'lightbox-pan cursor-zoom-out active:cursor-grabbing' : ''"
+          :class="isZoomed ? 'cursor-zoom-out active:cursor-grabbing' : ''"
           @click="onZoomControlClick"
           @pointerdown="onZoomPointerDown"
           @pointermove="onZoomPointerMove"
@@ -490,17 +595,22 @@ const onDialogKeydown = (event: KeyboardEvent) => {
         </template>
       </div>
 
+      <!-- Thumb-reach close: the bottom-centre band under the photo, where a one-handed grip
+           actually lands, instead of the far top corner. Bottom-centring the dialog's own flex
+           axis is `left-1/2` + the half-width translate — transform-only, so it joins no layout.
+           Focus still starts here when the dialog opens. -->
       <button
         ref="lightboxCloseBtn"
         type="button"
         data-lightbox-close
         :aria-label="t('close')"
-        class="absolute right-4 top-4 z-10 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        class="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         @click="closeLightbox"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
       </button>
-    </div>
+      </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -569,10 +679,11 @@ const onDialogKeydown = (event: KeyboardEvent) => {
 .lightbox-zoomed {
   transition: transform 220ms cubic-bezier(0.33, 1, 0.68, 1);
 }
-/* `touch-action: none` on the zoom control while magnified hands every drag to the pan handler
-   instead of letting the browser scroll the page under the finger; unset, a swipe on the contained
-   photo behaves like a swipe anywhere else in the dialog. */
-.lightbox-pan {
+/* `touch-action: none` on the zoom control — contained and magnified alike — hands every drag to
+   the gesture code instead of letting the browser claim it: the pan while magnified, and the
+   swipe-to-close while contained (the dialog cannot scroll anyway; the page behind is locked).
+   Unset, a vertical swipe would read as a scroll attempt and the pointer would be cancelled. */
+[data-lightbox-zoom-target] {
   touch-action: none;
 }
 /* The photo follows the control it sits under: while the zoom control is being dragged, the
@@ -583,5 +694,19 @@ const onDialogKeydown = (event: KeyboardEvent) => {
 }
 @media (prefers-reduced-motion: reduce) {
   .lightbox-zoomed { transition: none; }
+}
+
+/* The lightbox over the page, not into it: a 200ms opacity fade on the fixed container, which is
+   the entire enter and exit. No transform anywhere in this rule — the zoom maths reads the `<img>`
+   and the frame's rects, and a scaled ancestor would corrupt both mid-flight. Reduced motion keeps
+   the fade (a hard cut to full-screen is a flash, not a movement) and the fade is already no
+   movement, so there is nothing here to take away. */
+.lightbox-enter-active,
+.lightbox-leave-active {
+  transition: opacity 200ms ease;
+}
+.lightbox-enter-from,
+.lightbox-leave-to {
+  opacity: 0;
 }
 </style>

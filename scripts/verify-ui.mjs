@@ -383,7 +383,7 @@ const run = async () => {
   // containing block, whose `backdrop-blur` would otherwise make the bar its viewport — so it is asked
   // about document-wide rather than through a mount. Exactly one mount is painted at a time, so there
   // is never more than one sheet to find.
-  const SHEET = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const c = getComputedStyle(s); const rows = [...s.querySelectorAll("[data-share-destination]")].map(a => { const mark = a.querySelector("svg"); return { platform: a.getAttribute("data-share-destination"), href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-share-prefilled") === "true", svgs: a.querySelectorAll("svg").length, fill: mark ? mark.getAttribute("fill") : null } }); const fb = s.querySelector("[data-share-feedback]"); const link = s.querySelector("[data-share-sheet-link]"); return { label: s.getAttribute("aria-label"), text: (s.textContent || "").trim(), position: c.position, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height), radius: c.borderTopLeftRadius, pb: c.paddingBottom, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, vh: innerHeight, hasCopyLink: !!s.querySelector("[data-share-copy-link]"), hasCopyMessage: !!s.querySelector("[data-share-copy-message]"), copyLinkText: (s.querySelector("[data-share-copy-link]") || {}).textContent ? (s.querySelector("[data-share-copy-link]").textContent || "").trim() : null, copyMessageText: (s.querySelector("[data-share-copy-message]") || {}).textContent ? (s.querySelector("[data-share-copy-message]").textContent || "").trim() : null, viaText: [...s.querySelectorAll("p")].map(p => (p.textContent || "").trim()).filter(Boolean).join(" | "), hasClose: !!s.querySelector("[data-share-close]"), link: link ? link.value : null, readonly: link ? link.getAttribute("readonly") !== null : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, rows } })()'
+  const SHEET = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const c = getComputedStyle(s); const rows = [...s.querySelectorAll("[data-share-destination]")].map(a => { const mark = a.querySelector("svg"); return { platform: a.getAttribute("data-share-destination"), href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-share-prefilled") === "true", svgs: a.querySelectorAll("svg").length, fill: mark ? mark.getAttribute("fill") : null } }); const fb = s.querySelector("[data-share-feedback]"); const link = s.querySelector("[data-share-sheet-link]"); return { label: s.getAttribute("aria-label"), text: (s.textContent || "").trim(), position: c.position, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height), radius: c.borderTopLeftRadius, pb: c.paddingBottom, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, vh: innerHeight, hasCopyLink: !!s.querySelector("[data-share-copy-link]"), hasCopyMessage: !!s.querySelector("[data-share-copy-message]"), copyLinkText: (s.querySelector("[data-share-copy-link]") || {}).textContent ? (s.querySelector("[data-share-copy-link]").textContent || "").trim() : null, copyMessageText: (s.querySelector("[data-share-copy-message]") || {}).textContent ? (s.querySelector("[data-share-copy-message]").textContent || "").trim() : null, viaText: [...s.querySelectorAll("p")].map(p => (p.textContent || "").trim()).filter(Boolean).join(" | "), hasClose: !!s.querySelector("[data-share-close]"), hasCloseBottom: !!s.querySelector("[data-share-close-bottom]"), link: link ? link.value : null, readonly: link ? link.getAttribute("readonly") !== null : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, rows } })()'
   const sheet = async () => await ev(SHEET)
   // The message the page must produce, assembled from the fixture row and the contract in
   // `expectations.conversion` — never read back out of the app.
@@ -1224,6 +1224,37 @@ const run = async () => {
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the lightbox on mobile too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
+    // ---- thumb-reach exits from the phone lightbox -----------------------------------------------
+    // The close control sits bottom-centre under the photo, not in the far top corner, and a
+    // vertical swipe on the contained photo dismisses. A short, slow pull must snap back without
+    // closing AND without its trailing click reading as a zoom — the same gesture the pan tests
+    // proved the overlay can keep honest.
+    await clickAt(mZoom.x, mZoom.y)
+    await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`)
+    await sleep(300)
+    const lbCloseGeo = await ev('(() => { const b = document.querySelector(\'[data-lightbox-close]\'); if (!b) return null; const r = b.getBoundingClientRect(); return { cx: Math.round(r.left + r.width / 2), top: Math.round(r.top), gapToBottom: Math.round(innerHeight - r.bottom), vw: innerWidth, vh: innerHeight } })()')
+    check('the lightbox close sits bottom-centre within thumb reach', !!lbCloseGeo && Math.abs(lbCloseGeo.cx - lbCloseGeo.vw / 2) < 4 && lbCloseGeo.top > lbCloseGeo.vh * 0.75 && lbCloseGeo.gapToBottom < 48, { lbCloseGeo })
+    const swipeFrom = { x: 195, y: 420 }
+    await touch('touchStart', [swipeFrom])
+    for (let i = 1; i <= 3; i++) { await touch('touchMove', [{ x: swipeFrom.x, y: swipeFrom.y + i * 12 }]); await sleep(80) }
+    await touch('touchEnd', [])
+    await sleep(320)
+    const shortPull = await ev('(() => { const lb = document.querySelector(\'[data-lightbox]\'); const i = document.querySelector(\'[data-lightbox] [data-lightbox-main]\'); return { open: !!lb, zoomed: !!i && i.getAttribute(\'data-zoomed\') === \'true\', tr: i ? getComputedStyle(i).transform : null } })()')
+    check('a short slow pull on the photo snaps it back without closing or zooming', shortPull.open === true && shortPull.zoomed === false && shortPull.tr === 'none', { shortPull })
+    await touch('touchStart', [swipeFrom])
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [{ x: swipeFrom.x, y: swipeFrom.y + i * 28 }]); await sleep(30) }
+    await touch('touchEnd', [])
+    check('swiping the photo down closes the lightbox', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
+    check('the swipe hands focus back to the photo button', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-gallery-zoom") !== null })()'))
+    await sleep(300)
+    await clickAt(mZoom.x, mZoom.y)
+    await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`)
+    await sleep(300)
+    await touch('touchStart', [swipeFrom])
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [{ x: swipeFrom.x, y: swipeFrom.y - i * 28 }]); await sleep(30) }
+    await touch('touchEnd', [])
+    check('swiping the photo up closes it too', await waitFor(`!document.querySelector(${JSON.stringify(LB)})`))
+    await sleep(300)
     await metrics(1440, 900, false)
 
     // ---- product-detail header search: one lazy catalog fetch per visit, filtered locally ----
@@ -1389,7 +1420,7 @@ const run = async () => {
     // probe below is that lesson, written down.
     const ctaBoxExpr = '(() => { const el = document.querySelector("[data-product-actions] [data-contact-cta]"); el.scrollIntoView({ block: "center", inline: "nearest" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()'
     const panelGone = '!document.querySelector(\'[data-contact-panel]\')'
-    const START_FLIGHT = '(() => { window.__F = []; window.__Fdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = getComputedStyle(p); window.__F.push({ tr: c.transform, op: +c.opacity, tp: c.transitionProperty }); } if (performance.now() - t0 < 420) requestAnimationFrame(tick); else window.__Fdone = true; }; requestAnimationFrame(tick); return true })()'
+    const START_FLIGHT = '(() => { window.__F = []; window.__Fdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = getComputedStyle(p); window.__F.push({ tr: c.transform, op: +c.opacity, tp: c.transitionProperty }); } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Fdone = true; }; requestAnimationFrame(tick); return true })()'
     const travelled = f => f.some(s => s.tr !== 'none' && s.tr !== '')
     const faded = f => f.some(s => s.op < 1)
     const namedTransform = f => f.some(s => /transform/.test(s.tp))
@@ -1408,11 +1439,48 @@ const run = async () => {
     const leave = await flight()
     check('the panel leaves through the same transition rather than popping out', leave.length >= 3 && namedTransform(leave) && travelled(leave) && faded(leave), { frames: leave.length, first: leave[0] })
     await waitFor(panelGone)
-    // Reduced motion keeps the fade and drops the travel: a region that appears with no signal at all
-    // is harder to follow than one that takes 120ms.
+    // The FLIP's contract is painted, not textual. The LEAVE is proved by rects: the panel's own
+    // box must END on the CTA's box, compared in the same frame so a reveal-scroll cannot fake it.
+    // The ENTER is proved by the computed matrix: some frame of the flight must be scaled to a
+    // fraction of the panel's settled size (the morph passing over the button on its way out).
+    // A fade-only regression — the inversion silently never applied — keeps every frame at scale 1.
+    const START_RECTS = '(() => { window.__R = []; window.__Rdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = document.querySelector("[data-product-actions] [data-contact-cta]"); if (c) { const pr = p.getBoundingClientRect(); const br = c.getBoundingClientRect(); window.__R.push({ pt: pr.top, pl: pr.left, pw: pr.width, ph: pr.height, bt: br.top, bl: br.left, bw: br.width, bh: br.height, ct: getComputedStyle(p).transform }); } } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Rdone = true; }; requestAnimationFrame(tick); return true })()'
+    const onButton = s => !!s && Math.abs(s.pt - s.bt) < 3 && Math.abs(s.pl - s.bl) < 3 && Math.abs(s.pw - s.bw) < 3 && Math.abs(s.ph - s.bh) < 3
+    const opensFromButton = f => f.some(s => { const m = /^matrix\(([\d.-]+),\s*[\d.-]+,\s*[\d.-]+,\s*([\d.-]+)/.exec(s.ct || ''); return !!m && Number(m[1]) > 0 && Number(m[1]) < 0.75 && Number(m[2]) > 0 && Number(m[2]) < 0.75 })
+    const rectsFlight = async () => { const box = await settleOnCta(); await ev(START_RECTS); await clickAt(box.x, box.y); await waitFor('!!window.__Rdone', 4000); return await ev('window.__R || []') }
+    const enterR = await rectsFlight()
+    check('the morph opens out of the button\u2019s own painted footprint', enterR.length > 3 && opensFromButton(enterR), { first: enterR[0], scales: enterR.slice(0, 4).map(s => s.ct) })
+    const leaveR = await rectsFlight()
+    check('the morph retracts back into the button\u2019s own painted footprint', leaveR.length > 3 && onButton(leaveR[leaveR.length - 1]), { last: leaveR[leaveR.length - 1] })
+    await waitFor(panelGone)
+    // Interrupting the enter is the regression this path was built for: closing mid-flight used
+    // to measure through the half-finished transform, compounding two inverses and landing the
+    // exit at an arbitrary rect. Escape (not a re-click, which a reveal-scroll could move out
+    // from under) interrupts at 140ms of a 480ms enter; the exit must still land on the button.
+    {
+      const box = await settleOnCta()
+      await ev(START_RECTS)
+      await clickAt(box.x, box.y)
+      await sleep(140)
+      await press('Escape', 'Escape', 27)
+      await waitFor('!!window.__Rdone', 4000)
+      const interrupted = await ev('window.__R || []')
+      check('a close that interrupts the enter still lands the exit on the button', interrupted.length > 4 && onButton(interrupted[interrupted.length - 1]), { frames: interrupted.length, last: interrupted[interrupted.length - 1] })
+      await waitFor(panelGone)
+      const reopened = await rectsFlight()
+      check('and the panel still opens from the button after an interrupted cycle', reopened.length > 3 && opensFromButton(reopened), { first: reopened[0] })
+      // Every flight above is a toggle, and this one ENDED open — dismiss it rather than waiting
+      // for a departure that will not come, or the reduced-motion flight below starts by closing
+      // the panel and measures a leave as if it were an enter.
+      await press('Escape', 'Escape', 27)
+      await waitFor(panelGone)
+    }
+    // Reduced motion keeps the FLIP — it is a short, contained morph of one panel back into its own
+    // button, not the large-area travel the preference targets — and only trims the duration. So the
+    // panel must still grow from and retract into the button here, just faster, and still settle.
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     const reduced = await flight()
-    check('under reduced motion the panel still fades in, without travelling', reduced.length >= 3 && !travelled(reduced) && !namedTransform(reduced) && faded(reduced) && namedOpacity(reduced) && reduced[reduced.length - 1].op === 1, { frames: reduced.length, sample: reduced.slice(0, 3) })
+    check('under reduced motion the panel still flips from the button and settles', reduced.length >= 3 && travelled(reduced) && faded(reduced) && namedOpacity(reduced) && reduced[reduced.length - 1].tr === 'none' && reduced[reduced.length - 1].op === 1, { frames: reduced.length, sample: reduced.slice(0, 3) })
     await flight()
     await waitFor(panelGone)
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
@@ -1488,6 +1556,7 @@ const run = async () => {
     // Anchored, not centred and not bottom-bleeding: the popover sits next to the control that opened
     // it, which is the difference between a share popover and a modal dialog on a desktop.
     check('the popover is anchored beside the Share control that opened it', !!keyed && !!shareBtnGeo && keyed.width > 100 && keyed.width < keyed.vw * 0.5 && (Math.abs(keyed.top - shareBtnGeo.bottom) < 40 || Math.abs(keyed.bottom - shareBtnGeo.top) < 40) && keyed.bottom < keyed.vh - 1, { keyed, shareBtnGeo })
+    check('the desktop popover carries no thumb-reach close row', !!keyed && keyed.hasCloseBottom === false, { hasCloseBottom: keyed && keyed.hasCloseBottom })
     await closeSheet()
     check('the sheet never reached the platform share API during the whole visit', (await shareCalls()).length === 0, { calls: await shareCalls() })
 
@@ -1667,6 +1736,34 @@ const run = async () => {
     // and the sticky bar *is* the conversion UI, so the page has to end in something readable.
     const clearance = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const dl = document.querySelector("main dl") || document.querySelector("main pre"); const b = bar.getBoundingClientRect(); const d = dl ? dl.getBoundingClientRect() : null; return { atEnd: window.scrollY + innerHeight >= document.documentElement.scrollHeight - 2, barTop: Math.round(b.top), dlBottom: d ? Math.round(d.bottom) : null, gap: d ? Math.round(b.top - d.bottom) : null } })()')
     check('at the end of the page the sticky bar leaves the product content clear of itself', clearance.atEnd && clearance.dlBottom !== null && clearance.dlBottom <= clearance.barTop + 1, clearance)
+
+    // ---- thumb-reach exits from the phone sheet ------------------------------------------------
+    // The bottom Close row and the swipe-down handle belong to the sheet only (the desktop-absence
+    // of the row is asserted in the popover section). A slow short pull is below both gates and
+    // must snap back; a long pull dismisses; the header's own buttons stay clickable under the
+    // handle's pointer capture.
+    await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
+    await waitFor(sheetAtRest)
+    const sheetGeo = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); const b = s && s.querySelector("[data-share-close-bottom]"); const d = s && s.querySelector("[data-share-drag]"); if (!b || !d) return null; const r = b.getBoundingClientRect(); const dr = d.getBoundingClientRect(); return { centre: Math.round(r.top + r.height / 2), gapToBottom: Math.round(innerHeight - r.bottom), width: Math.round(r.width), grabX: Math.round(dr.left + dr.width / 2), grabY: Math.round(dr.top + 8), vh: innerHeight } })()')
+    check('the phone sheet repeats its Close at the bottom edge, within thumb reach', !!sheetGeo && sheetGeo.gapToBottom < 140 && sheetGeo.width > 100 && sheetGeo.centre > sheetGeo.vh * 0.6, { sheetGeo })
+    const bottomClose = (await ev(boxesExpr('[data-share-sheet] [data-share-close-bottom]')))[0]
+    await clickAt(bottomClose.x, bottomClose.y)
+    check('the bottom Close row dismisses the sheet', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
+    await sleep(300)
+    await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
+    await waitFor(sheetAtRest)
+    const grabAt = { x: sheetGeo.grabX, y: sheetGeo.grabY }
+    await touch('touchStart', [grabAt])
+    for (let i = 1; i <= 3; i++) { await touch('touchMove', [{ x: grabAt.x, y: grabAt.y + i * 12 }]); await sleep(80) }
+    await touch('touchEnd', [])
+    await sleep(320)
+    const pulled = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); return { open: !!s, tr: s ? getComputedStyle(s).transform : null, anims: s ? s.getAnimations().length : -1 } })()')
+    check('a short slow pull on the handle snaps the sheet back instead of dismissing', pulled.open === true && pulled.tr === 'none' && pulled.anims === 0, { pulled })
+    await touch('touchStart', [grabAt])
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [{ x: grabAt.x, y: grabAt.y + i * 30 }]); await sleep(30) }
+    await touch('touchEnd', [])
+    check('swiping the handle down dismisses the sheet', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
+    await sleep(300)
 
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true')
     await sleep(350)
