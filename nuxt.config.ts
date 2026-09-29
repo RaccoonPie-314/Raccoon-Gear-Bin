@@ -5,7 +5,7 @@ export default defineNuxtConfig({
   app: {
     pageTransition: { name: 'page', mode: 'out-in' }
   },
-  modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase'],
+  modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase', 'motion-v/nuxt'],
   // @nuxt/ui auto-registers @nuxt/fonts, whose default provider fetches fonts.googleapis.com at
   // build time. The CI runner cannot reach it, and the fetch fails silently. Empty providers = no
   // network step. Latin UI text needs no webfont at all: the theme stack is the native system UI
