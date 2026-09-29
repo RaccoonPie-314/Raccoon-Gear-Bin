@@ -4,6 +4,9 @@ import type { ProductShareDestination, ProductSharePayload } from '../composable
 import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
+import { motion, useReducedMotion } from 'motion-v'
+import { press } from '~/utils/motion'
+import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
 // detail page renders it. The channel list, the stock band, the ready message, the canonical link,
@@ -43,10 +46,21 @@ const { t } = useI18n()
 const panelId = useId()
 const messageId = useId()
 const isOpen = ref(false)
-const ctaBtn = ref<HTMLElement | null>(null)
+// Phase B moved the press feedback off CSS `active:scale` onto a Motion spring, so these controls
+// are `<motion.button>` now. A template ref on a motion component resolves to its instance, not its
+// DOM node — the same reason motion-v reaches its element through `instance.$el`. ctaEl/shareEl
+// unwrap that node so the FLIP measurement, the popover anchor, and the dismiss focus all target the
+// exact same <button> as before: the contact-panel morph is untouched, only the element handle moved.
+const ctaBtn = ref<ComponentPublicInstance | null>(null)
 const panelEl = ref<HTMLElement | null>(null)
 const isSheetOpen = ref(false)
-const shareBtn = ref<HTMLElement | null>(null)
+const shareBtn = ref<ComponentPublicInstance | null>(null)
+const ctaEl = computed<HTMLElement | null>(() => (ctaBtn.value?.$el as HTMLElement) ?? null)
+const shareEl = computed<HTMLElement | null>(() => (shareBtn.value?.$el as HTMLElement) ?? null)
+// Reactive prefers-reduced-motion (useMediaQuery-backed): false during SSR, synced on mount — so it
+// never changes a rendered attribute and cannot cause a hydration mismatch. The press is gated on it
+// in the template, reproducing the old `motion-safe:` contract: no scale is emitted under `reduce`.
+const reduced = useReducedMotion()
 
 // Out of stock must not read as "buy now": the same action, worded as the question it actually is.
 const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability') : t('contactToOrder'))
@@ -132,7 +146,7 @@ const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduc
 // reverse (leave) it is retract-back-into-the-button, on both mounts, because the button's live
 // rect is the anchor.
 const flipCss = (el: HTMLElement) => {
-  const t = ctaBtn.value?.getBoundingClientRect()
+  const t = ctaEl.value?.getBoundingClientRect()
   const p = el.getBoundingClientRect()
   if (!t || !p.width || !p.height) return null
   return `translate(${t.left - p.left}px, ${t.top - p.top}px) scale(${t.width / p.width}, ${t.height / p.height})`
@@ -219,11 +233,11 @@ const openSheet = () => {
 const close = (returnFocus = false) => {
   if (isSheetOpen.value) {
     isSheetOpen.value = false
-    if (returnFocus) void nextTick(() => shareBtn.value?.focus())
+    if (returnFocus) void nextTick(() => shareEl.value?.focus())
     return
   }
   isOpen.value = false
-  if (returnFocus) void nextTick(() => ctaBtn.value?.focus())
+  if (returnFocus) void nextTick(() => ctaEl.value?.focus())
 }
 
 // Selecting the revealed link on focus is what makes the manual path a single click: the visitor
@@ -244,39 +258,43 @@ const channelName = platformLabel
     <!-- The row stays a row at every width: `min-w-0` plus a truncating label is what keeps a long
          Khmer string from widening the page. -->
     <div class="flex min-w-0 gap-2 sm:gap-3">
-      <button
+      <motion.button
         v-if="channels.length"
         ref="ctaBtn"
         type="button"
         data-contact-cta
         :aria-expanded="isOpen"
         :aria-controls="panelId"
-        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white shadow-xs transition-[scale,background-color,color,border-color] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+        :while-press="reduced ? undefined : { scale: press.scale }"
+        :transition="press.transition"
+        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white shadow-xs transition-[background-color,color,border-color] duration-150 ease-out hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
         :class="compact ? 'flex-1' : 'flex-1 sm:flex-none'"
         @click="toggle"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span class="truncate">{{ ctaLabel }}</span>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0 transition-transform duration-200" :class="isOpen ? 'rotate-180' : ''" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-      </button>
+      </motion.button>
 
       <!-- Share is a secondary at the same height and shape, so the hierarchy is carried by fill
            rather than by size. It is the same control on a phone as on a desktop — two
            implementations of "the Share button" is how one of them stops working — and on the sticky
            row it takes only the room its own label needs, because at 320px the primary action's
            wording is the thing worth keeping whole. -->
-      <button
+      <motion.button
         ref="shareBtn"
         type="button"
         data-share-cta
         :aria-expanded="isSheetOpen"
-        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full border border-zinc-300/80 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-xs transition-[scale,background-color,color,border-color] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:border-zinc-700/70 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
+        :while-press="reduced ? undefined : { scale: press.scale }"
+        :transition="press.transition"
+        class="inline-flex h-11 min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full border border-zinc-300/80 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-xs transition-[background-color,color,border-color] duration-150 ease-out hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white sm:px-5 dark:border-zinc-700/70 dark:bg-zinc-900/60 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
         :class="compact ? (channels.length ? 'shrink-0' : 'flex-1') : 'flex-1 sm:flex-none'"
         @click="openSheet"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
         <span class="truncate">{{ t('share') }}</span>
-      </button>
+      </motion.button>
     </div>
 
     <!-- Only ever rendered after a copy actually failed. The last thing this flow should do is tell a
@@ -415,7 +433,7 @@ const channelName = platformLabel
       :destinations="destinations"
       :feedback="sheetFeedback"
       :reveal-link="!!revealLink"
-      :anchor="shareBtn"
+      :anchor="shareEl"
       @close="isSheetOpen = false"
       @copy-link="emit('copyLink')"
       @copy-message="emit('copyMessage')"

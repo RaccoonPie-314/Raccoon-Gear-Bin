@@ -1485,6 +1485,33 @@ const run = async () => {
     await waitFor(panelGone)
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
 
+    // ---- CTA press feedback (Phase B: press moved from CSS `active:scale` to a Motion spring) ------
+    // The press is a JS-driven gesture now, so it is asserted while the pointer is HELD, not at rest:
+    // a broken `whilePress` would leave the button at scale 1 through the whole press and read as no
+    // feedback at all — the very failure a plain CSS transition never had. Pressing *without* releasing
+    // engages the spring before the click (and the panel) fires; a few frames in the CTA's own matrix
+    // must be scaled below 1. Under prefers-reduced-motion the gesture is gated off entirely (the old
+    // `motion-safe:` contract), so the button must not scale at all. This is transform-only, so it
+    // never shifts layout, and it reads the inline `transform` Motion writes — not a Tailwind utility.
+    const pressScaleExpr = '(() => { const c = document.querySelector("[data-product-actions] [data-contact-cta]"); if (!c) return null; return +new DOMMatrixReadOnly(getComputedStyle(c).transform).a.toFixed(3) })()'
+    const heldPressScale = async () => {
+      await press('Escape', 'Escape', 27); await waitFor(panelGone)
+      const box = await settleOnCta()
+      await mouse('mouseMoved', box.x, box.y)
+      await mouse('mousePressed', box.x, box.y, 1)   // pointerdown -> whilePress engages; click not yet
+      await sleep(130)                               // let the spring travel from 1 toward 0.97
+      const held = await ev(pressScaleExpr)
+      await mouse('mouseReleased', box.x, box.y)     // release fires the click (opens the panel)
+      await press('Escape', 'Escape', 27); await waitFor(panelGone)
+      return held
+    }
+    const pressHeld = await heldPressScale()
+    check('pressing a conversion CTA answers with a subtle Motion scale (while held)', pressHeld !== null && pressHeld > 0.9 && pressHeld < 0.99, { held: pressHeld })
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    const pressHeldReduced = await heldPressScale()
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+    check('under reduced motion the CTA press emits no scale (the motion-safe contract preserved)', pressHeldReduced !== null && pressHeldReduced >= 0.995, { held: pressHeldReduced })
+
     // ---- the Share Sheet -------------------------------------------------------------------------
     // The sheet is the product's share UI, so every claim below is about a surface the visitor can
     // see: the platform's own share API must never be reached for (the trap records any call), the
