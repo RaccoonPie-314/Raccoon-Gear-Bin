@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { animate, useReducedMotion } from 'motion-v'
-import { spotlight } from '~/utils/motion'
+import { arrival, spotlight } from '~/utils/motion'
 
 const searchQuery = defineModel<string>({ default: '' })
 
@@ -24,6 +24,8 @@ const FIELD_SCRUB_W = 180
 const FIELD_MORPH_MS = 260
 const FIELD_ICON_MIN = 52
 const FIELD_FLY_MS = 500
+// Peak sideways bow of the collapse/restore flight, in px (0 at launch and at landing). See flyStep.
+const ARC_BOW_PX = 80
 // Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
 // Ease-out-cubic spreads the same motion across the whole duration.
 const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
@@ -50,6 +52,11 @@ const flyLeft = ref(0)
 const flyTop = ref(0)
 const flyW = ref(44)
 const flyH = ref(44)
+// Decorative 3D transform (scale + aerodynamic tilt) and a floating shadow, applied on top of the
+// fixed left/top so the box is positioned drift-free but still reads as a lifted projectile. Both
+// ride sin(t·π): flat (scale 1 / no shadow) at launch and landing, peak at the apex.
+const flyTransform = ref('none')
+const flyShadow = ref('none')
 
 const overlayMounted = ref(false)
 const overlayActive = ref(false)
@@ -133,8 +140,9 @@ let lockedScrollY = 0
 // icon footprint and the sidebar slot (startFly).
 const desktopLauncherStyle = computed(() => {
   if (flying.value) {
-    // A fixed box at an absolute viewport position (drift-free), flex-centred glyph → no transform,
-    // no distortion, and a reversal re-aims from wherever it currently is.
+    // A fixed box at an absolute viewport position (drift-free placement via left/top/width/height),
+    // plus a decorative scale/rotate transform and floating shadow for the iOS projectile lift. The
+    // transform never places the box, so a reversal still re-aims from wherever it currently is.
     return {
       position: 'fixed' as const,
       margin: '0',
@@ -143,11 +151,12 @@ const desktopLauncherStyle = computed(() => {
       width: `${flyW.value.toFixed(2)}px`,
       height: `${flyH.value.toFixed(2)}px`,
       borderRadius: flyRadius.value,
-      transform: 'none',
+      transform: flyTransform.value,
+      boxShadow: flyShadow.value,
       opacity: 1,
       transition: flyTransition.value,
       pointerEvents: 'none' as const,
-      willChange: 'left, top, width, height'
+      willChange: 'left, top, width, height, transform'
     }
   }
   const visible = isCollapsed.value && !launcherTaken.value
@@ -397,11 +406,25 @@ const flyStep = () => {
   const to: FlyRect = flyTarget === 'field'
     ? iconFootprint(readRect(field))
     : (flySidebar ?? readRect(launcher))
-  flyLeft.value = lerp(from.left, to.left, k)
-  flyTop.value = lerp(from.top, to.top, k)
+  // iOS-Safari-download feel: the straight lerp is bent by a sin(t·π) bow that is 0 at t=0 and t=1,
+  // so launch and arrival stay mathematically exact (the mid-flight reversal re-aim and the 44px
+  // landing assertions read those endpoints) and only the middle of the path arcs. Collapse (field →
+  // sidebar, down-left) bows up-and-out; restore (sidebar → field) bows the other way off the line.
+  const arc = Math.sin(t * Math.PI) * ARC_BOW_PX
+  const isCollapse = flyTarget === 'sidebar'
+  flyLeft.value = lerp(from.left, to.left, k) + (isCollapse ? arc * 0.8 : -arc * 0.6)
+  flyTop.value = lerp(from.top, to.top, k) - (isCollapse ? arc * 0.5 : 0)
   flyW.value = lerp(from.width, to.width, k)
   flyH.value = lerp(from.height, to.height, k)
   flyRadius.value = `${Math.round(Math.min(flyW.value, flyH.value) / 2)}px`
+  // 3D lift + aerodynamic tilt + floating shadow, all riding the same sin(t·π): flat at the
+  // endpoints (so launch/landing stay pixel-exact) and peaking at the apex. scale reaches ~1.16 at
+  // the apex and funnels toward 0.90 on entry; the box banks into the turn (collapse leans left).
+  const apex = Math.sin(t * Math.PI)
+  const scale = 1 + (apex * 0.16) - (t * 0.10)
+  const tilt = isCollapse ? -apex * 10 : apex * 8
+  flyTransform.value = `scale(${scale.toFixed(3)}) rotate(${tilt.toFixed(1)}deg)`
+  flyShadow.value = `0 ${Math.round(apex * 25)}px ${Math.round(apex * 35)}px -6px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.12)`
   if (elapsed < FIELD_FLY_MS) { flyFrame = requestAnimationFrame(flyStep); return }
   // One extra frame so the arrival box is PAINTED before `flying` is released (Vue would otherwise
   // batch the final position with the release and the icon would vanish short of its target).
@@ -411,18 +434,35 @@ const flyStep = () => {
 
 const flyFinish = () => {
   if (flyTarget === 'field') endFieldReturn()
-  else endFlight()
+  else endFlight(true)
 }
 
 // Collapse arrival: drop the fixed box; the launcher is already at its sidebar slot so the normal
-// isCollapsed fade holds it. The field stays hidden (we are collapsed).
-const endFlight = () => {
+// isCollapsed fade holds it. The field stays hidden (we are collapsed). `caught` is true only for a
+// real flight landing (flyFinish); the teardown path (flyClear: overlay open / resize / unmount)
+// calls it with false so a launcher that is being taken away never plays a recoil.
+const endFlight = (caught = false) => {
   flying.value = false
   flyTransition.value = 'none'
   flyRadius.value = ''
   flyLeft.value = 0; flyTop.value = 0; flyW.value = 44; flyH.value = 44
+  flyTransform.value = 'none'
+  flyShadow.value = 'none'
   const glyph = desktopLauncherRef.value?.querySelector('svg')
   if (glyph) { glyph.style.transition = ''; glyph.style.transform = '' }
+  if (caught) catchLanding()
+}
+
+// The iOS-Safari "download landed" catch: the sidebar icon recoils on the arriving box's momentum.
+// The launcher's transform is otherwise owned by desktopLauncherStyle plus its LAUNCHER_MOTION CSS
+// transform transition, so suppress that transition for the recoil's length and let Motion write
+// scale — one transform owner at a time, no dual-writer jitter. Skipped under reduced motion.
+const catchLanding = () => {
+  const el = desktopLauncherRef.value
+  if (!el || reduced.value) return
+  suppressLauncherMotion.value = true
+  const a = animate(el, { scale: [...arrival.keyframes] }, arrival.transition)
+  void a.finished.then(() => { suppressLauncherMotion.value = false })
 }
 
 // Full teardown (overlay open, resize, unmount): stop the flight and reveal any field hidden for a
@@ -467,6 +507,8 @@ const endFieldReturn = () => {
   flyTransition.value = 'none'
   flyRadius.value = ''
   flyLeft.value = 0; flyTop.value = 0; flyW.value = 44; flyH.value = 44
+  flyTransform.value = 'none'
+  flyShadow.value = 'none'
   const glyph = desktopLauncherRef.value?.querySelector('svg')
   if (glyph) { glyph.style.transition = ''; glyph.style.transform = '' }
   requestAnimationFrame(() => requestAnimationFrame(() => { suppressLauncherMotion.value = false }))

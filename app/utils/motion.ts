@@ -95,3 +95,15 @@ export const spotlight = {
   backdrop: { duration: 0.22, ease: 'linear' },
   content: { duration: 0.16, ease: [0.16, 1, 0.3, 1] }
 } as const
+
+/**
+ * `arrival` — the sidebar launcher "catching" the flying search bar (Phase E.2). A punchy impact
+ * recoil with a settle bounce: it overshoots hard to 1.28 on impact, dips under to 0.92, gives a
+ * small second bounce to 1.05, then rests — the box visibly absorbing a heavier projectile. Kept
+ * short (stiffness 420 / damping 18 / mass 0.7) so the whole punctuation clears in well under half
+ * a second. Skipped entirely under prefers-reduced-motion.
+ */
+export const arrival = {
+  keyframes: [1, 1.28, 0.92, 1.05, 1],
+  transition: { type: 'spring', stiffness: 420, damping: 18, mass: 0.7 }
+} as const

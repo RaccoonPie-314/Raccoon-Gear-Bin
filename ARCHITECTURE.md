@@ -373,7 +373,7 @@ and none of them are visible to the compiler or to `build`.
 | Constant | Value | Where |
 |---|---|---|
 | Spotlight open / close morph | **A Motion spring, not a fixed-duration CSS transition** (Phase E): the pill→field FLIP — panel `transform` + `border-radius`, and the glyph flyer `transform` + `color` — is played by `app/utils/motion.ts` `spotlight.frame` (spring stiffness 360 / damping 28 / mass 0.8, near-critically damped, no overshoot) via motion-v `animate()`; settle is the animation's `.finished`, replacing the old `OPEN/CLOSE_MORPH_MS` `setTimeout` + `transitionend` arbiter. A close that interrupts an open re-aims from the live value, velocity-continuous. Reduced motion swaps the spring for a short eased duration. Backdrop + content stay fast opacity fades (text never stretches); the matrix-inversion measurement and the separate scroll-collapse rAF flight engine are unchanged | `SearchDock.vue` |
-| Scroll-collapse field↔icon morph | Two cooperating pieces, desktop only. (1) The **real top field morphs its OWN width in place**: `width = lerp(natural, FIELD_ICON_MIN=52, progress)` recomputed every scroll frame over the last `FIELD_SCRUB_W` (180px) before its top reaches the edge (no transition → tracks the wheel; a fast flick can skip it — a known, accepted trade-off, NOT a bug to "fix" by moving the width to the box: doing so killed the in-place expand and mis-centred the icon). A 260ms settle eases a mid-band width to the nearer endpoint on scroll-idle. The field is `visibility:hidden` while collapsed (focus-preserving) so it never co-shows with the launcher. (2) ONE rAF engine (`startFly`, `FIELD_FLY_MS`=500) flies the **launcher as a narrow `position: fixed` box** between the field's icon footprint and its sidebar slot — it carries the icon↔circle TRAVEL only, NOT the width (so no wide-box glyph-centring issue). Fixed, not a transform: the sticky sidebar's layout box drifts as you scroll, so a transform mis-lands it. The box lerps **straight** from origin to target on an ease-out-cubic clock (`k = 1-(1-t)³`). `flyTarget`='sidebar'(collapse: from `iconFootprint(lastVisibleFieldRect)` → slot)/'field'(restore: from slot → field **live** `iconFootprint`, re-read each frame so it lands on the field wherever it is). `endFieldReturn` releases the box in place (`suppressLauncherMotion`) and the real field expands in place. A mid-flight scroll reversal re-aims from the launcher's live box (no teleport). Arrival paints one extra rAF before `flying=false`. Mobile launcher stays a plain fade | `SearchDock.vue` |
+| Scroll-collapse field↔icon morph | Two cooperating pieces, desktop only. (1) The **real top field morphs its OWN width in place**: `width = lerp(natural, FIELD_ICON_MIN=52, progress)` recomputed every scroll frame over the last `FIELD_SCRUB_W` (180px) before its top reaches the edge (no transition → tracks the wheel; a fast flick can skip it — a known, accepted trade-off, NOT a bug to "fix" by moving the width to the box: doing so killed the in-place expand and mis-centred the icon). A 260ms settle eases a mid-band width to the nearer endpoint on scroll-idle. The field is `visibility:hidden` while collapsed (focus-preserving) so it never co-shows with the launcher. (2) ONE rAF engine (`startFly`, `FIELD_FLY_MS`=500) flies the **launcher as a narrow `position: fixed` box** between the field's icon footprint and its sidebar slot — it carries the icon↔circle TRAVEL only, NOT the width (so no wide-box glyph-centring issue). Fixed, not a transform: the sticky sidebar's layout box drifts as you scroll, so a transform mis-lands it. The box eases from origin to target on an ease-out-cubic clock (`k = 1-(1-t)³`) bent by a `sin(t·π) · ARC_BOW_PX` (**80px**) **parabolic arc** (Phase E.2 — the iOS-Safari download trajectory): the bow is `0` at `t=0` and `t=1`, so launch and landing stay pixel-exact (the reversal re-aim and the 44px landing read those endpoints) and only mid-flight curves; collapse bows out `arc*0.8`/up `arc*0.5`, restore `arc*0.6` off the line. It also lifts in 3D during flight — `flyStep` writes `flyTransform` (`scale(1 + apex*0.16 − t*0.10)` reaching ~1.16 at the apex, funnelling to ~0.90 on entry, plus an aerodynamic `rotate` bank ∓8–10°) and a floating `flyShadow`; both are decorative on top of the drift-free `left/top` box and are `0`/`none` at the endpoints, and `endFlight`/`endFieldReturn` reset them. `endFlight(true)` (real collapse landing only — never the `flyClear` teardown) plays an `arrival` **catch recoil** (Motion spring, `app/utils/motion.ts` `arrival`: scale 1→1.28→0.92→1.05→1, stiffness 420 / damping 18 / mass 0.7) on the sidebar icon, skipped under reduced motion; `suppressLauncherMotion` is held for its length so Motion is the launcher transform's only writer for the recoil. `flyTarget`='sidebar'(collapse: from `iconFootprint(lastVisibleFieldRect)` → slot)/'field'(restore: from slot → field **live** `iconFootprint`, re-read each frame so it lands on the field wherever it is). `endFieldReturn` releases the box in place (`suppressLauncherMotion`) and the real field expands in place. A mid-flight scroll reversal re-aims from the launcher's live box (no teleport). Arrival paints one extra rAF before `flying=false`. Mobile launcher stays a plain fade | `SearchDock.vue` |
 | Backdrop in / out, content in / out / delay | 260/200ms, 220/140ms/150ms | `SearchDock.vue` |
 | Search-field collapse hysteresis | gone at `0`, back at `24` | `SearchDock.vue` |
 | Dock reveal threshold / direction delta | `60` / `6` | `useScrollReveal.ts` (one copy), `SearchDock.vue` (still its own) |
@@ -592,14 +592,21 @@ surface should match the logo.
   has never been permission-checked against the traps in
   [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md); a red first run is a wiring bug to
   fix in the workflow, not a licence to drop the step.
-- **`nav()` sleeps instead of polling, so a cold run reads as a product bug.** It awaits
-  `Page.navigate` and then a fixed 2200 ms, which is exactly the pattern trap 2 in
-  [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) warns against. Measured 2026-09-28: on
-  one unchanged build, three of five runs died at the first product-detail check
-  (`specifications rows: []`, gallery absent) or on `Page.navigate` itself — every one of them the
-  first run after a fresh `bun run build` — while the same build passed 257/257 twice with no rebuild
-  between. Re-run a red detail-page run before believing it; the real fix is a `waitFor` on the
-  mount selector after each `nav`, not a longer sleep.
+- **`nav()` waits for readiness; the rest of the harness still sleeps.** The `Page.navigate` +
+  `sleep(2200)` pair this bullet used to describe is gone — it was the pattern trap 2 in
+  [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) warns against, and it did not even fix
+  the symptom: measured 2026-09-28, three of five runs died at the first product-detail check
+  (`specifications rows: []`, gallery absent), every one of them the first run after a fresh
+  `bun run build`. `nav` now arms a one-shot `Page.loadEventFired` wait **before** navigating —
+  `Page.navigate` answers while the previous document is still current, so a readiness poll written
+  after the await can read the old page as loaded — then awaits `document.fonts.ready`, because the
+  text-metric asserts are invalid until the self-hosted Khmer face finishes swapping, then a 400 ms
+  settle. Measured 2026-09-29: 24 navigations 58.5 s → 15.9 s (p50 0.65 s, max 1.24 s), `waitFor`'s
+  poll tick 150 ms → 40 ms, whole local suite 197 s → 145 s, and the run immediately after a fresh
+  build was green first try. Still open: the runner's own wall clock (Verify UI was 365 s of a 423 s
+  run before this change and has not been re-measured since), and the ~80 remaining literal `sleep()`
+  sites — `park` 450 ms, `clickAt` 90 ms, that 400 ms settle — which guard *measured* traps and
+  should be profiled before any one of them is cut.
 - **Two paths the harness cannot see: switching locale, and a product with no category.** Nothing
   clicks `LanguageSwitcher`, so the navigation rule under Boundary rule 4 is held by reading
   `@nuxtjs/i18n`'s source rather than by a check; and every fixture product carries a category, so
@@ -664,7 +671,11 @@ drive headless Chrome over CDP at 1440 / 1280 / 1024 / 834 / 640 / 390 and asser
 
 The pipeline in `.github/workflows/ci.yml` is two jobs that run in parallel: `lint`, and
 `build-and-verify` — Build then Verify UI, unseparated because the harness serves the `.output`
-Build produces. Pushes to the same ref cancel that ref's in-flight older runs, and both jobs warm
-`~/.bun/install/cache` (keyed on `bun.lock`) so no run pays for a cold download of every package.
-Triggers stay branch-only: `backup/*` tags ride along with almost every commit, and a tag trigger
-ran the whole pipeline a second time for a SHA that had already been checked.
+Build produces. Pushes to the same ref cancel that ref's in-flight older runs. Triggers stay
+branch-only: `backup/*` tags ride along with almost every commit, and a tag trigger ran the whole
+pipeline a second time for a SHA that had already been checked. Caching is **not** the lever: cold
+versus warm on the same SHA moved the run from 423 s to 408 s, because install is 4–8 s and Build is
+under 30 s while `bun run verify` is ~360 s of it. Both jobs warm `~/.bun/install/cache` (201 MB —
+roughly break-even with a cold install, kept as insurance for a larger tree); there is no build
+cache, which measured ~1 MB and was the one step that could serve a stale entry. The remaining wall
+clock is the harness' fixed `sleep()` calls, not compilation — see the `nav()` gap above.
