@@ -2,6 +2,9 @@
 import type { ProductShareDestination, ProductSharePayload } from '../composables/useProductShare'
 import { platformLabel } from '~/utils/social-prefill'
 import { selectOnFocus } from '~/utils/clipboard'
+import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'motion-v'
+import { popover, sheet } from '~/utils/motion'
+import type { ComponentPublicInstance } from 'vue'
 
 /**
  * The share UI: one product, one link, two shapes.
@@ -56,11 +59,15 @@ const readDesktop = () => { isDesktop.value = media?.matches ?? false }
 // sits at the viewport's top-left corner, and painting it there is the flash this guards against.
 // The side it landed on is recorded with the position because the fold belongs to that edge: the
 // panel scales open from whichever of its own edges touches the trigger, not from its centre.
-const panelEl = ref<HTMLElement | null>(null)
+const panelEl = ref<ComponentPublicInstance | null>(null)
+// A template ref on the motion panel is its instance, not its node (the same reason motion-v reaches
+// its element through `instance.$el`); place() measures the real box through this.
+const panelNode = computed<HTMLElement | null>(() => (panelEl.value?.$el as HTMLElement) ?? null)
 const placed = ref<{ left: number, top: number, side: 'below' | 'above' } | null>(null)
+const reduced = useReducedMotion()
 
 const place = () => {
-  const el = panelEl.value
+  const el = panelNode.value
   const box = props.anchor?.getBoundingClientRect()
   if (!el || !box) return
   const margin = 12
@@ -94,83 +101,49 @@ const panelStyle = computed(() => {
   }
 })
 
-// ---- swipe-to-dismiss (phone sheet) ----
-// The grabber and the header block form the drag handle: dragging down from there follows the
-// finger with a pure `translateY` (transform + the existing leave transition only — no layout),
-// and releasing past the distance or velocity threshold flicks the sheet off the bottom. Below
-// either threshold it snaps back. A mouse is never a swipe (the popover ignores this path anyway,
-// and a text-selection or scroll drag inside the sheet must not dismiss it), and the handle's own
-// buttons stay clickable — a gesture that starts on one is not a swipe.
+// ---- swipe-to-dismiss (phone sheet) — a single transform owner: Motion ----
+// The grabber + header band is the drag handle. On a phone, Motion owns the panel's `transform`
+// outright — the enter/exit slide, the finger-follow, the snap-back and the dismiss are all the same
+// `y` — so there is no longer a CSS leave transition and an imperative WAAPI flick both writing
+// transform. Drag starts only from the handle (`dragListener` off + `useDragControls`), a mouse is
+// never a swipe, and the handle's own buttons stay clickable — a gesture that starts on a button is
+// not a swipe. `dragConstraints { top: 0, bottom: 0 }` with `dragElastic { top: 0, bottom: 1 }` gives
+// 1:1 downward finger-follow, locks upward, and springs the sheet home automatically below the gate.
 const SHEET_SWIPE_MIN_PX = 96
-const SHEET_SWIPE_MIN_VEL = 0.5 // px/ms — a short fast flick dismisses where a slow long drag does not
+const SHEET_SWIPE_MIN_VEL = 500 // px/s (0.5 px/ms) — a short fast flick dismisses where a slow long drag does not
 const SHEET_SWIPE_FLICK_PX = 16 // below this travel even a fast release reads as a tap artifact
-const dragY = ref(0)
-const dragging = ref(false)
-let swipeId: number | null = null
-let swipeStartY = 0
-let swipeLastY = 0
-let swipeLastT = 0
-let swipeVel = 0
+const dragControls = useDragControls()
 
+// Begin the Motion drag only from the handle, only on a phone, never on a mouse or a button.
 const onHandlePointerDown = (event: PointerEvent) => {
   if (isDesktop.value || event.pointerType === 'mouse') return
   if ((event.target as HTMLElement).closest('button')) return
-  swipeId = event.pointerId
-  swipeStartY = event.clientY
-  swipeLastY = event.clientY
-  swipeLastT = event.timeStamp
-  swipeVel = 0
-  dragY.value = 0
-  dragging.value = true
-  // Capture keeps the drag alive when the finger leaves the handle, and the stylesheet's
-  // `touch-action: none` on it stops the browser claiming the gesture as a scroll.
-  try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId) } catch { /* the pointer is already released */ }
+  dragControls.start(event)
 }
 
-const onHandlePointerMove = (event: PointerEvent) => {
-  if (swipeId === null || event.pointerId !== swipeId) return
-  const dt = event.timeStamp - swipeLastT
-  if (dt > 0) swipeVel = (event.clientY - swipeLastY) / dt
-  swipeLastY = event.clientY
-  swipeLastT = event.timeStamp
-  // Down only: an upward pull is the sheet refusing to grow past its anchor, not a dismiss.
-  dragY.value = Math.max(0, event.clientY - swipeStartY)
+// Releasing past either gate closes the sheet; AnimatePresence plays the exit from wherever the finger
+// lifted, so the dismiss is velocity-continuous rather than teleporting to the top of a keyframe.
+// Below both gates we leave it open and the dragConstraints spring returns it home on its own.
+const onDragEnd = (_event: PointerEvent, info: { offset: { y: number }, velocity: { y: number } }) => {
+  const dismissed = info.offset.y > SHEET_SWIPE_MIN_PX
+    || (info.offset.y > SHEET_SWIPE_FLICK_PX && info.velocity.y > SHEET_SWIPE_MIN_VEL)
+  if (dismissed) close()
 }
 
-const resetSwipe = () => {
-  swipeId = null
-  dragging.value = false
-  dragY.value = 0
-}
-
-const onHandlePointerUp = (event: PointerEvent) => {
-  if (swipeId === null || event.pointerId !== swipeId) return
-  const el = panelEl.value
-  const from = dragY.value
-  const dismissed = from > SHEET_SWIPE_MIN_PX || (from > SHEET_SWIPE_FLICK_PX && swipeVel > SHEET_SWIPE_MIN_VEL)
-  resetSwipe()
-  if (!el) { if (dismissed) close(); return }
-  // The WAAPI flick holds its end state (`fill: 'forwards'` outranks the leave classes), so the
-  // sheet slides out from exactly where the finger let go instead of teleporting to the top of
-  // the CSS slide. The snap-back needs no state: it animates the element home and lets go.
-  if (dismissed) {
-    el.animate(
-      [{ transform: `translateY(${from}px)` }, { transform: 'translateY(100%)' }],
-      { duration: 220, easing: 'cubic-bezier(0.33, 1, 0.68, 1)', fill: 'forwards' }
-    )
-    close()
-  } else if (from > 0) {
-    el.animate(
-      [{ transform: `translateY(${from}px)` }, { transform: 'translateY(0px)' }],
-      { duration: 180, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
-    )
-  }
-}
-
-const mobileSheetStyle = computed(() => dragging.value
-  ? { transform: `translateY(${dragY.value}px)`, transition: 'none' }
-  : undefined)
-const sheetStyle = computed(() => isDesktop.value ? panelStyle.value : mobileSheetStyle.value)
+// One motion language for both shapes: the phone sheet slides on `y`, the desktop popover unfolds on
+// `scaleY` out of the edge `panelStyle` names as the transform-origin. Reduced motion drops the
+// sheet's position change to a fade and keeps the popover's position-free scale — the same tiering
+// the removed CSS classes carried, now expressed as the enter/exit targets.
+const panelInitial = computed(() => isDesktop.value
+  ? (reduced.value ? { opacity: 0, scaleY: 0.9 } : { opacity: 0, scaleY: 0.5 })
+  : (reduced.value ? { opacity: 0 } : { opacity: 0, y: '100%' }))
+const panelAnimate = computed(() => (isDesktop.value ? { opacity: 1, scaleY: 1 } : { opacity: 1, y: 0 }))
+const panelExit = computed(() => isDesktop.value
+  ? (reduced.value ? { opacity: 0, scaleY: 0.9 } : { opacity: 0, scaleY: 0.5 })
+  : (reduced.value ? { opacity: 0 } : { opacity: 0, y: '100%' }))
+const panelTransition = computed(() => reduced.value
+  ? { duration: 0.18 }
+  : (isDesktop.value ? popover.transition : sheet.transition))
 
 const close = (returnFocus = true) => {
   emit('close')
@@ -193,7 +166,6 @@ watch(() => props.open, (open) => {
     document.removeEventListener('keydown', onKeydown)
     removeEventListener('scroll', reposition, true)
     removeEventListener('resize', reposition)
-    resetSwipe()
     return
   }
   // Reset on the way in, never on the way out: cleared while the leave transition runs, the panel
@@ -221,16 +193,22 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <Transition :name="isDesktop ? 'share-pop' : 'share-sheet'">
-      <div
+    <AnimatePresence>
+      <motion.div
         v-if="open"
+        key="share-backdrop"
         data-share-backdrop
         class="fixed inset-0 z-[60] outline-none"
         :class="isDesktop ? '' : 'bg-zinc-950/45 backdrop-blur-[2px] dark:bg-zinc-950/60'"
+        :initial="{ opacity: 0 }"
+        :animate="{ opacity: 1 }"
+        :exit="{ opacity: 0 }"
+        :transition="{ duration: reduced ? 0.12 : 0.22 }"
         @click.self="close(false)"
       >
-        <div
+        <motion.div
           ref="panelEl"
+          key="share-sheet"
           data-share-sheet
           role="dialog"
           :aria-modal="isDesktop ? 'false' : 'true'"
@@ -241,7 +219,18 @@ onBeforeUnmount(() => {
             ? 'fixed w-72 max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-2xl p-3'
             : 'fixed inset-x-0 bottom-0 max-h-[85dvh] w-full max-w-lg overflow-y-auto overscroll-contain rounded-t-3xl pb-[max(1rem,env(safe-area-inset-bottom))]'
           "
-          :style="sheetStyle"
+          :style="panelStyle"
+          :initial="panelInitial"
+          :animate="panelAnimate"
+          :exit="panelExit"
+          :transition="panelTransition"
+          :drag="isDesktop ? false : 'y'"
+          :drag-controls="dragControls"
+          :drag-listener="false"
+          :drag-constraints="{ top: 0, bottom: 0 }"
+          :drag-elastic="{ top: 0, bottom: 1 }"
+          :drag-momentum="false"
+          @drag-end="onDragEnd"
         >
           <!-- The grabber reads as "this slides", and is the only thing on a desktop popover that
                would read as a browser dialog instead of a control. On the phone it is also the top
@@ -252,9 +241,6 @@ onBeforeUnmount(() => {
             class="shrink-0"
             :class="isDesktop ? '' : 'sheet-drag-handle'"
             @pointerdown="onHandlePointerDown"
-            @pointermove="onHandlePointerMove"
-            @pointerup="onHandlePointerUp"
-            @pointercancel="onHandlePointerUp"
           >
             <div v-if="!isDesktop" class="mx-auto mb-1 mt-3 h-1 w-10 shrink-0 rounded-full bg-zinc-300 dark:bg-zinc-700" aria-hidden="true" />
 
@@ -368,93 +354,20 @@ onBeforeUnmount(() => {
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             {{ t('close') }}
           </button>
-        </div>
-      </div>
-    </Transition>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   </Teleport>
 </template>
 
 <style scoped>
 /* The phone sheet's drag handle opts out of browser scrolling over its own band, so the vertical
-   gesture belongs to the dismiss code rather than to the sheet's `overflow-y-auto`. The desktop
-   popover never gets this class — its header is not a handle. */
+   gesture belongs to the Motion drag rather than to the sheet's `overflow-y-auto`. The desktop
+   popover never gets this class — its header is not a handle. The enter/exit, the finger-follow, the
+   snap-back and the dismiss are now one `y` owned by Motion (Phase C.2), so there is no CSS
+   transition or @keyframes here any more — only the touch-action that lets the browser hand the
+   vertical swipe to the drag instead of to the page scroll. */
 .sheet-drag-handle {
   touch-action: none;
-}
-
-/* The sheet slides on its own axis and nothing else moves: a transform-only enter cannot shift
-   the page behind it, which is the "no layout jump" requirement. On enter the backdrop leads and
-   the panel follows 40ms later — "the world dims, then the thing arrives" reads as two signals in
-   sequence instead of one event; on leave they go together, because dismissal should feel instant. */
-.share-sheet-enter-active,
-.share-sheet-leave-active {
-  transition: opacity 220ms ease;
-}
-.share-sheet-enter-active [data-share-sheet] {
-  transition: transform 260ms cubic-bezier(0.33, 1, 0.68, 1) 40ms;
-}
-.share-sheet-leave-active [data-share-sheet] {
-  transition: transform 260ms cubic-bezier(0.33, 1, 0.68, 1);
-}
-.share-sheet-enter-from,
-.share-sheet-leave-to {
-  opacity: 0;
-}
-.share-sheet-enter-from [data-share-sheet],
-.share-sheet-leave-to [data-share-sheet] {
-  transform: translateY(100%);
-}
-
-/* The desktop popover unfolds exactly like the catalog's sort control and the Contact panel —
-   `scaleY` growing out of whichever edge faces the trigger (the inline `transform-origin` from
-   `place()` picks the edge; the mobile sheet below never reads it, so it is unaffected). Opacity
-   leads and finishes early so the surface is fully visible for the whole unfold: the read is
-   "opened out of the Share button", not "faded in nearby". Enter and leave share the transform, so
-   it collapses back the way it came. */
-.share-pop-enter-active,
-.share-pop-leave-active {
-  transition: opacity 90ms linear;
-}
-.share-pop-enter-active [data-share-sheet],
-.share-pop-leave-active [data-share-sheet] {
-  transition: transform 260ms cubic-bezier(0.33, 1, 0.68, 1);
-}
-.share-pop-enter-from,
-.share-pop-leave-to {
-  opacity: 0;
-}
-.share-pop-enter-from [data-share-sheet],
-.share-pop-leave-to [data-share-sheet] {
-  transform: scaleY(0.5);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* The bottom sheet's slide is a position change, so it drops to a fade. The desktop popover's
-     unfold is a contained vertical scale with no travel, so it survives as a soft scaleY — the
-     same "gentler, not zero" tier the contact panel uses, so a reduced-motion visitor still sees
-     the surface open out of the Share button rather than materialising. */
-  .share-sheet-enter-active,
-  .share-sheet-leave-active {
-    transition-duration: 120ms;
-  }
-  .share-sheet-enter-active [data-share-sheet],
-  .share-sheet-leave-active [data-share-sheet] {
-    transition: none;
-  }
-  .share-sheet-enter-active [data-share-sheet] {
-    transition-delay: 0ms;
-  }
-  .share-sheet-enter-from [data-share-sheet],
-  .share-sheet-leave-to [data-share-sheet] {
-    transform: none;
-  }
-  .share-pop-enter-active [data-share-sheet],
-  .share-pop-leave-active [data-share-sheet] {
-    transition: transform 150ms ease;
-  }
-  .share-pop-enter-from [data-share-sheet],
-  .share-pop-leave-to [data-share-sheet] {
-    transform: scaleY(0.9);
-  }
 }
 </style>

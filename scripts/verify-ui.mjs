@@ -1526,7 +1526,7 @@ const run = async () => {
     const sheetOpen = '!!document.querySelector("[data-share-sheet]")'
     // The enter transition moves the panel by its own height, so a rect read on the first frame is
     // the sheet mid-slide — off the bottom of the viewport. Every geometry read waits for it to rest.
-    const sheetAtRest = '(() => { const s = document.querySelector("[data-share-sheet]"); return !!s && !s.getAnimations().length && getComputedStyle(s).transform === "none" })()'
+    const sheetAtRest = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return false; const t = getComputedStyle(s).transform; const settled = t === "none" || (() => { const m = new DOMMatrixReadOnly(t); return Math.abs(m.a - 1) < 0.02 && Math.abs(m.d - 1) < 0.02 && Math.abs(m.e) < 2 && Math.abs(m.f) < 2 })(); const running = s.getAnimations().some(a => a.playState === "running"); return settled && !running })()'
     const openSheet = async () => { await clickSelector('[data-share-cta]', sheetOpen); return await waitFor(sheetAtRest) }
     const closeSheet = async () => { await press('Escape', 'Escape', 27); return await waitFor('!document.querySelector(\'[data-share-sheet]\')') }
 
@@ -1783,9 +1783,9 @@ const run = async () => {
     await touch('touchStart', [grabAt])
     for (let i = 1; i <= 3; i++) { await touch('touchMove', [{ x: grabAt.x, y: grabAt.y + i * 12 }]); await sleep(80) }
     await touch('touchEnd', [])
-    await sleep(320)
-    const pulled = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); return { open: !!s, tr: s ? getComputedStyle(s).transform : null, anims: s ? s.getAnimations().length : -1 } })()')
-    check('a short slow pull on the handle snaps the sheet back instead of dismissing', pulled.open === true && pulled.tr === 'none' && pulled.anims === 0, { pulled })
+    await waitFor(sheetAtRest, 1500)
+    const pulled = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return { open: false }; const t = getComputedStyle(s).transform; const settled = t === "none" || (() => { const m = new DOMMatrixReadOnly(t); return Math.abs(m.a - 1) < 0.02 && Math.abs(m.d - 1) < 0.02 && Math.abs(m.e) < 2 && Math.abs(m.f) < 2 })(); return { open: true, settled, tr: t } })()')
+    check('a short slow pull on the handle snaps the sheet back instead of dismissing', pulled.open === true && pulled.settled === true, { pulled })
     await touch('touchStart', [grabAt])
     for (let i = 1; i <= 6; i++) { await touch('touchMove', [{ x: grabAt.x, y: grabAt.y + i * 30 }]); await sleep(30) }
     await touch('touchEnd', [])

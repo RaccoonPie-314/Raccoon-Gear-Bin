@@ -49,3 +49,22 @@ export const press = {
 export const panel = {
   transition: { type: 'spring', stiffness: 300, damping: 30 }
 } as const
+
+/**
+ * `sheet` — the phone bottom sheet (the Share Sheet's mobile shape). Its whole vertical life — enter
+ * from `100%`, the drag-follow, the snap-back and the dismiss-exit — rides this one spring on a single
+ * `y`, so the panel `transform` has exactly one owner (Phase C.2). Damped just past critical: a sheet
+ * that overshoots upward off the bottom edge reads as broken, not physical.
+ */
+export const sheet = {
+  transition: { type: 'spring', stiffness: 300, damping: 34 }
+} as const
+
+/**
+ * `popover` — the desktop anchored popover (the Share Sheet's desktop shape), unfolding on `scaleY`
+ * out of whichever edge faces the trigger. A touch stiffer than the sheet (a smaller, faster surface)
+ * but equally restrained — no overshoot.
+ */
+export const popover = {
+  transition: { type: 'spring', stiffness: 380, damping: 34 }
+} as const
