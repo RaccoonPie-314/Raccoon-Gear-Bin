@@ -33,10 +33,10 @@ jobs:
         with:
           bun-version: latest
 
-      # ~/.bun/install/cache is Bun's content-addressed download cache; warming
-      # it is what removes the cold fetch of every package on each run. Keyed on
-      # the lockfile — not the commit — so any commit after a dependency change
-      # still gets a hit. `bun install --frozen-lockfile` stays the gate that
+      # ~/.bun/install/cache is Bun's content-addressed download cache. Measured
+      # here it is roughly break-even — a cold `bun install` is 7 s, restoring the
+      # 201 MB cache is 6 s — so it stays as insurance for a larger tree, not as a
+      # speed win. `bun install --frozen-lockfile` remains the gate that
       # package.json and bun.lock agree.
       - name: Cache Bun dependencies
         uses: actions/cache@v4
@@ -53,7 +53,10 @@ jobs:
         run: bun run lint
 
   # `bun run verify` serves the `.output` that `bun run build` produces, so the
-  # two stay in one job.
+  # two stay in one job. No build cache: it measured ~1 MB against a 26 s build,
+  # which is noise next to verify's ~6 min — and it was the one step here that
+  # could have served a stale Vite/Nuxt entry. The wall clock lives in the
+  # harness' fixed waits, not in anything CI can cache.
   build-and-verify:
     runs-on: ubuntu-latest
     steps:
@@ -82,20 +85,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      # Nuxt's icon cache (content-hashed files) and Vite's dependency-optimizer
-      # cache. Restored *after* `bun install`, because `node_modules` is rewritten
-      # by the installer; a stale entry is only ever a cache miss — the build
-      # either reuses a hashed entry or recomputes it.
-      - name: Cache Nuxt build
-        uses: actions/cache@v4
-        with:
-          path: |
-            .nuxt/cache
-            node_modules/.cache
-          key: ${{ runner.os }}-nuxt-${{ hashFiles('**/bun.lock', 'nuxt.config.ts', 'package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-nuxt-
 
       - name: Build
         run: bun run build

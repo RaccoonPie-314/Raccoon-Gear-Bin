@@ -169,6 +169,22 @@ class Cdp {
     })
   }
 
+  // One-shot wait for a CDP event. Arm it *before* the action that causes it:
+  // `Page.navigate` answers while the previous document is still current, so a
+  // readiness poll written after the await can read the old page as loaded. The
+  // listener chains to whatever `onEvent` already held (the Fetch photo handler)
+  // and restores it when the event lands or the bound expires.
+  once(method, ms = 20000) {
+    return new Promise((resolve, reject) => {
+      const prev = this.onEvent
+      const timer = setTimeout(() => { this.onEvent = prev; reject(new Error(method + ' never fired within ' + ms + 'ms')) }, ms)
+      this.onEvent = m => {
+        if (m.method === method) { clearTimeout(timer); this.onEvent = prev; resolve(m.params); return }
+        prev?.(m)
+      }
+    })
+  }
+
   async ev(expression) {
     const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text)
@@ -300,14 +316,32 @@ const run = async () => {
 
   // 3. helpers built on the client
   const ev = expr => cdp.ev(expr)
-  const nav = async url => { await cdp.send('Page.navigate', { url }); await sleep(2200) }
+  // Readiness, bounded. This used to be `Page.navigate` + `sleep(2200)`, the
+  // pattern docs/rules/TESTING_SPECS.md forbids, and it lost the race anyway — 3 of
+  // 5 runs on 2026-09-28 died at the first product-detail check. Now wait for the
+  // new document's load event (armed before navigating, see Cdp.once) and for the
+  // webfont swap several asserts measure through, then settle for hydration. The
+  // caps sum to ~2.4 s, so the worst case is the old sleep and the common case is
+  // ~0.7 s. They are not decoration: a page whose Supabase host is unreachable
+  // never commits its navigation, and an unbounded wait turned that into a red run.
+  const nav = async url => {
+    const loaded = cdp.once('Page.loadEventFired', 1200).catch(() => false)
+    await cdp.send('Page.navigate', { url })
+    await loaded
+    await ev('Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 800))]).then(() => true)')
+    await sleep(400) // the one guess left: hydration and entry transitions have no observable edge
+  }
   const metrics = (w, h, mobile) => cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile })
   const mouse = (type, x, y, buttons = 0) => cdp.send('Input.dispatchMouseEvent', { type, x, y, buttons, clickCount: 1, button: 'left' })
   const clickAt = async (x, y) => { await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 1); await mouse('mouseReleased', x, y); await sleep(90) }
   const park = async () => { await mouse('mouseMoved', 12, 12); await sleep(450) }
   const waitFor = async (expr, ms = 8000) => {
+    // 40 ms, not 150 ms: an `ev()` round trip costs a few milliseconds, so the
+    // old tick threw away half its interval per wait — ~250 waits per run. The
+    // 8 s bound is deliberate and unchanged: an expired wait is a reported FAIL,
+    // never a hang, so a finer tick buys resolution rather than timeout safety.
     const until = Date.now() + ms
-    while (Date.now() < until) { try { if (await ev(expr)) return true } catch { return false } await sleep(150) }
+    while (Date.now() < until) { try { if (await ev(expr)) return true } catch { return false } await sleep(40) }
     return false
   }
   // contains, not equality ("＋ Add product"); and a modal's footer button sits below its own
@@ -316,7 +350,7 @@ const run = async () => {
   const clickByText = async (sel, text, waitExpr) => {
     let box = null
     const until = Date.now() + 7000
-    while (!box && Date.now() < until) { box = await ev(findBox(sel, text)); if (!box) await sleep(150) }
+    while (!box && Date.now() < until) { box = await ev(findBox(sel, text)); if (!box) await sleep(40) }
     if (!box) return false
     await sleep(300)
     box = await ev(findBox(sel, text)) || box

@@ -592,21 +592,30 @@ surface should match the logo.
   has never been permission-checked against the traps in
   [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md); a red first run is a wiring bug to
   fix in the workflow, not a licence to drop the step.
-- **`nav()` waits for readiness; the rest of the harness still sleeps.** The `Page.navigate` +
-  `sleep(2200)` pair this bullet used to describe is gone — it was the pattern trap 2 in
-  [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) warns against, and it did not even fix
-  the symptom: measured 2026-09-28, three of five runs died at the first product-detail check
-  (`specifications rows: []`, gallery absent), every one of them the first run after a fresh
-  `bun run build`. `nav` now arms a one-shot `Page.loadEventFired` wait **before** navigating —
-  `Page.navigate` answers while the previous document is still current, so a readiness poll written
-  after the await can read the old page as loaded — then awaits `document.fonts.ready`, because the
-  text-metric asserts are invalid until the self-hosted Khmer face finishes swapping, then a 400 ms
-  settle. Measured 2026-09-29: 24 navigations 58.5 s → 15.9 s (p50 0.65 s, max 1.24 s), `waitFor`'s
-  poll tick 150 ms → 40 ms, whole local suite 197 s → 145 s, and the run immediately after a fresh
-  build was green first try. Still open: the runner's own wall clock (Verify UI was 365 s of a 423 s
-  run before this change and has not been re-measured since), and the ~80 remaining literal `sleep()`
-  sites — `park` 450 ms, `clickAt` 90 ms, that 400 ms settle — which guard *measured* traps and
-  should be profiled before any one of them is cut.
+- **`nav()` waits for bounded readiness; the rest of the harness still sleeps.** The
+  `Page.navigate` + `sleep(2200)` pair this bullet used to describe is gone — it was the pattern trap
+  2 in [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) warns against, and it did not even
+  hold: measured 2026-09-28, three of five runs died at the first product-detail check. `nav` now
+  arms a one-shot `Page.loadEventFired` wait **before** navigating (`Page.navigate` answers while the
+  previous document is still current, so a readiness poll written after the await can read the old
+  page as loaded), then awaits `document.fonts.ready`, because the text-metric asserts are invalid
+  until the self-hosted Khmer face stops swapping, then a 400 ms settle. Each stage is capped
+  (1.2 s + 0.8 s + 0.4 s), so the worst case is the old sleep and the common case is ~0.7 s; the caps
+  are load-bearing, see the bullet below. `waitFor`'s poll tick went 150 ms → 40 ms. Measured
+  2026-09-29: 24 navigations 58.5 s → 15.9 s, whole local suite 197 s → 146 s, green in the working
+  tree and green twice in a clean worktree holding only this commit's app source. Still open: the
+  runner's wall clock (Verify UI was 365 s of a 423 s run before this change), and the ~80 remaining
+  literal `sleep()` sites — `park` 450 ms, `clickAt` 90 ms, that settle — which guard *measured*
+  traps and should be profiled before any one of them is cut.
+- **A missing `.env` is what made a detail-page run look cold.** With no `.env`, `nuxt.config.ts`
+  falls back to `example.supabase.co`; the product-detail page's SSR request then blocks on an
+  unreachable host and the navigation never commits, so `Page.navigate` answers with nothing to
+  observe. Reproduced 2026-09-29 in a clean worktree at the same commit twice over — the old harness
+  died with `Page.navigate timed out`, an unbounded readiness wait died with `never fired within
+  20000ms`, both at check #61 — while every run in a tree that has `.env` passed. CI has no secrets,
+  variables or environments, so the runner builds on that fallback too; it gets through today,
+  which is why the caps above are the shape to keep. **Run `bun run verify` from a tree that has
+  `.env`**, and treat a red detail-page run there as suspect before believing it.
 - **Two paths the harness cannot see: switching locale, and a product with no category.** Nothing
   clicks `LanguageSwitcher`, so the navigation rule under Boundary rule 4 is held by reading
   `@nuxtjs/i18n`'s source rather than by a check; and every fixture product carries a category, so
