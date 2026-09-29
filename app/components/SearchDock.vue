@@ -882,6 +882,9 @@ const closeOverlay = async () => {
   }
 
   // Re-show the glyph flyer (it unmounts once the open settles) so it can ride back to the icon.
+  // Mount it at the panel glyph first — captureScene left flyerBox on the icon (the open's start),
+  // which would teleport the glyph to the dock instead of easing it home.
+  flyerBox.value = panelGlyphBox
   morphing.value = true
 
   await nextTick()
