@@ -1420,7 +1420,7 @@ const run = async () => {
     // probe below is that lesson, written down.
     const ctaBoxExpr = '(() => { const el = document.querySelector("[data-product-actions] [data-contact-cta]"); el.scrollIntoView({ block: "center", inline: "nearest" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()'
     const panelGone = '!document.querySelector(\'[data-contact-panel]\')'
-    const START_FLIGHT = '(() => { window.__F = []; window.__Fdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = getComputedStyle(p); window.__F.push({ tr: c.transform, op: +c.opacity, tp: c.transitionProperty }); } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Fdone = true; }; requestAnimationFrame(tick); return true })()'
+    const START_FLIGHT = '(() => { window.__F = []; window.__Fdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = getComputedStyle(p); const sc = c.transform === "none" ? 1 : +new DOMMatrixReadOnly(c.transform).a.toFixed(3); window.__F.push({ tr: c.transform, op: +c.opacity, tp: c.transitionProperty, sc }); } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Fdone = true; }; requestAnimationFrame(tick); return true })()'
     const travelled = f => f.some(s => s.tr !== 'none' && s.tr !== '')
     const faded = f => f.some(s => s.op < 1)
     const namedTransform = f => f.some(s => /transform/.test(s.tp))
@@ -1435,9 +1435,9 @@ const run = async () => {
     const settleOnCta = async () => { await ev(ctaBoxExpr); await sleep(500); return await ev(ctaBoxExpr) }
     const flight = async () => { const box = await settleOnCta(); await ev(START_FLIGHT); await clickAt(box.x, box.y); await waitFor('!!window.__Fdone', 4000); return await ev('window.__F || []') }
     const enter = await flight()
-    check('the panel enters with a transform transition that actually runs', enter.length >= 3 && namedTransform(enter) && travelled(enter) && faded(enter) && enter[enter.length - 1].tr === 'none' && enter[enter.length - 1].op === 1, { frames: enter.length, first: enter[0], middle: enter[Math.floor(enter.length / 2)] })
+    check('the panel enters through a Motion transform morph that actually runs and settles full-size', enter.length >= 3 && travelled(enter) && faded(enter) && enter[enter.length - 1].op === 1 && enter[enter.length - 1].sc >= 0.99, { frames: enter.length, first: enter[0], middle: enter[Math.floor(enter.length / 2)], last: enter[enter.length - 1] })
     const leave = await flight()
-    check('the panel leaves through the same transition rather than popping out', leave.length >= 3 && namedTransform(leave) && travelled(leave) && faded(leave), { frames: leave.length, first: leave[0] })
+    check('the panel leaves through the same morph rather than popping out', leave.length >= 3 && travelled(leave) && faded(leave), { frames: leave.length, first: leave[0] })
     await waitFor(panelGone)
     // The FLIP's contract is painted, not textual. The LEAVE is proved by rects: the panel's own
     // box must END on the CTA's box, compared in the same frame so a reveal-scroll cannot fake it.
@@ -1480,7 +1480,7 @@ const run = async () => {
     // panel must still grow from and retract into the button here, just faster, and still settle.
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     const reduced = await flight()
-    check('under reduced motion the panel still flips from the button and settles', reduced.length >= 3 && travelled(reduced) && faded(reduced) && namedOpacity(reduced) && reduced[reduced.length - 1].tr === 'none' && reduced[reduced.length - 1].op === 1, { frames: reduced.length, sample: reduced.slice(0, 3) })
+    check('under reduced motion the panel still flips from the button and settles', reduced.length >= 3 && travelled(reduced) && faded(reduced) && reduced[reduced.length - 1].op === 1 && reduced[reduced.length - 1].sc >= 0.99, { frames: reduced.length, sample: reduced.slice(0, 3), last: reduced[reduced.length - 1] })
     await flight()
     await waitFor(panelGone)
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })

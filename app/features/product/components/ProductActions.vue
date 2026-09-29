@@ -4,8 +4,8 @@ import type { ProductShareDestination, ProductSharePayload } from '../composable
 import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
-import { motion, useReducedMotion } from 'motion-v'
-import { press } from '~/utils/motion'
+import { animate, motion, useReducedMotion } from 'motion-v'
+import { panel, press } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
@@ -115,32 +115,27 @@ watch(isOpen, (open) => {
     if (!host) return
     const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
     const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-    window.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' })
+    window.scrollTo({ top: target, behavior: reduced.value ? 'auto' : 'smooth' })
   })
 })
 
 onBeforeUnmount(unpinColumn)
 
-// ---- Contact panel: FLIP expand out of the button ----
-// The panel grows from the CTA's own footprint on both axes — the same shared-element morph the
-// search dock's spotlight plays (SearchDock measures the launcher rect and scales the panel from
-// it) — instead of a vertical squash, which distorts the message text, or a fade. Measure the
-// button and the panel's settled box, invert the panel onto the button with a translate + scale,
-// then play it back to identity. Each mount is measured against its own button, so the inline
-// panel expands down out of the row and the sticky one up out of the bar, and closing retracts it
-// back down into the button it came from. Driven by JS hooks, not CSS classes, because the start
-// transform is measured, not known ahead of time.
+// ---- Contact panel: FLIP expand out of the button, played by a Motion spring ----
+// The panel grows from the CTA's own footprint on both axes — a shared-element morph, not a vertical
+// squash (which distorts the message text) or a fade. Measure the button and the panel's settled box,
+// invert the panel onto the button with a translate + scale, then let Motion animate it back to
+// identity. Each mount is measured against its own button, so the inline panel expands down out of the
+// row and the sticky one up out of the bar, and closing retracts it back into the button it came from.
 //
-// The translate is what makes it land *on the button* rather than collapsing toward some corner, so
-// it runs under reduced motion too — this is a short, contained morph of one element, not the
-// large-area travel reduced motion exists to suppress. Reduced motion only trims the duration.
-const FLIP_IN_MS = 480
-const FLIP_OUT_MS = 380
-const FLIP_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
-const REDUCED_IN_MS = 340
-const REDUCED_OUT_MS = 260
-const prefersReduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+// Phase C kept the measurement — the spatial contract that makes the morph land *on* the button — and
+// moved only the PLAYBACK from a fixed-duration CSS transition to Motion's spring, so the panel is now
+// interruptible and velocity-continuous: a rapid open→close→reopen retargets from where the panel
+// actually is instead of freezing a transition and restarting a curve from scratch. Under reduced motion
+// the contained translate survives (a short morph of one element, not the large-area travel the
+// preference targets) but the spring is swapped for a short eased duration.
+// The spring's rest value, named once so enter and leave agree on where "settled" is.
+const IDENTITY = 'translate(0px, 0px) scale(1, 1)'
 // The panel's settled box mapped onto the button's: translate its top-left to the button's top-left
 // and scale it down to the button's size. Played forward that is grow-out-of-the-button; played in
 // reverse (leave) it is retract-back-into-the-button, on both mounts, because the button's live
@@ -151,29 +146,18 @@ const flipCss = (el: HTMLElement) => {
   if (!t || !p.width || !p.height) return null
   return `translate(${t.left - p.left}px, ${t.top - p.top}px) scale(${t.width / p.width}, ${t.height / p.height})`
 }
-// A FLIP inverts the element's *settled* box, so the box must be measured at rest. Toggling the
-// panel mid-flight leaves the previous transition's partial transform on the element: measuring
-// through it compounds two inverses, which is what made an interrupted exit land at an arbitrary
-// scale and position instead of back on the button. Freeze any running transition, clear the
-// in-flight transform, and force the reflow that commits the rest geometry — every later rect in
-// this tick is then the layout box, never a half-morphed one.
+// A FLIP inverts the element's *settled* box, so the box must be measured at rest. Stopping a running
+// Motion animation and clearing its transform, then forcing the reflow that commits the rest geometry,
+// means every later rect in this tick is the layout box and never a half-morphed one — the same guard
+// that stopped an interrupted exit from compounding two inverses onto an arbitrary scale. Motion owns
+// the inline transform while it runs, so there is no lingering CSS transition to freeze.
+let running: { stop(): void } | null = null
 const settleForMeasurement = (p: HTMLElement) => {
-  p.style.transition = 'none'
+  running?.stop()
+  running = null
   p.style.transform = ''
   p.style.opacity = ''
-  void p.offsetWidth // the write above only becomes a measurable rect after this read flushes it
-  p.style.transition = ''
-}
-// The fallback timeout is the direction's own duration plus one frame's grace: a leave that reused
-// the enter's longer budget would hold the unmount hostage for the difference.
-const onceSettled = (el: HTMLElement, ms: number, done: () => void) => {
-  const finish = (e?: TransitionEvent) => {
-    if (e && e.target !== el) return
-    el.removeEventListener('transitionend', finish)
-    done()
-  }
-  el.addEventListener('transitionend', finish)
-  setTimeout(finish, ms + 220) // a zero-size or hidden element may never fire transitionend
+  void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
 // The enter is measured in the `enter` hook, not `before-enter`: Vue calls `before-enter` while
 // the panel is still a detached node, and its rect there is all zeros — an inversion computed from
@@ -186,15 +170,15 @@ const onPanelEnter = (el: Element, done: () => void) => {
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
   p.style.transformOrigin = 'top left'
-  p.style.opacity = '0'
-  const start = flipCss(p)
-  if (start) p.style.transform = start
-  void p.offsetWidth // commit the inversion — without this flush the transition's "from" is the rest box
-  const ms = prefersReduced() ? REDUCED_IN_MS : FLIP_IN_MS
-  p.style.transition = `transform ${ms}ms ${FLIP_EASE}, opacity 220ms ease`
-  p.style.transform = 'translate(0px, 0px) scale(1, 1)'
-  p.style.opacity = '1'
-  onceSettled(p, ms, done)
+  const start = flipCss(p) ?? IDENTITY
+  // Opacity rides its own short fade, transform rides the spring. Splitting them keeps the text
+  // legible on the heavily-scaled first frames (a gentle 240ms fade, not a spring that snaps to 1 in
+  // a frame) and lets the morph stay interruptible. Under reduced motion both are a short duration.
+  const red = reduced.value
+  animate(p, { opacity: [0, 1] }, { duration: red ? 0.3 : 0.24, ease: 'easeOut' })
+  const a = animate(p, { transform: [start, IDENTITY] }, red ? { duration: 0.3, ease: 'easeOut' } : panel.transition)
+  running = a
+  void a.finished.then(() => { if (running === a) running = null; done() })
 }
 const onPanelAfterEnter = (el: Element) => {
   const p = el as HTMLElement
@@ -209,12 +193,12 @@ const onPanelLeave = (el: Element, done: () => void) => {
   // the button's live rect, so a close that interrupts an open retraces the identical path home.
   settleForMeasurement(p)
   p.style.transformOrigin = 'top left'
-  const end = flipCss(p)
-  const ms = prefersReduced() ? REDUCED_OUT_MS : FLIP_OUT_MS
-  p.style.transition = `transform ${ms}ms ${FLIP_EASE}, opacity ${ms}ms ease`
-  if (end) p.style.transform = end
-  p.style.opacity = '0'
-  onceSettled(p, ms, done)
+  const end = flipCss(p) ?? IDENTITY
+  const red = reduced.value
+  animate(p, { opacity: [1, 0] }, { duration: red ? 0.26 : 0.22, ease: 'easeIn' })
+  const a = animate(p, { transform: [IDENTITY, end] }, red ? { duration: 0.26, ease: 'easeIn' } : panel.transition)
+  running = a
+  void a.finished.then(() => { if (running === a) running = null; done() })
 }
 
 // The sheet is opened by this mount's own Share button, which stays its anchor: a desktop popover is

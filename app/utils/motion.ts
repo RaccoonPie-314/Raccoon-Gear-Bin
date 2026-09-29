@@ -32,3 +32,20 @@ export const press = {
   scale: 0.97,
   transition: { type: 'spring', stiffness: 400, damping: 30 }
 } as const
+
+/**
+ * `panel` — a surface that morphs out of its own trigger (the Contact-to-Order panel, on both the
+ * inline and the sticky mount). Phase C moved its enter/exit off a fixed-duration CSS transition and
+ * onto this spring so the morph is interruptible and velocity-continuous — a rapid open→close→reopen
+ * retargets from where the panel actually is rather than restarting a curve.
+ *
+ * Restrained, near-critically damped (`damping 30`): it settles with no visible overshoot, because a
+ * panel that bounces reads as a toy, not a tool. The *start transform is still measured against the
+ * trigger in `ProductActions.vue` — Motion owns the physics, not the spatial anchoring.
+ *
+ * Reduced motion is applied at the call site (a short eased duration instead of this spring), keeping
+ * the contained translate but dropping the springy character.
+ */
+export const panel = {
+  transition: { type: 'spring', stiffness: 300, damping: 30 }
+} as const
