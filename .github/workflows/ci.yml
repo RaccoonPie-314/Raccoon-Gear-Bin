@@ -1,43 +1,108 @@
 name: ci
 
-on: push
+on:
+  push:
+    # Branch pushes only. Naming `branches` also excludes tags, which matters
+    # here: `backup/*` checkpoint tags are pushed alongside almost every commit
+    # (docs/rules/GIT_CONVENTIONS.md), and an unfiltered `on: push` started a
+    # second full pipeline for a SHA that had already been checked.
+    # No `pull_request` trigger: work lands by pushing to `main`, so a PR check
+    # would run the same commit a second time in its own concurrency group.
+    branches: ['**']
+
+# A newer push to the same ref cancels its queued/running predecessors, so a
+# rapid burst of commits costs one pipeline instead of N. The group must be
+# per-ref: a whole-workflow group would let a push to one branch cancel
+# another branch's run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  ci:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
+  # Lint is independent of the bundle, so it runs beside build+verify instead
+  # of in front of it. Fails only on new hard errors — the pre-existing debt is
+  # documented in eslint.config.mjs.
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Bun
+      - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
+      # ~/.bun/install/cache is Bun's content-addressed download cache; warming
+      # it is what removes the cold fetch of every package on each run. Keyed on
+      # the lockfile — not the commit — so any commit after a dependency change
+      # still gets a hit. `bun install --frozen-lockfile` stays the gate that
+      # package.json and bun.lock agree.
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build
-        run: bun run build
-
-      # Fails only on new hard errors; the 16 remaining warnings are the
-      # pre-existing debt documented in eslint.config.mjs.
       - name: Lint
         run: bun run lint
 
-      # scripts/verify-ui.mjs runs on Node (global WebSocket needs Node 24),
-      # and its Chrome candidates are macOS/Windows paths, so point it at the
-      # runner's Chrome explicitly.
+  # `bun run verify` serves the `.output` that `bun run build` produces, so the
+  # two stay in one job.
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # scripts/verify-ui.mjs runs on Node and needs Node 24 for global
+      # `WebSocket`; it has no dependencies of its own.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Nuxt's icon cache (content-hashed files) and Vite's dependency-optimizer
+      # cache. Restored *after* `bun install`, because `node_modules` is rewritten
+      # by the installer; a stale entry is only ever a cache miss — the build
+      # either reuses a hashed entry or recomputes it.
+      - name: Cache Nuxt build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .nuxt/cache
+            node_modules/.cache
+          key: ${{ runner.os }}-nuxt-${{ hashFiles('**/bun.lock', 'nuxt.config.ts', 'package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuxt-
+
+      - name: Build
+        run: bun run build
+
       - name: Verify UI
         run: bun run verify
         env:
+          # The harness' built-in candidates are macOS/Windows paths, so point
+          # it at the runner's stock Chrome.
           CHROME_PATH: /usr/bin/google-chrome

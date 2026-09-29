@@ -661,3 +661,10 @@ is, and it has caught real regressions here. For anything visual or interactive,
 drive headless Chrome over CDP at 1440 / 1280 / 1024 / 834 / 640 / 390 and assert geometry
 (alignment, control heights, no horizontal overflow) and animation state (running
 `getAnimations()`, snap delta, settle size) rather than eyeballing screenshots.
+
+The pipeline in `.github/workflows/ci.yml` is two jobs that run in parallel: `lint`, and
+`build-and-verify` — Build then Verify UI, unseparated because the harness serves the `.output`
+Build produces. Pushes to the same ref cancel that ref's in-flight older runs, and both jobs warm
+`~/.bun/install/cache` (keyed on `bun.lock`) so no run pays for a cold download of every package.
+Triggers stay branch-only: `backup/*` tags ride along with almost every commit, and a tag trigger
+ran the whole pipeline a second time for a SHA that had already been checked.
