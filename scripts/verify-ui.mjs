@@ -584,7 +584,7 @@ const run = async () => {
       check('search launcher appears on scroll', true)
       const launch = await ev(launchExpr)
       await clickAt(launch.x, launch.y)
-      check('spotlight opens with a live morph', await waitFor('document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\').getAnimations().length >= 1'))
+      check('spotlight opens with a live morph', await waitFor(`(() => { const p = document.querySelector('[role="dialog"][aria-label="Search products"] .h-14'); if (!p) return false; const r = p.getBoundingClientRect(); const t = getComputedStyle(p).transform; return p.getAnimations().length >= 1 || (r.width < 400 && t && t !== 'none' && t !== 'matrix(1, 0, 0, 1, 0, 0)') })()`, 1500))
       const settled = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
       const panel = await ev('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] .h-14\'); if (!p) return null; const r = p.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })()')
       check('spotlight panel settles as a wide field', settled && !!panel && panel.w > 400 && panel.h > 40, panel)

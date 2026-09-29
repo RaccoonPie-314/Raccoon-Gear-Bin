@@ -80,3 +80,18 @@ export const popover = {
 export const lightbox = {
   transition: { duration: 0.2, ease: [0.33, 1, 0.68, 1] }
 } as const
+
+/**
+ * `spotlight` — the SearchDock overlay FLIP: the pill morphs out of the launcher icon into the
+ * search field and back (Phase E). The frame spring is the pop-and-settle: stiffness 360 / damping
+ * 28 / mass 0.8 is snappy with a hair of life but never overshoots into a wobble. Only `frame`
+ * drives a transform (panel translate+scale+radius, glyph flyer); the backdrop and content are
+ * opacity-only fades on their own elements, kept fast and independent so the text never stretches
+ * while the surface grows. Reduced motion swaps the frame spring for a short eased duration at the
+ * call site.
+ */
+export const spotlight = {
+  frame: { type: 'spring', stiffness: 360, damping: 28, mass: 0.8 },
+  backdrop: { duration: 0.22, ease: 'linear' },
+  content: { duration: 0.16, ease: [0.16, 1, 0.3, 1] }
+} as const

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { animate, useReducedMotion } from 'motion-v'
+import { spotlight } from '~/utils/motion'
+
 const searchQuery = defineModel<string>({ default: '' })
 
 withDefaults(defineProps<{ resultCount?: number }>(), { resultCount: 0 })
@@ -12,8 +15,6 @@ const FIELD_BACK_AT = 24
 const DOCK_REVEAL_AT = 60
 const DOCK_DIRECTION_DELTA = 6
 
-const OPEN_MORPH_MS = 420
-const CLOSE_MORPH_MS = 380
 // The top field morphs IN PLACE: its width is a function of scroll over the last FIELD_SCRUB_W px
 // before it reaches the top edge (full ↔ FIELD_ICON_MIN), with a short settle when the scroll stops
 // mid-way. This gives the genuine expanding animation (and the real field's own leading glyph, so
@@ -75,6 +76,16 @@ const panelRef = ref<HTMLElement | null>(null)
 const overlayInputRef = ref<HTMLInputElement | null>(null)
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 const realGlyphRef = ref<HTMLElement | null>(null)
+const flyerRef = ref<HTMLElement | null>(null)
+const reduced = useReducedMotion()
+// Phase E: the overlay FLIP is played by Motion, not a CSS transition + transitionend/settle timer.
+// animate() writes the panel/flyer inline transform + radius directly; the reactive transform refs
+// stay pinned at the start for the length of the spring (Vue only rewrites a style key whose bound
+// value changed, so it never clobbers the running animation) and are snapped to the end value on
+// `.finished`. Handles are kept so an interrupted morph is stopped and re-aimed, not stacked.
+type OverlayAnim = { stop(): void, finished: Promise<unknown> }
+let panelAnim: OverlayAnim | null = null
+let flyerAnim: OverlayAnim | null = null
 
 const panelStartTransform = ref('none')
 const flyerStartTransform = ref('none')
@@ -86,9 +97,6 @@ let panelGlyphColor = ''
 let collapsedRadius = ''
 let restingRadius = ''
 let originClickEvent: Event | null = null
-let openTimer: ReturnType<typeof setTimeout> | null = null
-let closeTimer: ReturnType<typeof setTimeout> | null = null
-let settleOn: 'open' | 'close' | null = null
 let restoreFrame = 0
 // Unified launcher flight (BOTH directions): one drift-free `position:fixed` rAF engine lerping the
 // real launcher between the field's live rect and the sidebar slot. `flyTarget` is where it is
@@ -598,17 +606,8 @@ const focusOverlayInput = () => {
 }
 
 const finishOpen = () => {
-  if (openTimer) { clearTimeout(openTimer); openTimer = null }
-  if (settleOn === 'open') settleOn = null
   if (overlayClosing.value || !morphing.value) return
   morphing.value = false
-}
-
-// Whichever morph armed the token gets to settle; an interrupted morph never reports in.
-const onMorphSettled = (event: TransitionEvent) => {
-  if (event.target !== panelRef.value || event.propertyName !== 'transform') return
-  if (settleOn === 'close') finishClose()
-  else if (settleOn === 'open') finishOpen()
 }
 
 const isInsidePanel = (node: EventTarget | null) => {
@@ -712,23 +711,52 @@ const openOverlay = async (event: MouseEvent) => {
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!overlayMounted.value || overlayClosing.value) return
-    panelTransition.value = `transform ${OPEN_MORPH_MS}ms ${MORPH_EASE}, border-radius ${OPEN_MORPH_MS}ms ${MORPH_EASE}`
-    panelTransform.value = 'translate3d(0px, 0px, 0) scale(1, 1)'
-    panelRadius.value = restingRadius
-    flyerTransition.value = `transform ${OPEN_MORPH_MS}ms ${MORPH_EASE}, color ${OPEN_MORPH_MS}ms ${MORPH_EASE}`
-    flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
-    flyerColor.value = panelGlyphColor
+    // Motion plays the FLIP: the pill (transform + radius) and the glyph flyer (transform + color)
+    // spring from the launcher's exact pixels to their resting spots. Backdrop and content keep their
+    // own opacity fades, so text never stretches while the surface grows. Reduced motion swaps the
+    // frame spring for a short eased duration. The reactive transform refs stay at the start for the
+    // length of the spring (Vue skips rewriting an unchanged style key) and are snapped on finish.
     backdropOpacity.value = 1
     contentOpacity.value = 1
-    settleOn = 'open'
-    openTimer = setTimeout(finishOpen, OPEN_MORPH_MS + 120)
+    const frame = reduced.value ? { duration: 0.2, ease: [0.16, 1, 0.3, 1] } : spotlight.frame
+    const panel = panelRef.value
+    const flyer = flyerRef.value
+    if (panel) {
+      const a = animate(
+        panel,
+        { transform: [panelStartTransform.value, 'translate3d(0px, 0px, 0) scale(1, 1)'], borderRadius: [collapsedRadius, restingRadius] },
+        frame
+      )
+      panelAnim = a
+      void a.finished.then(() => {
+        if (panelAnim !== a) return
+        panelAnim = null
+        panelTransform.value = 'translate3d(0px, 0px, 0) scale(1, 1)'
+        panelRadius.value = restingRadius
+        finishOpen()
+      })
+    } else {
+      finishOpen()
+    }
+    if (flyer) {
+      const g = animate(
+        flyer,
+        { transform: [flyerStartTransform.value, 'translate3d(0px, 0px, 0) scale(1)'], color: [launcherGlyphColor, panelGlyphColor] },
+        frame
+      )
+      flyerAnim = g
+      void g.finished.then(() => {
+        if (flyerAnim !== g) return
+        flyerAnim = null
+        flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
+        flyerColor.value = panelGlyphColor
+      })
+    }
   }))
 }
 
 const finishClose = () => {
   if (!overlayMounted.value) return
-  if (closeTimer) { clearTimeout(closeTimer); closeTimer = null }
-  settleOn = null
   overlayMounted.value = false
   overlayActive.value = false
   overlayClosing.value = false
@@ -748,7 +776,6 @@ const closeOverlay = async () => {
   window.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('click', handleDocumentClick)
   originClickEvent = null
-  if (openTimer) { clearTimeout(openTimer); openTimer = null }
 
   contentTransition.value = `opacity ${CONTENT_OUT_MS}ms ease`
   contentOpacity.value = 0
@@ -757,22 +784,29 @@ const closeOverlay = async () => {
 
   const launcherEl = activeLauncherEl()
   const launcherRect = launcherEl?.getBoundingClientRect()
+  const frame = reduced.value ? { duration: 0.2, ease: [0.16, 1, 0.3, 1] } : spotlight.frame
+  panelAnim?.stop()
+  flyerAnim?.stop()
 
+  // Fallback: no launcher to snap back onto — shrink in place and fade out, then unmount.
   if (!launcherEl || !launcherRect?.width || !captureScene(launcherEl)) {
-    panelTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, opacity ${CONTENT_OUT_MS}ms ease`
-    panelTransform.value = 'translate3d(0px, 0px, 0) scale(0.97, 0.97)'
-    panelRadius.value = ''
-    panelOpacity.value = 0
-    settleOn = 'close'
-    closeTimer = setTimeout(finishClose, CLOSE_MORPH_MS + 120)
+    const panel = panelRef.value
+    if (panel) {
+      const a = animate(panel,
+        { transform: ['translate3d(0px, 0px, 0) scale(1, 1)', 'translate3d(0px, 0px, 0) scale(0.97, 0.97)'], opacity: 0 },
+        frame)
+      panelAnim = a
+      void a.finished.then(() => { if (panelAnim === a) panelAnim = null; finishClose() })
+    } else {
+      finishClose()
+    }
     return
   }
 
-  // Mid-flight the flyer already has its own transition running; resetting it would teleport the glyph.
+  // Park the glyph at identity (its resting spot) unless a morph is already mid-flight carrying it.
   const wasMorphing = morphing.value
   morphing.value = true
   if (!wasMorphing) {
-    flyerTransition.value = 'none'
     flyerTransform.value = 'translate3d(0px, 0px, 0) scale(1)'
     flyerColor.value = panelGlyphColor
   }
@@ -782,14 +816,26 @@ const closeOverlay = async () => {
 
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (!overlayMounted.value) return
-    panelTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, border-radius ${CLOSE_MORPH_MS}ms ${MORPH_EASE}`
-    panelTransform.value = panelStartTransform.value
-    panelRadius.value = collapsedRadius
-    flyerTransition.value = `transform ${CLOSE_MORPH_MS}ms ${MORPH_EASE}, color ${CLOSE_MORPH_MS}ms ${MORPH_EASE}`
-    flyerTransform.value = flyerStartTransform.value
-    flyerColor.value = launcherGlyphColor
-    settleOn = 'close'
-    closeTimer = setTimeout(finishClose, CLOSE_MORPH_MS + 120)
+    // The reverse FLIP: pill + glyph spring from their resting spots back onto the launcher's live
+    // pixels, so a close that interrupts an open retraces the identical path (velocity-continuous).
+    const panel = panelRef.value
+    const flyer = flyerRef.value
+    if (panel) {
+      const a = animate(panel,
+        { transform: ['translate3d(0px, 0px, 0) scale(1, 1)', panelStartTransform.value], borderRadius: [restingRadius, collapsedRadius] },
+        frame)
+      panelAnim = a
+      void a.finished.then(() => { if (panelAnim === a) panelAnim = null; finishClose() })
+    } else {
+      finishClose()
+    }
+    if (flyer) {
+      const g = animate(flyer,
+        { transform: ['translate3d(0px, 0px, 0) scale(1)', flyerStartTransform.value], color: [panelGlyphColor, launcherGlyphColor] },
+        frame)
+      flyerAnim = g
+      void g.finished.then(() => { if (flyerAnim === g) flyerAnim = null })
+    }
   }))
 }
 
@@ -818,8 +864,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('click', handleDocumentClick)
-  if (openTimer) clearTimeout(openTimer)
-  if (closeTimer) clearTimeout(closeTimer)
+  panelAnim?.stop()
+  flyerAnim?.stop()
   if (restoreFrame) cancelAnimationFrame(restoreFrame)
   fieldIdleClear()
   flyClear()
@@ -908,7 +954,6 @@ onUnmounted(() => {
           ref="panelRef"
           class="pointer-events-auto flex h-14 w-full max-w-xl origin-top-left items-center gap-3 rounded-full border border-zinc-200/80 bg-white shadow-xs pr-2 pl-5 dark:border-zinc-800/80 dark:bg-zinc-900"
           :style="{ transform: panelTransform, transition: panelTransition, borderRadius: panelRadius, opacity: panelOpacity, willChange: 'transform' }"
-          @transitionend="onMorphSettled"
         >
           <span
             ref="realGlyphRef"
@@ -980,6 +1025,7 @@ onUnmounted(() => {
       <!-- The launcher glyph in flight while the pill expands into the search field -->
       <span
         v-if="morphing && flyerBox"
+        ref="flyerRef"
         class="pointer-events-none fixed flex items-center justify-center"
         :style="{
           left: flyerBox.left,
