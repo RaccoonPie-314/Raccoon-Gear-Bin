@@ -5,7 +5,7 @@ import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
 import { animate, motion, useReducedMotion } from 'motion-v'
-import { copyPop, panel, press } from '~/utils/motion'
+import { applePop, copyPop, press } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
@@ -124,43 +124,26 @@ watch(isOpen, (open) => {
     if (!host) return
     const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
     const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
-    window.scrollTo({ top: target, behavior: reduced.value ? 'auto' : 'smooth' })
+    // Let the first bloom frame paint before the viewport moves, so the pop and the reveal-scroll do
+    // not collide on the same frame (the jarring stretch this replaces).
+    requestAnimationFrame(() => window.scrollTo({ top: target, behavior: reduced.value ? 'auto' : 'smooth' }))
   })
 })
 
 onBeforeUnmount(unpinColumn)
 
-// ---- Contact panel: FLIP expand out of the button, played by a Motion spring ----
-// The panel grows from the CTA's own footprint on both axes — a shared-element morph, not a vertical
-// squash (which distorts the message text) or a fade. Measure the button and the panel's settled box,
-// invert the panel onto the button with a translate + scale, then let Motion animate it back to
-// identity. Each mount is measured against its own button, so the inline panel expands down out of the
-// row and the sticky one up out of the bar, and closing retracts it back into the button it came from.
-//
-// Phase C kept the measurement — the spatial contract that makes the morph land *on* the button — and
-// moved only the PLAYBACK from a fixed-duration CSS transition to Motion's spring, so the panel is now
-// interruptible and velocity-continuous: a rapid open→close→reopen retargets from where the panel
-// actually is instead of freezing a transition and restarting a curve from scratch. Under reduced motion
-// the contained translate survives (a short morph of one element, not the large-area travel the
-// preference targets) but the spring is swapped for a short eased duration.
-// The spring's rest value, named once so enter and leave agree on where "settled" is.
-const IDENTITY = 'translate(0px, 0px) scale(1, 1)'
-// The panel's settled box mapped onto the button's: translate its top-left to the button's top-left
-// and scale it down to the button's size. Played forward that is grow-out-of-the-button; played in
-// reverse (leave) it is retract-back-into-the-button, on both mounts, because the button's live
-// rect is the anchor.
-const flipCss = (el: HTMLElement) => {
-  const t = ctaEl.value?.getBoundingClientRect()
-  const p = el.getBoundingClientRect()
-  if (!t || !p.width || !p.height) return null
-  return `translate(${t.left - p.left}px, ${t.top - p.top}px) scale(${t.width / p.width}, ${t.height / p.height})`
-}
-// A FLIP inverts the element's *settled* box, so the box must be measured at rest. Stopping a running
-// Motion animation and clearing its transform, then forcing the reflow that commits the rest geometry,
-// means every later rect in this tick is the layout box and never a half-morphed one — the same guard
-// that stopped an interrupted exit from compounding two inverses onto an arbitrary scale. Motion owns
-// the inline transform while it runs, so there is no lingering CSS transition to freeze.
+// ---- Contact panel: Apple popover bloom (uniform scale + offset), played by a Motion spring ----
+// Phase H replaced the asymmetric 2D FLIP (which scaled the whole panel onto the CTA's footprint and
+// stretched the textarea / channel pills mid-flight) with a native macOS/iOS "share pop": the panel
+// blooms from a slightly-shrunk, offset state to full size on a UNIFORM scale (no distortion),
+// anchored at the edge that faces its trigger — top for the inline block (drops down out of the CTA),
+// bottom for the sticky bar (rises up out of the bar). Enter rides the `applePop` spring; exit is a
+// short sharp ease-in shrink. Under reduced motion both become brief eased durations.
 let running: { stop(): void } | null = null
+// The bloom's rest value is the identity, but the box must be measured at rest before it is animated.
+// Stopping a running animation and clearing its transform, then forcing the reflow that commits the
+// rest geometry, means every later rect is the layout box — the guard that keeps an interrupted
+// enter→leave from compounding two transforms onto an arbitrary scale.
 const settleForMeasurement = (p: HTMLElement) => {
   running?.stop()
   running = null
@@ -168,24 +151,22 @@ const settleForMeasurement = (p: HTMLElement) => {
   p.style.opacity = ''
   void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
-// The enter is measured in the `enter` hook, not `before-enter`: Vue calls `before-enter` while
-// the panel is still a detached node, and its rect there is all zeros — an inversion computed from
-// it silently degrades the entry to a fade. The reveal scroll therefore aims at the panel's
-// layout position via `offsetTop`, which no in-flight transform can distort (see the watch above).
+// A hair of scale and a few px of travel, uniform on both axes so nothing inside stretches.
+const REST = 'scale(1) translateY(0px)'
+const popFrom = (compact: boolean) => compact ? 'scale(0.94) translateY(10px)' : 'scale(0.93) translateY(-8px)'
+const popTo = (compact: boolean) => compact ? 'scale(0.96) translateY(6px)' : 'scale(0.95) translateY(-4px)'
+
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
-  // Pin before the first measurement: the column goes `static` synchronously, so the settled box
-  // the flip inverts is the one the panel will actually hold for the reveal scroll.
+  // Pin before the first measurement so the reveal scroll aims at a stable destination.
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
-  p.style.transformOrigin = 'top left'
-  const start = flipCss(p) ?? IDENTITY
-  // Opacity rides its own short fade, transform rides the spring. Splitting them keeps the text
-  // legible on the heavily-scaled first frames (a gentle 240ms fade, not a spring that snaps to 1 in
-  // a frame) and lets the morph stay interruptible. Under reduced motion both are a short duration.
+  p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
   const red = reduced.value
-  animate(p, { opacity: [0, 1] }, { duration: red ? 0.3 : 0.24, ease: 'easeOut' })
-  const a = animate(p, { transform: [start, IDENTITY] }, red ? { duration: 0.3, ease: 'easeOut' } : panel.transition)
+  // Opacity rides its own fast clean curve, transform rides the spring — split so the text is legible
+  // on the shrunk first frames and the bloom stays interruptible.
+  animate(p, { opacity: [0, 1] }, { duration: red ? 0.16 : 0.18, ease: 'easeOut' })
+  const a = animate(p, { transform: [popFrom(props.compact), REST] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }
@@ -198,14 +179,13 @@ const onPanelAfterEnter = (el: Element) => {
 }
 const onPanelLeave = (el: Element, done: () => void) => {
   const p = el as HTMLElement
-  // Settle first, then aim: the exit is computed from the same rest box the entry was, and against
-  // the button's live rect, so a close that interrupts an open retraces the identical path home.
+  // Settle first, then shrink: the exit starts from the same rest box the entry landed on, so a close
+  // that interrupts an open retargets cleanly instead of compounding transforms.
   settleForMeasurement(p)
-  p.style.transformOrigin = 'top left'
-  const end = flipCss(p) ?? IDENTITY
+  p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
   const red = reduced.value
-  animate(p, { opacity: [1, 0] }, { duration: red ? 0.26 : 0.22, ease: 'easeIn' })
-  const a = animate(p, { transform: [IDENTITY, end] }, red ? { duration: 0.26, ease: 'easeIn' } : panel.transition)
+  animate(p, { opacity: [1, 0] }, { duration: red ? 0.12 : 0.14, ease: 'easeIn' })
+  const a = animate(p, { transform: [REST, popTo(props.compact)] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }
@@ -346,7 +326,7 @@ const channelName = platformLabel
         :aria-label="ctaLabel"
         tabindex="0"
         class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
-        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-zinc-50/80 dark:bg-zinc-900/70'"
+        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-white/95 shadow-xl backdrop-blur-md dark:bg-zinc-900/95'"
       >
         <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
              a browser that refuses the clipboard still leaves them something to select. The field

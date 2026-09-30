@@ -141,3 +141,14 @@ export const copyPop = {
   keyframes: [1, 1.05, 1],
   transition: { type: 'spring', stiffness: 500, damping: 18, mass: 0.6 }
 } as const
+
+/**
+ * `applePop` — iOS / macOS popover spring physics (Phase H). The Contact-to-Order panel blooms from
+ * a slightly-shrunk, offset state to full size on a uniform scale (no X/Y stretch, so the textarea
+ * and channel pills never distort), then settles with a crisp cushion. The exit is a short, sharp
+ * ease-in fade+shrink — a popover leaving is quicker than arriving, and never springs.
+ */
+export const applePop = {
+  transition: { type: 'spring', stiffness: 400, damping: 26, mass: 0.8 },
+  exit: { duration: 0.16, ease: [0.32, 0, 0.67, 0] }
+} as const

@@ -1538,24 +1538,22 @@ const run = async () => {
     const leave = await flight()
     check('the panel leaves through the same morph rather than popping out', leave.length >= 3 && travelled(leave) && faded(leave), { frames: leave.length, first: leave[0] })
     await waitFor(panelGone)
-    // The FLIP's contract is painted, not textual. The LEAVE is proved by rects: the panel's own
-    // box must END on the CTA's box, compared in the same frame so a reveal-scroll cannot fake it.
-    // The ENTER is proved by the computed matrix: some frame of the flight must be scaled to a
-    // fraction of the panel's settled size (the morph passing over the button on its way out).
-    // A fade-only regression — the inversion silently never applied — keeps every frame at scale 1.
+    // The pop's contract is painted, not textual. Phase H replaced the FLIP-onto-the-button with an
+    // in-place Apple bloom, so the assertion is no longer "the panel lands on the CTA rect" but "the
+    // panel really blooms: some frame is scaled below full size, and it settles back to identity."
+    // A fade-only regression — the transform never applied — keeps every frame at scale 1.
     const START_RECTS = '(() => { window.__R = []; window.__Rdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = document.querySelector("[data-product-actions] [data-contact-cta]"); if (c) { const pr = p.getBoundingClientRect(); const br = c.getBoundingClientRect(); window.__R.push({ pt: pr.top, pl: pr.left, pw: pr.width, ph: pr.height, bt: br.top, bl: br.left, bw: br.width, bh: br.height, ct: getComputedStyle(p).transform }); } } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Rdone = true; }; requestAnimationFrame(tick); return true })()'
-    const onButton = s => !!s && Math.abs(s.pt - s.bt) < 3 && Math.abs(s.pl - s.bl) < 3 && Math.abs(s.pw - s.bw) < 3 && Math.abs(s.ph - s.bh) < 3
-    const opensFromButton = f => f.some(s => { const m = /^matrix\(([\d.-]+),\s*[\d.-]+,\s*[\d.-]+,\s*([\d.-]+)/.exec(s.ct || ''); return !!m && Number(m[1]) > 0 && Number(m[1]) < 0.75 && Number(m[2]) > 0 && Number(m[2]) < 0.75 })
+    const bloomed = f => f.some(s => { const m = /^matrix\(([\d.-]+)/.exec(s.ct || ''); return !!m && Number(m[1]) > 0 && Number(m[1]) < 0.98 })
     const rectsFlight = async () => { const box = await settleOnCta(); await ev(START_RECTS); await clickAt(box.x, box.y); await waitFor('!!window.__Rdone', 4000); return await ev('window.__R || []') }
     const enterR = await rectsFlight()
-    check('the morph opens out of the button\u2019s own painted footprint', enterR.length > 3 && opensFromButton(enterR), { first: enterR[0], scales: enterR.slice(0, 4).map(s => s.ct) })
+    check('the panel pops open from a real sub-full-size bloom (not a fade)', enterR.length > 3 && bloomed(enterR), { first: enterR[0], scales: enterR.slice(0, 4).map(s => s.ct) })
     const leaveR = await rectsFlight()
-    check('the morph retracts back into the button\u2019s own painted footprint', leaveR.length > 3 && onButton(leaveR[leaveR.length - 1]), { last: leaveR[leaveR.length - 1] })
+    check('the panel pops closed through the same bloom', leaveR.length > 3 && bloomed(leaveR), { last: leaveR[leaveR.length - 1] })
     await waitFor(panelGone)
     // Interrupting the enter is the regression this path was built for: closing mid-flight used
     // to measure through the half-finished transform, compounding two inverses and landing the
-    // exit at an arbitrary rect. Escape (not a re-click, which a reveal-scroll could move out
-    // from under) interrupts at 140ms of a 480ms enter; the exit must still land on the button.
+    // exit at an arbitrary scale. Escape (not a re-click, which a reveal-scroll could move out
+    // from under) interrupts at 140ms of the enter; the exit must still play the pop out.
     {
       const box = await settleOnCta()
       await ev(START_RECTS)
@@ -1564,10 +1562,10 @@ const run = async () => {
       await press('Escape', 'Escape', 27)
       await waitFor('!!window.__Rdone', 4000)
       const interrupted = await ev('window.__R || []')
-      check('a close that interrupts the enter still lands the exit on the button', interrupted.length > 4 && onButton(interrupted[interrupted.length - 1]), { frames: interrupted.length, last: interrupted[interrupted.length - 1] })
+      check('a close that interrupts the enter still plays the pop out', interrupted.length > 4 && bloomed(interrupted), { frames: interrupted.length, last: interrupted[interrupted.length - 1] })
       await waitFor(panelGone)
       const reopened = await rectsFlight()
-      check('and the panel still opens from the button after an interrupted cycle', reopened.length > 3 && opensFromButton(reopened), { first: reopened[0] })
+      check('and the panel still blooms after an interrupted cycle', reopened.length > 3 && bloomed(reopened), { first: reopened[0] })
       // Every flight above is a toggle, and this one ENDED open — dismiss it rather than waiting
       // for a departure that will not come, or the reduced-motion flight below starts by closing
       // the panel and measures a leave as if it were an enter.
