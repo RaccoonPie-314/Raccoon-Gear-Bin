@@ -57,9 +57,18 @@ body {
   scrollbar-width: none;
 }
 
-.page-enter-active,
+/* The route transition is what a locale switch *is* — switching EN ⇄ ខ្មែរ is a navigation, because
+   translations are resolved at fetch time — so it is shaped like one gesture rather than two
+   animations. The outgoing page gets out of the way fast on an accelerating curve (nobody needs to
+   watch a page leave); the incoming one arrives slower on the storefront's ease-out. Both travel the
+   same 4px in the same direction, so the path out is the path back. `out-in` mode means they never
+   overlap and the durations add: ~320ms from tap to a fully painted page. */
+.page-enter-active {
+  transition: opacity 220ms ease-out, transform 220ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
 .page-leave-active {
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity 100ms ease-in, transform 100ms cubic-bezier(0.42, 0, 1, 1);
 }
 
 .page-enter-from,
@@ -147,6 +156,18 @@ body {
   [data-slot="content"][role="listbox"][data-state="closed"] {
     animation: none;
   }
+}
+
+/* The data-arrival handoff: the skeleton grid is replaced by the real one with a fade instead of a
+   hard cut. Opacity only, and only on the incoming layer — the loaded block is in the DOM from the
+   first frame of its own enter, so it already occupies its full height and the page cannot collapse
+   under it. `ease-out` because content arriving is the direction the eye is watching. */
+.reveal-enter-active {
+  transition: opacity 200ms ease-out;
+}
+
+.reveal-enter-from {
+  opacity: 0;
 }
 
 /* Frosted surfaces, defeated. `prefers-reduced-transparency` is the platform's answer to "do not make

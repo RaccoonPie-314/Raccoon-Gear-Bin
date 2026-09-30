@@ -7,6 +7,10 @@ const { signOut, isAdmin } = useAdminAuth()
 const { fetchCatalog } = useCatalog()
 const { fetchSiteInfo } = useSiteInfo()
 const { locale, t } = useI18n()
+// Every internal path on the storefront resolves through the locale. A bare `/` happens to come out
+// right today only because `redirectOn: 'root'` sends it back to `/km/` from the cookie — a redirect
+// hop that depends on a cookie being present; `localePath` states the route it means.
+const localePath = useLocalePath()
 
 const products = ref<CatalogProduct[]>([])
 const categories = ref<CatalogCategory[]>([])
@@ -65,7 +69,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
         <SiteInfoContact :site-info="siteInfo" />
 
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 pt-2.5 sm:pt-4 lg:gap-x-6">
-          <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
+          <NuxtLink :to="localePath('/')" :aria-label="t('appName')" class="shrink-0">
             <BrandLogo size="masthead" />
           </NuxtLink>
 
@@ -212,15 +216,21 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           <div v-else-if="!filteredProducts.length" class="mt-8 rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">
             <p class="text-sm font-medium text-zinc-500">{{ t('noProducts') }}</p>
           </div>
-          <div v-else class="mt-8 grid grid-cols-1 gap-x-6 gap-y-10 sm:mt-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 xl:grid-cols-3">
-            <ProductCard
-              v-for="product in filteredProducts"
-              :key="product.id"
-              :product="product"
-              :is-admin="isAdminMode"
-              @edit="openEditEditor"
-            />
-          </div>
+          <!-- The grid arrives with a fade rather than a cut. It is its own `v-if` chain now (the same
+               three mutually exclusive conditions) precisely so it can be a Transition child — Vue only
+               accepts `v-else` as a direct sibling, and a Transition slot needs the condition on the
+               element it wraps. -->
+          <Transition name="reveal">
+            <div v-if="!isLoading && filteredProducts.length" class="mt-8 grid grid-cols-1 gap-x-6 gap-y-10 sm:mt-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 xl:grid-cols-3">
+              <ProductCard
+                v-for="product in filteredProducts"
+                :key="product.id"
+                :product="product"
+                :is-admin="isAdminMode"
+                @edit="openEditEditor"
+              />
+            </div>
+          </Transition>
         </div>
       </div>
     </UContainer>

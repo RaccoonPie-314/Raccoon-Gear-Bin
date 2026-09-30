@@ -954,8 +954,13 @@ const run = async () => {
       await sleep(120)
       await mouse('mousePressed', nextBtn.x, nextBtn.y, 1)
       await mouse('mouseReleased', nextBtn.x, nextBtn.y)
-      const midSwap = await ev('(() => { const f = document.querySelector(\'[data-gallery-zoom]\'); const is = [...document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\')]; return { layers: is.length, anims: is.reduce((n, i) => n + i.getAnimations().length, 0), travel: is.some(i => getComputedStyle(i).transform !== \'none\'), widths: is.map(i => Math.round(i.getBoundingClientRect().width)), box: Math.round(f.getBoundingClientRect().width) } })()')
+      const midSwap = await ev('(() => { const f = document.querySelector(\'[data-gallery-zoom]\'); const is = [...document.querySelectorAll(\'[data-product-gallery] [data-gallery-main]\')]; return { layers: is.length, anims: is.reduce((n, i) => n + i.getAnimations().length, 0), travel: is.some(i => getComputedStyle(i).transform !== \'none\'), widths: is.map(i => Math.round(i.getBoundingClientRect().width)), box: Math.round(f.getBoundingClientRect().width), ops: is.map(i => +getComputedStyle(i).opacity), gap: is.length > 1 ? Math.round(Math.abs(is[1].getBoundingClientRect().left - is[0].getBoundingClientRect().left)) : 0 } })()')
       check('the swap travels: a second layer mid-flight carrying an actual transform', midSwap.layers >= 2 && (midSwap.anims >= 1 || midSwap.travel) && await waitFor(`(${SEL_IDX}) === 2`), { midSwap })
+      // "Continuous, not a fade." Both layers stay fully opaque through the swap, and they sit exactly
+      // one photo box apart — so the pair reads as one surface sliding across the frame with no gap
+      // and no dissolve. A cross-fade regression fails the opacity half; a desynced enter/exit (which
+      // is what a snap-back parent looks like) fails the adjacency half.
+      check('the inline swap slides as one continuous surface, never a cross-fade', midSwap.layers >= 2 && midSwap.ops.every(o => o > 0.99) && Math.abs(midSwap.gap - midSwap.box) <= 4, { ops: midSwap.ops, gap: midSwap.gap, box: midSwap.box })
       // The enlargement-flash regression: the outgoing layer once sized to the padded
       // frame's padding box (~17% wider than the photo box) and read as a split-second
       // zoom. Both layers must occupy the identical box mid-swap. Broken fixture images
@@ -1258,6 +1263,24 @@ const run = async () => {
     const mNext = (await ev(boxesExpr('[data-gallery-next]')))[0]
     await clickAt(mNext.x, mNext.y)
     check('touch taps reach the gallery arrows without hovering', await waitFor(`(${SEL_IDX}) === 1`))
+    // ---- swipe to cycle the inline photo ----------------------------------------------------
+    // A leftward flick advances, a rightward one takes it back — and the pair leaves the selection
+    // where the checks below expect it. `touch-action: pan-y` on the button is what lets the
+    // horizontal axis reach the app while the page keeps the vertical one.
+    const cyc = (await ev(boxesExpr('[data-gallery-zoom]')))[0]
+    const flick = async (fromX, toX) => {
+      await touch('touchStart', [{ x: fromX, y: cyc.y }])
+      for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: fromX + ((toX - fromX) * i) / 5, y: cyc.y }]); await sleep(30) }
+      await touch('touchEnd', [])
+    }
+    await flick(cyc.x + 30, cyc.x - 70)
+    check('a leftward swipe on the photo advances it', await waitFor(`(${SEL_IDX}) === 2`, 2500), { idx: await ev(SEL_IDX) })
+    await flick(cyc.x - 30, cyc.x + 70)
+    check('a rightward swipe takes it back', await waitFor(`(${SEL_IDX}) === 1`, 2500), { idx: await ev(SEL_IDX) })
+    // The finger-follow must not be left on the page, and the click that trails a drag is the end of
+    // a gesture rather than an intent to enlarge — the same guard the lightbox pan carries.
+    check('the photo settles back to no offset after a swipe', await ev('(() => { const b = document.querySelector("[data-gallery-zoom]"); if (!b) return false; const t = getComputedStyle(b).transform; if (t === "none" || t === "") return true; const m = new DOMMatrixReadOnly(t); return Math.abs(m.f) <= 1 })()'))
+    check('the trailing click of a swipe does not open the lightbox', await ev(`!document.querySelector(${JSON.stringify(LB)})`))
     const mZoom = (await ev(boxesExpr('[data-gallery-zoom]')))[0]
     await clickAt(mZoom.x, mZoom.y)
     const mOpen = await waitFor(`!!document.querySelector(${JSON.stringify(LB)})`)
@@ -1682,6 +1705,33 @@ const run = async () => {
     check('the popover is anchored beside the Share control that opened it', !!keyed && !!shareBtnGeo && keyed.width > 100 && keyed.width < keyed.vw * 0.5 && (Math.abs(keyed.top - shareBtnGeo.bottom) < 40 || Math.abs(keyed.bottom - shareBtnGeo.top) < 40) && keyed.bottom < keyed.vh - 1, { keyed, shareBtnGeo })
     check('the desktop popover carries no thumb-reach close row', !!keyed && keyed.hasCloseBottom === false, { hasCloseBottom: keyed && keyed.hasCloseBottom })
     await closeSheet()
+    // ---- the popover's bloom (desktop shape) ------------------------------------------------
+    // The desktop shape used to unfold on `scaleY` alone, which stretched every copy row and
+    // destination pill vertically for the length of the pop — the defect Phase H removed from the
+    // contact panel. Frame-sampled rather than read at rest, because a settled popover reports the
+    // identity matrix whatever curve got it there: only a mid-flight frame can tell a uniform bloom
+    // (a === d < 1) from a one-axis stretch (scaleY 0.5 gives a=1, d=0.5).
+    const START_SHEET_FRAMES = '(() => { window.__SF = []; window.__SFdone = false; const t0 = performance.now(); const tick = function () { const s = document.querySelector("[data-share-sheet]"); const t = s && getComputedStyle(s).transform; if (t && t !== "none") { const m = new DOMMatrixReadOnly(t); window.__SF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +getComputedStyle(s).opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__SFdone = true }; requestAnimationFrame(tick); return true })()'
+    const settleOnShare = async () => {
+      await ev('(() => { const el = [...document.querySelectorAll("[data-share-cta]")].find(b => b.getClientRects().length); el.scrollIntoView({ block: "center", inline: "nearest" }); return true })()')
+      await sleep(500)
+      return await ev('(() => { const el = [...document.querySelectorAll("[data-share-cta]")].find(b => b.getClientRects().length); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()')
+    }
+    const sbox = await settleOnShare()
+    await ev(START_SHEET_FRAMES)
+    await clickAt(sbox.x, sbox.y)
+    await waitFor('!!window.__SFdone', 4000)
+    const sframes = await ev('window.__SF || []')
+    const popBloom = sframes.filter(f => f.a > 0.5 && f.a < 0.995)
+    check('the desktop popover blooms on a uniform scale, not a one-axis stretch', sframes.length > 3 && popBloom.length > 0 && popBloom.every(f => Math.abs(f.a - f.d) <= 0.01), { frames: sframes.slice(0, 6) })
+    // The other half of "the same animation as the Contact panel": the bloom travels a few px back
+    // toward the control it opened from, and opacity fades on its own curve rather than riding the
+    // spring. A scale-only pop passes the check above and fails this one.
+    const popTravelled = sframes.filter(f => Math.abs(f.f) >= 2)
+    const popFaded = sframes.some(f => f.o > 0.02 && f.o < 0.98)
+    check('the popover travels toward its trigger and fades on its own curve, like the panel', popTravelled.length > 0 && popFaded, { travel: popTravelled.slice(0, 4), frames: sframes.slice(0, 4) })
+    await waitFor(sheetAtRest)
+    await closeSheet()
     check('the sheet never reached the platform share API during the whole visit', (await shareCalls()).length === 0, { calls: await shareCalls() })
 
     await clearFeedback()
@@ -1847,6 +1897,18 @@ const run = async () => {
     await waitFor('!!document.querySelector(\'main article p.uppercase\')')
     const enEyebrows = await ev('Array.from(document.querySelectorAll("main article p.uppercase")).map(p => parseFloat(getComputedStyle(p).letterSpacing))')
     check('the English card eyebrow is wide, so the Khmer bound has something to measure', enEyebrows.length > 0 && enEyebrows.every(px => px > 1.5), { enEyebrows })
+    // The locale pill answers on pointer-down, because a locale switch is a remount plus a refetch and
+    // the control is the only thing that *can* respond in that gap. Read `scale`, not `transform` —
+    // Tailwind v4's scale utility writes the standalone property, which a transform read never sees.
+    const pills = await ev(boxesExpr('div[aria-label="Language"] a'))
+    const kmPill = pills[1]
+    await mouse('mousePressed', kmPill.x, kmPill.y, 1)
+    await sleep(90)
+    const pillPress = await ev('(() => { const a = document.querySelectorAll(\'div[aria-label="Language"] a\')[1]; return getComputedStyle(a).scale })()')
+    // Released away from the pill on purpose: a press and release over the same link would navigate,
+    // and the run wants to make that trip through the pill itself two lines later.
+    await mouse('mouseReleased', kmPill.x, kmPill.y + 320, 0)
+    check('the locale pill answers on press, before the new page paints', /^0\.9/.test(pillPress), { pillPress })
     await nav(new URL('/km/products/' + G.manyId, appUrl).href)
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
     await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
@@ -1865,6 +1927,17 @@ const run = async () => {
     await waitFor('!!document.querySelector(\'main article p.uppercase\')')
     const kmEyebrows = await ev('Array.from(document.querySelectorAll("main article p.uppercase")).map(p => parseFloat(getComputedStyle(p).letterSpacing))')
     check('no Khmer card eyebrow carries wide Latin tracking', kmEyebrows.length > 0 && kmEyebrows.every(px => px <= 1.1), { kmEyebrows })
+    // The locale a card links to is the bug this guards. A hardcoded `/products/<id>` is the *English*
+    // route under `prefix_except_default`, so a Khmer visitor clicking a listing was handed English
+    // until they found the storefront again. Assert the href carries the prefix, then follow it and
+    // assert the page it lands on is still Khmer — a link that only looks right in the DOM fails there.
+    const kmHref = await ev('(() => { const a = document.querySelector("main article a[href]"); return a ? a.getAttribute("href") : null })()')
+    check('a Khmer card links into the Khmer route', typeof kmHref === 'string' && kmHref.startsWith('/km/products/'), { kmHref })
+    await clickSelector('main article a[href]', 'location.pathname.startsWith("/km/products/")')
+    await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
+    check('following that card keeps the detail page in Khmer', await ev('(() => { const p = location.pathname; const khmer = /[\u1780-\u17FF]/.test(document.body.innerText); return p.startsWith("/km/products/") && khmer })()'), { href: kmHref })
+    await nav(new URL('/km/', appUrl).href)
+    await waitFor('!!document.querySelector(\'main article p.uppercase\')')
     await nav(detailUrl(G.manyId))
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
     check('the page is back in English for the checks that follow', (await stickyMount()).ctaText === C.cta.in, { cta: (await stickyMount()).ctaText })

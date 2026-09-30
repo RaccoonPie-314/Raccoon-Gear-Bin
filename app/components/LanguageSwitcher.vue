@@ -9,6 +9,11 @@ const switchLocalePath = useSwitchLocalePath()
 // would re-render the interface around English product names and a stale location label.
 // Linking to the localized path changes the route, and Nuxt's default page key is `route.path` —
 // which remounts the page, refetches, and leaves a real alternate-locale URL behind.
+//
+// Because that route change *is* the transition, the pill answers on pointer-down (`active:scale`)
+// rather than waiting for the new page: a language switch costs a remount and a refetch, so the only
+// feedback in the gap between tap and paint is the control itself. `motion-safe:` keeps the press out
+// of the way under prefers-reduced-motion, and the scale is the storefront's own `press` value.
 type LocaleCode = 'en' | 'km'
 
 const languages: { code: LocaleCode; label: string }[] = [
@@ -27,7 +32,7 @@ const languages: { code: LocaleCode; label: string }[] = [
       :key="language.code"
       :to="switchLocalePath(language.code)"
       :aria-current="locale === language.code ? 'true' : undefined"
-      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wider transition-colors duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
+      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wider transition-[color,background-color,scale] duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white motion-safe:active:scale-[0.97]"
       :class="[
         locale === language.code
           ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-white'

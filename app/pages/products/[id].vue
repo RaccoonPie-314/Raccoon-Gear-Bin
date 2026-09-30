@@ -6,6 +6,9 @@ const route = useRoute()
 const { fetchProduct, fetchProducts, parseSpecificationPairs } = useCatalog()
 const { fetchSiteInfo } = useSiteInfo()
 const { locale, t } = useI18n()
+// The header search, the logo and the back link all resolve through the locale, so a Khmer visitor
+// who landed here from a card stays in Khmer instead of being handed the English route.
+const localePath = useLocalePath()
 const product = ref<Awaited<ReturnType<typeof fetchProduct>>>(null)
 const isLoading = ref(true)
 const loadError = ref('')
@@ -116,7 +119,7 @@ useHead(() => {
            its own full-width line below that — the same reflow valve the masthead uses, so a
            control that no longer fits adds a row instead of widening the page. -->
       <UContainer class="flex min-h-16 sm:min-h-20 flex-wrap items-center gap-x-3 gap-y-2 py-2 sm:gap-x-4">
-        <NuxtLink to="/" :aria-label="t('appName')" class="shrink-0">
+        <NuxtLink :to="localePath('/')" :aria-label="t('appName')" class="shrink-0">
           <BrandLogo size="md" />
         </NuxtLink>
         <div class="order-last w-full min-w-0 sm:order-none sm:w-auto sm:max-w-xs sm:flex-1">
@@ -131,7 +134,7 @@ useHead(() => {
           <ColorModeToggle />
           <LanguageSwitcher />
           <NuxtLink
-            to="/"
+            :to="localePath('/')"
             class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
@@ -162,12 +165,16 @@ useHead(() => {
       <section v-else-if="!product" class="rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">
         <h1 class="text-2xl font-black text-zinc-950 dark:text-white">{{ t('productNotFound') }}</h1>
         <p class="mt-3 text-sm text-zinc-500">{{ t('productNotFoundDescription') }}</p>
-        <UButton to="/" color="neutral" class="mt-6 rounded-full px-6">
+        <UButton :to="localePath('/')" color="neutral" class="mt-6 rounded-full px-6">
           {{ t('browseProducts') }}
         </UButton>
       </section>
 
-      <section v-else class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+      <!-- The loaded product fades in over the skeleton instead of cutting to it — the same `reveal`
+           transition the catalog grid uses. Its condition is spelled out rather than left as `v-else`
+           because a Transition child owns its own `v-if`. -->
+      <Transition name="reveal">
+      <section v-if="!isLoading && !loadError && product" class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
         <!-- Gallery Column: the photo frame, arrows and filmstrip live in one presentational
              component; the page only hands it the catalog-mapped images. -->
         <ProductGallery :images="product.images" :name="product.name" />
@@ -231,6 +238,7 @@ useHead(() => {
           </div>
         </div>
       </section>
+      </Transition>
     </UContainer>
   </main>
 </template>
