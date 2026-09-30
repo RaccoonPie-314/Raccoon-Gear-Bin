@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CatalogCategory } from '~/types/catalog'
 import type { CategoryItem } from '~/composables/useCategoryItems'
+import { motion, animate, useReducedMotion } from 'motion-v'
+import { press, iconPop } from '~/utils/motion'
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +21,16 @@ const emit = defineEmits<{
 // Item model, active matching and selection toggling are shared with the mobile dock;
 // everything below this line is desktop-only pointer behaviour.
 const { computedItems, isItemActive, activeIndex, nextSelection } = useCategoryItems(props)
+
+const reduced = useReducedMotion()
+
+// One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it, so a
+// stalled spring is only "no pop". The button element carries the icon svg.
+const popActiveIcon = () => {
+  if (reduced.value) return
+  const icon = desktopItemRefs.value[activeIndex.value]?.querySelector('svg')?.parentElement
+  if (icon) animate(icon, { scale: [...iconPop.keyframes] }, iconPop.transition)
+}
 
 const handleSelect = (item: CategoryItem) => {
   if (dragJustFinished) return
@@ -349,6 +361,7 @@ onUnmounted(() => {
 watch(activeIndex, () => {
   nextTick(() => {
     updateDesktopIndicator()
+    popActiveIcon()
   })
 })
 
@@ -387,13 +400,15 @@ watch(computedItems, () => {
     />
 
     <!-- Desktop Category Buttons -->
-    <button
+    <motion.button
       v-for="(item, index) in computedItems"
       :key="`desktop-${item.key}`"
       :ref="(el) => setDesktopItemRef(el, index)"
       type="button"
       role="tab"
       :aria-selected="isItemActive(item)"
+      :while-press="reduced || isDragging ? undefined : { scale: press.scale }"
+      :transition="press.transition"
       class="relative flex flex-col items-center justify-center w-full rounded-full select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white bg-transparent"
       :class="[
         !isVisualActive(item, index)
@@ -431,7 +446,7 @@ watch(computedItems, () => {
           {{ item.name }}
         </span>
       </div>
-    </button>
+    </motion.button>
   </nav>
 </template>
 

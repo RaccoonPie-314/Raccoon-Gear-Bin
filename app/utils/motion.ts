@@ -107,3 +107,26 @@ export const arrival = {
   keyframes: [1, 1.28, 0.92, 1.05, 1],
   transition: { type: 'spring', stiffness: 420, damping: 18, mass: 0.7 }
 } as const
+
+/**
+ * `iconPop` — the one-shot spring a category icon plays the moment its category becomes active
+ * (Phase F). A single overshoot to 1.16 then rest at 1.0 — the icon acknowledging the selection,
+ * not bouncing. Driven imperatively with `animate()` at the call site; it is pure decoration, so
+ * nothing in the lifecycle waits on it and a stalled spring can only mean "no pop", never a strand.
+ * Skipped entirely under prefers-reduced-motion.
+ */
+export const iconPop = {
+  keyframes: [1, 1.16, 1],
+  transition: { type: 'spring', stiffness: 500, damping: 16, mass: 0.7 }
+} as const
+
+/**
+ * `dock` — the mobile category bar's scroll-reveal glide (Phase F). Replaces the fixed-duration
+ * `transition-transform` with a spring so the bar eases in/out and can be interrupted by a
+ * direction change mid-slide. Damped past critical (no overshoot): a bottom sheet that bounces up
+ * past its resting edge reads as broken. Declarative transform (`y`) — the motion-v path that runs
+ * in every environment (unlike imperative layout-property animation).
+ */
+export const dock = {
+  transition: { type: 'spring', stiffness: 360, damping: 34, mass: 0.9 }
+} as const

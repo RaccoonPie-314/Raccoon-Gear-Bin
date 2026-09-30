@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { CatalogCategory } from '~/types/catalog'
 import type { CategoryItem } from '~/composables/useCategoryItems'
+import { motion, animate, useReducedMotion } from 'motion-v'
+import { press, iconPop, dock } from '~/utils/motion'
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +21,15 @@ const emit = defineEmits<{
 // Item model, active matching and selection toggling are shared with the desktop dock;
 // everything below this line is mobile-only touch behaviour.
 const { computedItems, isItemActive, activeIndex, nextSelection } = useCategoryItems(props)
+
+const reduced = useReducedMotion()
+
+// One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it.
+const popActiveIcon = () => {
+  if (reduced.value) return
+  const icon = mobileItemRefs.value[activeIndex.value]?.querySelector('svg')?.parentElement
+  if (icon) animate(icon, { scale: [...iconPop.keyframes] }, iconPop.transition)
+}
 
 const handleSelect = (item: CategoryItem) => {
   if (dragJustFinished) return
@@ -299,6 +310,7 @@ watch(activeIndex, () => {
   nextTick(() => {
     updateMobileIndicator()
     scrollActiveMobileItemIntoView()
+    popActiveIcon()
   })
 })
 
@@ -309,11 +321,13 @@ watch(computedItems, () => {
 
 <template>
   <Teleport to="body">
-    <div
-      class="fixed bottom-0 inset-x-0 z-40 lg:hidden pointer-events-none transition-transform duration-300 ease-out"
-      :class="isMobileNavVisible ? 'translate-y-0' : 'translate-y-[125%]'"
+    <motion.div
+      class="fixed bottom-0 inset-x-0 z-40 lg:hidden pointer-events-none"
+      :initial="false"
+      :animate="{ y: isMobileNavVisible ? '0%' : '125%' }"
+      :transition="reduced ? { duration: 0 } : dock.transition"
     >
-      <div class="pointer-events-auto bg-white/90 dark:bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-200/80 dark:border-zinc-800/80 shadow-xl px-2 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
+      <div class="pointer-events-auto bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl backdrop-saturate-150 border-t border-white/50 dark:border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_-12px_32px_-14px_rgba(0,0,0,0.3)] px-2 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
         <nav
           ref="mobileNavRef"
           aria-label="Mobile product categories"
@@ -338,13 +352,15 @@ watch(computedItems, () => {
           />
 
           <!-- Mobile Category Buttons -->
-          <button
+          <motion.button
             v-for="(item, index) in computedItems"
             :key="`mobile-${item.key}`"
             :ref="(el) => setMobileItemRef(el, index)"
             type="button"
             role="tab"
             :aria-selected="isItemActive(item)"
+            :while-press="reduced || isTouchDragging ? undefined : { scale: press.scale }"
+            :transition="press.transition"
             class="relative flex flex-col items-center justify-center text-center flex-1 min-w-[4.25rem] py-1.5 px-2 rounded-full transition-colors duration-200 select-none cursor-pointer z-10 bg-transparent shrink-0 focus-visible:outline-none"
             :class="[
               isVisualActive(item, index)
@@ -365,9 +381,9 @@ watch(computedItems, () => {
             >
               {{ item.name }}
             </span>
-          </button>
+          </motion.button>
         </nav>
       </div>
-    </div>
+    </motion.div>
   </Teleport>
 </template>
