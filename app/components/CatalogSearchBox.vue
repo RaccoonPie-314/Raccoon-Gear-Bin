@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CatalogProduct } from '~/types/catalog'
+import { getProductPricing } from '~/utils/product-pricing'
 
 // Presentational by design: the results are the page's `useCatalogBrowse` output, filtered
 // where the fetch lives. This box owns only the popover's open state and its keyboard exit —
@@ -10,10 +11,18 @@ const props = withDefaults(defineProps<{ results: CatalogProduct[]; loading?: bo
 const emit = defineEmits<{ focus: [] }>()
 
 const { t } = useI18n()
+// Results are links into the catalog, so they resolve through the current locale: a bare
+// `/products/<id>` is the English route, which would drop a Khmer visitor out of Khmer mid-search.
+const localePath = useLocalePath()
 
 // A header popover is a scanner, not a second results page; anything past the first hits is
 // noise next to the product the visitor actually came to read.
 const MAX_RESULTS = 6
+
+// One row, one number: the price a visitor would pay (so a running promotion shows its discounted
+// price), asked of the same rule the card and the detail page ask. The crossed-out original belongs
+// to those, not to a 44px result row — `ProductPrice` would add a second line here.
+const priceOf = (product: CatalogProduct) => getProductPricing(product).price
 
 const isFocused = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
@@ -45,7 +54,7 @@ const onKeydown = (event: KeyboardEvent) => {
     const first = displayed.value[0]
     if (first) {
       close()
-      void navigateTo(`/products/${first.id}`)
+      void navigateTo(localePath(`/products/${first.id}`))
     }
   }
 }
@@ -96,7 +105,7 @@ const onKeydown = (event: KeyboardEvent) => {
       <ul v-if="displayed.length" class="py-1">
         <li v-for="product in displayed" :key="product.id">
           <NuxtLink
-            :to="`/products/${product.id}`"
+            :to="localePath(`/products/${product.id}`)"
             class="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
             @click="close"
           >
@@ -110,7 +119,7 @@ const onKeydown = (event: KeyboardEvent) => {
               <span class="block truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ product.name }}</span>
               <span class="block truncate text-xs text-zinc-500 dark:text-zinc-400">{{ product.categoryName ?? t('uncategorized') }}</span>
             </span>
-            <span class="shrink-0 text-sm font-bold tabular-nums text-zinc-950 dark:text-white">{{ product.currency }} {{ product.price.toFixed(2) }}</span>
+            <span class="shrink-0 text-sm font-bold tabular-nums text-zinc-950 dark:text-white">{{ product.currency }} {{ priceOf(product).toFixed(2) }}</span>
           </NuxtLink>
         </li>
       </ul>

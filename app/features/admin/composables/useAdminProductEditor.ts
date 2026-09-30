@@ -1,5 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { Database, ProductStatus } from '~/types/database'
+import type { Database, ProductRow, ProductStatus } from '~/types/database'
 import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
 
 const IMAGE_BUCKET = 'product-images'
@@ -19,6 +19,70 @@ export type AdminProductForm = {
   description: string
   specifications: string
   imagePaths: string
+  /** Gates the promotion section; never a column. Turning it off is how a promotion is cleared. */
+  promotionEnabled: boolean
+  /** Kept as the modal's own strings: an empty field must stay empty rather than become `0`, which
+   * would write a free product or a zero unit cap. Typed `string` because that is `UInput`'s prop
+   * contract — but read through `numOf`, because with `type="number"` the control really does hand
+   * back a number, which is what the harness found. */
+  promoPrice: string
+  promoLabel: string
+  promoQuantity: string
+  /** `datetime-local` wall clock, zone-less by design — see `toInstant`. */
+  promoStartsAt: string
+  promoEndsAt: string
+}
+
+/** `datetime-local` holds a zone-less wall clock, Postgres holds an instant. A shop owner's "8pm"
+ * means their 8pm, so the value is written as local time and read back the same way. */
+const toInstant = (wallClock: string): string | null => wallClock ? new Date(wallClock).toISOString() : null
+const toWallClock = (instant: string | null): string => {
+  if (!instant) return ''
+  const date = new Date(instant)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+/** The number a promo field holds, or `null` when the owner left it empty. `String` first, never
+ * `.trim()` on the value itself: `UInput` types its model as a string and emits a number. */
+const numOf = (value: string | number): number | null => {
+  const text = String(value).trim()
+  return text === '' ? null : Number(text)
+}
+
+/** The checks the columns cannot make for themselves: the discount has to be a discount, a unit cap
+ * has to be a cap, and the window has to run forwards. Everything else the schema already refuses. */
+const promotionIsValid = (form: AdminProductForm) => {
+  const price = numOf(form.promoPrice)
+  const units = numOf(form.promoQuantity)
+  const starts = form.promoStartsAt ? new Date(form.promoStartsAt).getTime() : Number.NaN
+  const ends = form.promoEndsAt ? new Date(form.promoEndsAt).getTime() : Number.NaN
+  return price !== null && price >= 0 && price < Number(form.price)
+    && (units === null || units > 0)
+    && (Number.isNaN(starts) || Number.isNaN(ends) || ends > starts)
+}
+
+/**
+ * The promotion columns for one save: written when the section is on, cleared when it was on and has
+ * just been switched off, and absent otherwise. The third branch is what keeps a product that never
+ * had a promotion byte-for-byte the save it always was — no five nulls on every write.
+ *
+ * The return type is named rather than inferred: left to inference the three shapes become a union,
+ * and spreading a union into the payload makes supabase-js check every branch against the first one,
+ * which rejects `{}` for having no `promo_price` at all.
+ */
+const promoColumns = (form: AdminProductForm, wasActive: boolean): Partial<Pick<ProductRow, 'promo_price' | 'promo_label' | 'promo_quantity' | 'promo_starts_at' | 'promo_ends_at'>> => {
+  if (form.promotionEnabled) {
+    return {
+      promo_price: Number(form.promoPrice),
+      promo_label: form.promoLabel.trim() || null,
+      promo_quantity: numOf(form.promoQuantity),
+      promo_starts_at: toInstant(form.promoStartsAt),
+      promo_ends_at: toInstant(form.promoEndsAt)
+    }
+  }
+  if (!wasActive) return {}
+  return { promo_price: null, promo_label: null, promo_quantity: null, promo_starts_at: null, promo_ends_at: null }
 }
 
 /**
@@ -52,15 +116,21 @@ export const useAdminProductEditor = (options: {
   const imageFiles = ref<File[]>([])
   const isSaving = ref(false)
   const actionError = ref('')
+  // Whether the product being edited had a promotion when the modal opened. It is what tells a
+  // switched-off section "nothing to clear" from "clear it", without trusting the form's own fields.
+  const promotionWasActive = ref(false)
 
   function emptyForm(): AdminProductForm {
-    return { categoryId: toValue(categories)[0]?.id || '', sku: '', slug: '', price: 0, stockQuantity: 0, status: 'published', name: '', shortDescription: '', description: '', specifications: '', imagePaths: '' }
+    return { categoryId: toValue(categories)[0]?.id || '', sku: '', slug: '', price: 0, stockQuantity: 0, status: 'published', name: '', shortDescription: '', description: '', specifications: '', imagePaths: '', promotionEnabled: false, promoPrice: '', promoLabel: '', promoQuantity: '', promoStartsAt: '', promoEndsAt: '' }
   }
 
-  const openAddEditor = () => { actionError.value = ''; editorForm.value = emptyForm(); editorOpen.value = true }
+  const openAddEditor = () => { actionError.value = ''; editorForm.value = emptyForm(); promotionWasActive.value = false; editorOpen.value = true }
   const openEditEditor = (product: CatalogProduct) => {
     actionError.value = ''
-    editorForm.value = { id: product.id, categoryId: product.categoryId, sku: product.sku, slug: product.sku.toLowerCase().replace(/[^a-z0-9]+/g, '-'), price: product.price, stockQuantity: product.stockQuantity, status: 'published', name: product.name, shortDescription: product.shortDescription, description: product.description, specifications: product.specifications, imagePaths: product.images.map((image) => image.storagePath).join('\n') }
+    // `product.price` is the stored original, so the Price field keeps the number the promotion
+    // crosses out — the discount belongs to its own field, never to this one.
+    editorForm.value = { id: product.id, categoryId: product.categoryId, sku: product.sku, slug: product.sku.toLowerCase().replace(/[^a-z0-9]+/g, '-'), price: product.price, stockQuantity: product.stockQuantity, status: 'published', name: product.name, shortDescription: product.shortDescription, description: product.description, specifications: product.specifications, imagePaths: product.images.map((image) => image.storagePath).join('\n'), promotionEnabled: product.promoPrice !== null, promoPrice: product.promoPrice === null ? '' : String(product.promoPrice), promoLabel: product.promoLabel || '', promoQuantity: product.promoQuantity === null ? '' : String(product.promoQuantity), promoStartsAt: toWallClock(product.promoStartsAt), promoEndsAt: toWallClock(product.promoEndsAt) }
+    promotionWasActive.value = product.promoPrice !== null
     editorOpen.value = true
   }
 
@@ -75,7 +145,8 @@ export const useAdminProductEditor = (options: {
     actionError.value = ''
     try {
       if (!editorForm.value.categoryId) throw new Error(t('requiredCategory'))
-      const productPayload = { category_id: editorForm.value.categoryId, sku: editorForm.value.sku.trim(), slug: editorForm.value.slug.trim(), price: Number(editorForm.value.price), stock_quantity: Number(editorForm.value.stockQuantity), status: editorForm.value.status }
+      if (editorForm.value.promotionEnabled && !promotionIsValid(editorForm.value)) throw new Error(t('promotionInvalid'))
+      const productPayload = { category_id: editorForm.value.categoryId, sku: editorForm.value.sku.trim(), slug: editorForm.value.slug.trim(), price: Number(editorForm.value.price), stock_quantity: Number(editorForm.value.stockQuantity), status: editorForm.value.status, ...promoColumns(editorForm.value, promotionWasActive.value) }
       let productId = editorForm.value.id
       if (productId) {
         const { error } = await supabase.from('products').update(productPayload).eq('id', productId)

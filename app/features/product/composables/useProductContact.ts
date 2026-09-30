@@ -3,6 +3,7 @@ import type { CatalogProduct } from '~/types/catalog'
 import type { ProductContactChannel } from '~/types/product-contact'
 import type { SiteInfo } from '~/types/site-info'
 import { copyToClipboard } from '~/utils/clipboard'
+import { getProductPricing } from '~/utils/product-pricing'
 import { getProductStockState } from '~/utils/product-stock'
 import { socialPrefillLink } from '~/utils/social-prefill'
 
@@ -56,6 +57,9 @@ export const useProductContact = (
   const message = computed(() => {
     const product = toValue(source)
     if (!product) return ''
+    // The price the visitor was shown is the price the shop is asked about. Quoting the stored one
+    // instead would send a customer a message that contradicts the page they are standing on.
+    const pricing = getProductPricing(product)
     const ask = stock.value === 'out'
       ? t('contactAskOutOfStock')
       : stock.value === 'low'
@@ -63,7 +67,7 @@ export const useProductContact = (
         : t('contactAskInStock')
     return [
       t('contactIntent', { name: product.name }),
-      t('contactPriceLine', { currency: product.currency, price: product.price.toFixed(2) }),
+      t('contactPriceLine', { currency: product.currency, price: pricing.price.toFixed(2) }),
       product.sku ? t('contactSkuLine', { sku: product.sku }) : '',
       ask,
       productUrl(product.id)

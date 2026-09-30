@@ -41,6 +41,15 @@ Design rationale for everything below lives in
   `static`, scrolls the panel to sit under the header's live height, and restores on close. They
   carry no type and no harness assert currently; rename one in the same commit as the scroll, or
   the panel silently stops landing under the header (it still opens — which is why nothing catches it).
+- **The price surfaces' two data hooks** — `[data-product-price]` (the discounted/original pair on a
+  card and the detail page) and `[data-sale-ribbon]` (the red corner ribbon over both photos) — are what
+  `verify` reads for the promotion checks, including the ribbon's rect against the photo frame. The
+  ribbon clips *itself* in a 112px box, so it does not need the surface to clip it and must not be
+  moved inside `ProductGallery` — that component owns its frame's geometry for the zoom maths, and a
+  wrapper-level `overflow-hidden` would shave the frame's shadow. What the ribbon does need from the
+  `relative mx-auto w-full min-w-0 max-w-md` wrapper in `[id].vue` is the corner itself: drop `min-w-0`
+  and the page gains 8px of horizontal overflow at 320px (the grid item's `min-width: auto` becomes the
+  filmstrip's min-content), which the overflow sweep catches.
 - **The editor's two entry points** — `index.vue` types its `adminEditor` ref against
   `openAddEditor()` / `openEditEditor(product)` from the feature's `defineExpose`. Nothing in CI
   proves the names still match; the IDE language server and the harness do.

@@ -176,8 +176,22 @@ useHead(() => {
       <Transition name="reveal">
       <section v-if="!isLoading && !loadError && product" class="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
         <!-- Gallery Column: the photo frame, arrows and filmstrip live in one presentational
-             component; the page only hands it the catalog-mapped images. -->
-        <ProductGallery :images="product.images" :name="product.name" />
+             component; the page only hands it the catalog-mapped images. The wrapper exists for one
+             reason — `relative` is what the corner ribbon measures itself against, so the ribbon can cut
+             across the photo without reaching inside the gallery, whose zoom maths owns that frame
+             outright. No transform here on purpose: a transformed ancestor would become the containing
+             block for the lightbox's fixed overlay. No `overflow-hidden` either — the wrapper is taller
+             than the frame, so clipping it would shave the frame's shadow; the ribbon carries its own
+             clip box. The width cap mirrors the gallery's own box (`max-w-md`, centred): a wrapper wider
+             than the photo would park the ribbon in the gutter beside it, and `verify` measures the
+             ribbon against the frame, which is what catches the two drifting apart. `min-w-0` is the
+             same load-bearing guard the gallery's own root carries, and it belongs on the wrapper now:
+             as a grid item its default `min-width: auto` is the filmstrip's min-content width, which
+             pushes the whole page wider than a narrow phone. -->
+        <div class="relative mx-auto w-full min-w-0 max-w-md">
+          <ProductGallery :images="product.images" :name="product.name" />
+          <ProductSaleRibbon :product="product" />
+        </div>
 
         <!-- Product Summary & Specs Column. `min-w-0` is load-bearing at the narrowest phones: a
              grid item's default `min-width:auto` lets the conversion row's intrinsic width (pill
@@ -193,9 +207,7 @@ useHead(() => {
           <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl text-zinc-950 dark:text-white">
             {{ product.name }}
           </h1>
-          <p class="mt-4 text-2xl sm:text-3xl font-bold tabular-nums text-zinc-950 dark:text-white">
-            {{ product.currency }} {{ product.price.toFixed(2) }}
-          </p>
+          <ProductPrice :product="product" class="mt-4 text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white" />
 
           <div class="mt-4">
             <StockStatus :quantity="product.stockQuantity" />

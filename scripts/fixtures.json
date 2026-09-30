@@ -10,6 +10,11 @@
       "currency": "USD",
       "stock_quantity": 7,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-05T00:00:00.000Z",
       "product_translations": [
         {
@@ -51,6 +56,11 @@
       "currency": "USD",
       "stock_quantity": 3,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-04T00:00:00.000Z",
       "product_translations": [
         {
@@ -83,6 +93,11 @@
       "currency": "USD",
       "stock_quantity": 0,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-03T00:00:00.000Z",
       "product_translations": [
         {
@@ -114,6 +129,11 @@
       "currency": "USD",
       "stock_quantity": 12,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-02T00:00:00.000Z",
       "product_translations": [
         {
@@ -145,6 +165,11 @@
       "currency": "USD",
       "stock_quantity": 25,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-02T00:00:00.000Z",
       "product_translations": [
         {
@@ -176,6 +201,11 @@
       "currency": "USD",
       "stock_quantity": 4,
       "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
       "created_at": "2026-01-01T00:00:00.000Z",
       "product_translations": [
         {

@@ -1,5 +1,6 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { CatalogProduct } from '~/types/catalog'
+import { getProductPricing } from '~/utils/product-pricing'
 
 export type CatalogSortOrder = 'newest' | 'price-low' | 'price-high' | 'name'
 
@@ -27,9 +28,12 @@ export const useCatalogBrowse = (source: MaybeRefOrGetter<CatalogProduct[]>) => 
     })
 
     // 'newest' is the untouched order: it is the server's `created_at desc`, not a client sort.
+    // The price sorts read the price the visitor is shown, not the stored one, so a discounted
+    // product lands where its card's number says it should — and the crossed-out original never
+    // moves anything.
     return [...filtered].sort((first, second) => {
-      if (sortOrder.value === 'price-low') return first.price - second.price
-      if (sortOrder.value === 'price-high') return second.price - first.price
+      if (sortOrder.value === 'price-low') return getProductPricing(first).price - getProductPricing(second).price
+      if (sortOrder.value === 'price-high') return getProductPricing(second).price - getProductPricing(first).price
       if (sortOrder.value === 'name') return first.name.localeCompare(second.name)
       return 0
     })

@@ -103,6 +103,33 @@ defineExpose({ openAddEditor, openEditEditor })
           </UFormField>
         </div>
 
+        <!-- Promotion: switched off by default, because most products have none and an owner here
+             to correct a price should not have to read past five empty fields to find it. The four
+             kinds of offer are fields on one record, not four modes: a price cut on its own, a named
+             campaign, a campaign that stops at a time, and one that stops at a count. -->
+        <div class="border-t border-zinc-200/80 pt-5 dark:border-zinc-800/80">
+          <UFormField :label="t('applyPromotion')">
+            <USwitch v-model="editorForm.promotionEnabled" />
+          </UFormField>
+          <div v-if="editorForm.promotionEnabled" class="mt-4 grid gap-5 sm:grid-cols-2">
+            <UFormField :label="t('discountedPrice')" required>
+              <UInput v-model="editorForm.promoPrice" type="number" min="0" step="0.01" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('promotionName')">
+              <UInput v-model="editorForm.promoLabel" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('promotionStarts')">
+              <UInput v-model="editorForm.promoStartsAt" type="datetime-local" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('promotionEnds')">
+              <UInput v-model="editorForm.promoEndsAt" type="datetime-local" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('promotionUnits')" :hint="t('promotionUnitsHint')" class="sm:col-span-2">
+              <UInput v-model="editorForm.promoQuantity" type="number" min="1" step="1" class="w-full" />
+            </UFormField>
+          </div>
+        </div>
+
         <UFormField :label="t('shortDescription')" required>
           <UInput v-model="editorForm.shortDescription" required class="w-full" />
         </UFormField>

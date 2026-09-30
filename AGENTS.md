@@ -36,6 +36,10 @@ Detailed instructions live in `docs/rules/`. Open the matching file for the task
 - **The in / low / out band has one owner: `app/utils/product-stock.ts`**, and
   `LOW_STOCK_THRESHOLD` stays the only number. A rule that is neither reactive state nor a browser
   capability belongs in `app/utils/` as a plain function — not in a new composable.
+- **Which price applies has one owner: `app/utils/product-pricing.ts`.** `products.price` stays the
+  original; the five nullable `promo_*` columns are what `getProductPricing` reads to decide what to
+  charge, what to cross out, and which number "Price: low to high" orders by. No page, card or
+  message may compare a promo window or a unit cap inline.
 - **Authorisation is row-level security in Postgres.** The browser holds only the anon key. Never
   add a service-role client to "fix" a permission error — that fix belongs in a migration, and a
   pushed migration is never edited.

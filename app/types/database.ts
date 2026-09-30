@@ -27,6 +27,9 @@ export type CategoryTranslationRow = {
   updated_at: string
 }
 
+// The five promo columns are what `app/utils/product-pricing.ts` reads to decide whether a product
+// is discounted; they mirror `20260930120000_product_promotions.sql`, and `price` stays the original
+// price a promotion crosses out rather than being overwritten by it.
 export type ProductRow = {
   id: string
   category_id: string
@@ -37,6 +40,11 @@ export type ProductRow = {
   stock_quantity: number
   status: ProductStatus
   is_featured: boolean
+  promo_price: number | null
+  promo_label: string | null
+  promo_quantity: number | null
+  promo_starts_at: string | null
+  promo_ends_at: string | null
   created_at: string
   updated_at: string
 }

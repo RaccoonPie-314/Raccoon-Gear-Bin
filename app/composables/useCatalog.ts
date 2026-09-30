@@ -4,7 +4,7 @@ import type { CatalogCategory, CatalogProduct, CatalogSpecification } from '~/ty
 // The select strings have to stay inline literals: supabase-js infers the result type by
 // parsing the query text, so building one at runtime (join/concat/template) degrades every
 // row to `any`.
-const PRODUCT_SELECT = 'id, category_id, slug, sku, price, currency, stock_quantity, status, product_translations(id, locale, name, short_description, description, specifications), product_images(id, storage_path, alt_text, sort_order), categories(id, slug, category_translations(id, locale, name))'
+const PRODUCT_SELECT = 'id, category_id, slug, sku, price, currency, stock_quantity, status, promo_price, promo_label, promo_quantity, promo_starts_at, promo_ends_at, product_translations(id, locale, name, short_description, description, specifications), product_images(id, storage_path, alt_text, sort_order), categories(id, slug, category_translations(id, locale, name))'
 const CATEGORY_SELECT = 'id, slug, category_translations(id, locale, name)'
 
 const FALLBACK_LOCALE = 'en'
@@ -20,6 +20,12 @@ const specLinesToPairs = (value: string): CatalogSpecification[] => value.split(
   const [label = '', ...rest] = line.split(':')
   return { label: label.trim(), value: rest.join(':').trim() }
 })
+
+// The promo columns are nullable, and a number PostgREST hands back as a string: absent means
+// "no promotion", never `NaN`. Every price the storefront shows is decided from this, so the
+// distinction is made once, on the way in.
+const numberOrNull = (value: number | string | null | undefined): number | null =>
+  value === null || value === undefined ? null : Number(value)
 
 export const useCatalog = () => {
   const supabase = useSupabaseClient<Database>()
@@ -68,6 +74,11 @@ export const useCatalog = () => {
       currency: product.currency,
       stockQuantity: product.stock_quantity,
       status: product.status,
+      promoPrice: numberOrNull(product.promo_price),
+      promoLabel: product.promo_label ?? null,
+      promoQuantity: numberOrNull(product.promo_quantity),
+      promoStartsAt: product.promo_starts_at ?? null,
+      promoEndsAt: product.promo_ends_at ?? null,
       name: translation?.name || product.sku,
       shortDescription: translation?.short_description || '',
       description: translation?.description || '',

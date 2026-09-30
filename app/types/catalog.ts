@@ -23,10 +23,19 @@ export interface CatalogProduct {
   categorySlug?: string
   slug: string
   sku: string
+  /** The stored price — the original, not what a running promotion brings it down to. Ask
+   * `getProductPricing` (`app/utils/product-pricing.ts`) what a visitor should be charged. */
   price: number
   currency: string
   stockQuantity: number
   status: 'draft' | 'published' | 'archived'
+  /** The promotion as it is stored, column for column. Whether it applies *now* is decided by one
+   * rule in `app/utils/product-pricing.ts`, not by every view that renders a price. */
+  promoPrice: number | null
+  promoLabel: string | null
+  promoQuantity: number | null
+  promoStartsAt: string | null
+  promoEndsAt: string | null
   name: string
   shortDescription: string
   description: string

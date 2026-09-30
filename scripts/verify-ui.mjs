@@ -1821,6 +1821,61 @@ const run = async () => {
     check('the gallery shows its own no-image frame while the conversion still carries the product', await ev('/no image/i.test(document.body.innerText)') && noPhotoMount.message === wantIn, { message: norm(noPhotoMount.message) })
     await stopForNextDocument(noPhotoScript)
 
+    // ---- a product on promotion ------------------------------------------------------------------
+    // Two numbers, four surfaces that show them and one sort that reads them: which pair is painted
+    // is decided by the rule in `app/utils/product-pricing.ts`, so the check asks the page. The live
+    // window is fixed to dates no run can drift out of (year 2000 to year 2900), so no clock is
+    // stubbed and the same arm proves both the window and the unit cap by moving one value.
+    const promoArm = extra => forNextDocument('var p = window.__PRODUCTS[0]; p.promo_price = "79.00"; p.promo_label = "Verify Sale"; p.promo_quantity = 3; p.promo_starts_at = "2000-01-01T00:00:00Z"; p.promo_ends_at = "2900-01-01T00:00:00Z";' + extra)
+    const PRICE_PAIR = '(() => { const root = document.querySelector("[data-product-price]"); if (!root) return null; const ps = root.querySelectorAll("p"); const del = root.querySelector("del"); return { current: ((ps[0].querySelector("span") || {}).textContent || "").trim(), struck: del ? (del.textContent || "").trim() : null, deco: del ? (getComputedStyle(del).textDecorationLine || "") : null, note: ps.length > 1 ? (ps[1].textContent || "").trim() : null } })()'
+    // The ribbon is read against the photo frame it is cut across — the card's own frame on a card, the
+    // gallery's first child on the detail page — because the box that anchors it is the part most likely
+    // to drift (a wrapper wider than the photo would park the band in the gutter beside it). `angle` and
+    // `onDiagonal` together are what prove the band lies across the corner rather than sitting in it, and
+    // `overhang` proves its ends run past the 112px clip box instead of ending early in mid-air. `angle`
+    // is read off the `rotate` property, never `transform`: Tailwind v4 writes `rotate: -45deg`, which
+    // `getComputedStyle().transform` reports as a plain matrix none of this would notice.
+    const RIBBON = '(() => { const all = document.querySelectorAll("[data-sale-ribbon]"); if (all.length !== 1) return { count: all.length }; const el = all[0]; const band = el.firstElementChild; if (!band) return { count: 1, noBand: true }; const host = el.closest("article") ? el.parentElement : document.querySelector("[data-product-gallery] > div") || el.parentElement; const b = el.getBoundingClientRect(); const g = band.getBoundingClientRect(); const f = host.getBoundingClientRect(); const nums = (getComputedStyle(band).rotate || "none").match(/-?[0-9.]+/g) || []; const cx = g.left + g.width / 2, cy = g.top + g.height / 2; const hit = document.elementFromPoint(cx, cy); const prev = document.querySelector("[data-gallery-prev]"); return { count: 1, text: (el.textContent || "").trim(), pe: getComputedStyle(el).pointerEvents, angle: nums.length ? Math.round(parseFloat(nums[nums.length - 1])) : 0, boxH: Math.round(g.height), layoutH: band.offsetHeight, inX: Math.round(b.left - f.left), inY: Math.round(b.top - f.top), inside: b.left >= f.left - 0.5 && b.top >= f.top - 0.5 && b.right <= f.right + 0.5 && b.bottom <= f.bottom + 0.5, overhang: g.left < f.left - 4 && g.top < f.top - 4, onDiagonal: Math.abs((cx - f.left) - (cy - f.top)) < 6, arrowOverlap: prev ? (() => { const p = prev.getBoundingClientRect(); return !(g.right < p.left || g.left > p.right || g.bottom < p.top || g.top > p.bottom) })() : null, through: !!hit && !(hit.closest && hit.closest("[data-sale-ribbon]")) } })()'
+
+    const liveArm = await promoArm('')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-product-price] del\')')
+    const live = await ev(PRICE_PAIR)
+    check('a live promotion paints the discounted price with the original crossed out', !!live && live.current === 'USD 79.00' && live.struck === 'USD 123.45' && live.deco.includes('line-through') && live.note === 'Only 3 left at this price', live)
+    const liveRibbon = await ev(RIBBON)
+    check('the promoted product wears its named ribbon across the photo corner, off the arrows and click-through', !!liveRibbon && liveRibbon.count === 1 && liveRibbon.text === 'Verify Sale' && liveRibbon.inside && liveRibbon.inX < 2 && liveRibbon.inY < 2 && liveRibbon.angle === -45 && liveRibbon.boxH > liveRibbon.layoutH + 20 && liveRibbon.onDiagonal && liveRibbon.overhang && liveRibbon.arrowOverlap === false && liveRibbon.pe === 'none' && liveRibbon.through === true, liveRibbon)
+    const livePanel = await openInlinePanel()
+    check('the message handed to the shop quotes the price on the page, not the one crossed out', livePanel.message === expectedMessage({ ...row(G.manyId), price: '79.00' }, C.ask.in, canonical(G.manyId)), { message: norm(livePanel.message) })
+    await nav(new URL('/', appUrl).href)
+    await waitFor('!!document.querySelector(\'main article [data-product-price] del\')')
+    const promoCard = await ev(PRICE_PAIR)
+    // The second clause is the one that keeps the grid honest: a card that grew a second tabular
+    // price would silently change what `main article p.tabular-nums` counts, and the sort check above
+    // reads that selector.
+    check('the card paints the same pair, and still exactly one tabular price per card', !!promoCard && promoCard.current === 'USD 79.00' && promoCard.struck === 'USD 123.45' && (await ev('document.querySelectorAll("main article p.tabular-nums").length')) === EXP.cards, { promoCard })
+    const cardRibbon = await ev(RIBBON)
+    // One ribbon across six cards, because only the promoted row carries the columns: a badge keyed off
+    // anything looser (a stored price, a stale flag) would show on products nobody put on sale. The inset
+    // is a bound, not a constant: a card's frame carries a 1px border and the gallery's does not.
+    check('the grid wears exactly one ribbon, on the promoted card, cut across its corner', !!cardRibbon && cardRibbon.count === 1 && cardRibbon.text === 'Verify Sale' && cardRibbon.inside && cardRibbon.inX < 2 && cardRibbon.inY < 2 && cardRibbon.angle === -45 && cardRibbon.boxH > cardRibbon.layoutH + 20 && cardRibbon.onDiagonal && cardRibbon.overhang && (await ev('document.querySelectorAll("[data-sale-ribbon]").length')) === 1, cardRibbon)
+    await stopForNextDocument(liveArm)
+
+    const unnamedArm = await promoArm('p.promo_label = null; p.promo_quantity = null;')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-sale-ribbon]\')')
+    const unnamed = await ev(RIBBON)
+    check('a promotion with no name of its own still says what it is', !!unnamed && unnamed.count === 1 && unnamed.text === 'Sale' && unnamed.angle === -45 && unnamed.pe === 'none', unnamed)
+    await stopForNextDocument(unnamedArm)
+
+    for (const [why, extra] of [['has closed', 'p.promo_ends_at = "2000-06-01T00:00:00Z";'], ['has run out', 'p.promo_quantity = 0;']]) {
+      const arm = await promoArm(extra)
+      await nav(detailUrl(G.manyId))
+      await waitFor('!!document.querySelector(\'[data-product-price]\')')
+      const off = await ev(PRICE_PAIR)
+      check(`a promotion whose ${why} leaves the original price alone, with nothing crossed out`, !!off && off.current === 'USD 123.45' && off.struck === null && off.note === null, off)
+      await stopForNextDocument(arm)
+    }
+
     // ---- the mobile sticky bar -----------------------------------------------------------------
     await metrics(390, 844, true)
     await nav(detailUrl(G.manyId))
@@ -2198,6 +2253,22 @@ const run = async () => {
     const patchReq = editW.find(w => w.p === '/rest/v1/products')
     check('update targets one row and keeps the same column set', /^id=eq[.]/.test(patchReq?.q || '') && Object.keys(JSON.parse(patchReq.body || '{}')).sort().join(',') === EXP.sortedPayloadColumns, { q: norm(patchReq?.q) })
     check('update rewrites the translation with the new name', JSON.parse(editW.find(w => w.p === '/rest/v1/product_translations')?.body || '{}').name === 'Renamed By Harness')
+
+    // --- promotion write ---
+    // The five fields do not exist until the switch is on, so this reads the switch as the feature's
+    // entry point and then asks what reached the row: five columns on the product, in the browser's
+    // own local time — the modal takes a wall clock because an owner's "8pm" is theirs, not UTC's.
+    await ev(`document.querySelector(${JSON.stringify(EDIT_BTN)}).click()`)
+    await waitFor(`!!document.querySelector('${DIALOG}')`)
+    const PROMO_SWITCH = DIALOG + ' [role="switch"]'
+    await clickSelector(PROMO_SWITCH, '(() => { const b = document.querySelector(' + JSON.stringify(PROMO_SWITCH) + '); return !!b && b.getAttribute("aria-checked") === "true" })()')
+    check('the promotion switch reveals its fields', await waitFor(`!!document.querySelector('${DIALOG} input[type="datetime-local"]')`))
+    for (const [label, value] of [['Discounted price', '79.00'], ['Promotion name', 'Verify Sale'], ['Starts', '2026-09-01T10:00'], ['Ends', '2026-09-30T20:00'], ['Limited units', '3']]) await ev(byLabel(label, value))
+    await resetW()
+    const promoSaved = await clickByText(DIALOG + ' button[type="submit"]', 'Save changes', '!document.querySelector(' + JSON.stringify(DIALOG) + ')')
+    const promoW = await writes()
+    const promoBody = JSON.parse(promoW.find(w => w.p === '/rest/v1/products')?.body || '{}')
+    check('a promotion saves five columns on the product row', promoSaved && promoBody.promo_price === 79 && promoBody.promo_label === 'Verify Sale' && promoBody.promo_quantity === 3 && Date.parse(promoBody.promo_starts_at) === new Date('2026-09-01T10:00').getTime() && Date.parse(promoBody.promo_ends_at) === new Date('2026-09-30T20:00').getTime(), { promoBody, seq: seqOf(promoW) })
 
     // --- cancel + backdrop ---
     await ev(`document.querySelector(${JSON.stringify(EDIT_BTN)}).click()`)

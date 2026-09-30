@@ -4,14 +4,18 @@ import type { CatalogProduct } from '~/types/catalog'
 defineProps<{ product: CatalogProduct; isAdmin?: boolean }>()
 const emit = defineEmits<{ edit: [product: CatalogProduct] }>()
 // `locale` gates the wide Latin tracking: letter-spacing at this scale pulls Khmer clusters apart.
+// `localePath` is why the card's links are built rather than written: a hardcoded `/products/<id>`
+// is the *English* route under `prefix_except_default`, so clicking a card from the Khmer storefront
+// silently dropped the visitor back to English (and remounted the page, which reads as a reload).
 const { locale, t } = useI18n()
+const localePath = useLocalePath()
 </script>
 
 <template>
   <article class="group flex flex-col justify-between">
     <div>
       <div class="relative aspect-square overflow-hidden rounded-2xl bg-zinc-50 dark:bg-zinc-900/70 border border-zinc-200/70 dark:border-zinc-800/70 shadow-2xs group-hover:border-zinc-300 dark:group-hover:border-zinc-700 group-hover:shadow-sm transition-[border-color,box-shadow] duration-200 ease-out">
-        <NuxtLink :to="`/products/${product.id}`" class="block h-full w-full">
+        <NuxtLink :to="localePath(`/products/${product.id}`)" class="block h-full w-full">
           <img
             v-if="product.images[0]"
             :src="product.images[0].url"
@@ -23,6 +27,9 @@ const { locale, t } = useI18n()
             {{ t('noImage') }}
           </div>
         </NuxtLink>
+        <!-- The grid's sale signal: the ribbon carries its own clip box, so it is cut off by the
+             photo's corner here and by the detail page's wrapper in exactly the same way. -->
+        <ProductSaleRibbon :product="product" />
         <!-- Always visible, not reveal-on-hover: this button only exists in admin mode, so the
              hover gate bought nothing for its entire audience and cost the affordance itself —
              an `opacity-0` element is still clickable, which reads as a dead spot that works. -->
@@ -43,7 +50,7 @@ const { locale, t } = useI18n()
             {{ product.categoryName ?? t('uncategorized') }}
           </p>
           <h2 class="mt-1 text-sm sm:text-base font-bold tracking-tight text-zinc-950 dark:text-white truncate">
-            <NuxtLink :to="`/products/${product.id}`" class="hover:underline">
+            <NuxtLink :to="localePath(`/products/${product.id}`)" class="hover:underline">
               {{ product.name }}
             </NuxtLink>
           </h2>
@@ -51,16 +58,14 @@ const { locale, t } = useI18n()
             {{ product.shortDescription }}
           </p>
         </div>
-        <p class="shrink-0 text-sm sm:text-base font-bold tabular-nums text-zinc-950 dark:text-white">
-          {{ product.currency }} {{ product.price.toFixed(2) }}
-        </p>
+        <ProductPrice :product="product" class="shrink-0 text-right text-sm sm:text-base font-bold text-zinc-950 dark:text-white" />
       </div>
     </div>
 
     <div class="mt-4 flex items-center justify-between gap-3 pt-3 border-t border-zinc-100 dark:border-zinc-900/80">
       <StockStatus :quantity="product.stockQuantity" />
       <NuxtLink
-        :to="`/products/${product.id}`"
+        :to="localePath(`/products/${product.id}`)"
         class="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white transition-colors"
       >
         <span>{{ t('details') }}</span>

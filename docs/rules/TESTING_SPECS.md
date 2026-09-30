@@ -60,6 +60,18 @@ Covered (this list is the shape of the run, not its check count — the run prin
   the same elements in English that must read wide (2px) — so the bound is known to be measuring the
   guard and not an empty node list; and `prefers-reduced-transparency` leaves the sticky bar and detail
   header with `backdropFilter: 'none'` and a fully opaque `backgroundColor`.
+- **Promotions** (`app/utils/product-pricing.ts`, one rule with five call sites): a live window
+  paints the discounted price with the original crossed out on the detail page, the same pair on the
+  card, and the discounted number inside the prepared contact message; a closed window and a spent
+  unit cap each paint the original with nothing crossed out. On the admin side the switch is what
+  reveals the five fields, and the product PATCH is read for their values. The red corner ribbon is
+  measured, not looked at: exactly one across the six cards, its clip box anchored at the photo frame's
+  corner (`inX`/`inY` under 2 — the card's frame has a 1px border and the gallery's does not), rotated
+  -45° with its centre on the corner diagonal, its bounding box far taller than its layout height (a
+  horizontal band would report 22px against the tilted one's 106px), its ends overhanging the box so the
+  cut is real, never overlapping the gallery's prev arrow, and `pointer-events: none` with a hit-test at
+  its centre landing on what sits under it. A card that grew a second
+  `p.tabular-nums` would break the sort check's selector, so the pair count is asserted alongside.
 - **Admin flow**: login, add, image upload, save/update, cancel, delete, the site-info editor
   (seed, field edits, link add/toggle/reorder/remove, the singleton upsert body, and the public
   header reflecting it), logout.
@@ -149,7 +161,11 @@ seven widths, and both colour schemes):
 
 Note that Tailwind v4 `translate` / `scale` utilities are invisible to
 `getComputedStyle().transform` when they are composed in ways the harness does not expect; read
-the matrix, don't assume the utility name.
+the matrix, don't assume the utility name. v4 `rotate-45` is worse than invisible: it writes the
+standalone `rotate` property, so the computed `transform` stays a plain identity matrix and a ribbon
+that looks tilted reads as `matrix(1, 0, 0, 1, 0, 0)`. Ask `getComputedStyle(el).rotate` for the angle,
+or measure the axis-aligned bounding box against `offsetHeight` — the only evidence that survives
+however the utility was written.
 
 ## Environment
 

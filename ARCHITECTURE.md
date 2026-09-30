@@ -49,12 +49,15 @@ app/
 ├── components/       presentational; never import a data composable
 │   ├── category/     CategoryNav (facade) + CategoryDesktop + CategoryMobile
 │   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
+│   ├── ProductPrice.vue    the price pair one product shows: what it costs, plus the original crossed out
+│   ├── ProductSaleRibbon.vue  the red corner ribbon cut across a promoted product's photo (card + gallery)
 │   ├── SocialBrandIcon.vue   the one owner of the platform marks the header and contact rows share
 │   └── …
 ├── middleware/       admin-auth.global.ts — guards /admin/*
 ├── types/            database.ts (schema mirror), catalog.ts + site-info.ts + product-contact.ts
 ├── utils/            rules that are neither reactive state nor a browser capability
 │   ├── product-stock.ts   getProductStockState — the one owner of the in / low / out band
+│   ├── product-pricing.ts getProductPricing — the one owner of whether a promotion applies right now
 │   ├── social-prefill.ts  socialPrefillLink — which platforms document a prefill, and the rest
 │   └── clipboard.ts       copyToClipboard — reports only what the Clipboard API really did
 └── assets/css/main.css   theme, the system-UI font stack, and the select-morph keyframes
@@ -163,6 +166,34 @@ shared component silently stops resolving (the build stays green; the page rende
    refuses to pretend about: it returns `false` when the API is absent *or* when `writeText`
    rejects, and only a resolved write counts as success. The message is therefore also shown in the
    panel, so a refused clipboard is a slowdown rather than a dead end.
+9. **Whether a promotion applies is decided once: `app/utils/product-pricing.ts`.** A product stores
+   `price` (always the original) plus five nullable `promo_*` columns — a discounted price, a label,
+   a unit cap and an optional time window (`20260930120000_product_promotions.sql`) — and one price is
+   shown in four places (card, detail, header search, the prepared contact message) and *sorted by* in
+   a fifth. Those five call sites may differ in typography and never in the number, so each asks
+   `getProductPricing` rather than comparing a window or a cap inline: the same shape of problem the
+   stock band already solved, and the same answer — a plain function under `app/utils/`, not a
+   composable (it reads nothing reactive and touches no browser API) and not a second row mapping
+   (it issues no query, it just decides what the stored columns mean at this moment). `price` is
+   therefore never overwritten by a promotion: the crossed-out number and the charged number are both
+   derived, so switching a promotion off cannot lose the original price.
+
+   The two surfaces that *display* the decision are `ProductPrice.vue` (card and detail) and
+   `ProductSaleRibbon.vue` (the red ribbon cut across the top-left corner of the card's photo and of the
+   detail gallery), and they split the message rather than each computing it: the ribbon names the
+   campaign, the line under the price states the remaining units, and both ask the same function — so a
+   ribbon can never promise a sale the price does not show.
+
+   The ribbon brings its own 112px `overflow-hidden` clip box and is not clipped by the surface it sits
+   on. That is a deliberate avoidance, not a shortcut: the card's frame already clips, but reaching
+   inside `ProductGallery` to clip its frame is off bounds (the zoom maths measures that box), and
+   clipping the detail wrapper instead would shave the frame's own shadow, since the wrapper is taller
+   than the frame. One clip box, one geometry, both surfaces. What the wrapper *does* have to carry is
+   the corner itself — `relative`, plus `min-w-0` and the gallery's `max-w-md` repeated, because a
+   wrapper wider than the photo would park the ribbon in the gutter beside it. `verify` measures the
+   ribbon at the frame's corner and tilted -45°, and its existing 320px overflow sweep is what catches
+   the wrapper losing `min-w-0` — the page goes eight pixels wide before anything about the ribbon
+   itself looks wrong.
 
 ## The editor seam
 
@@ -196,6 +227,16 @@ Form state and the writes are deliberately *not* split. `saveProduct` reads `edi
 `imageFiles` and writes `editorOpen`/`imageFiles`; `confirmDelete` shares `isSaving` and
 `actionError` with it. Separating them would produce two modules that only work together, which
 is more coupling, not less.
+
+The promotion fields are the one part of the form that is *not* a column-for-column copy:
+`promotionEnabled` gates the section and is never written. It decides which of three payload shapes
+the product row gets — the five `promo_*` columns, those five as `null` (a promotion the owner just
+switched off, which has to be cleared rather than left to linger), or none at all (a product that
+never had one, saved exactly as it was before promotions existed). The third case is why the shape is
+conditional instead of always sending nulls, and `promotionWasActive` — set when the modal opens, from
+the product the page handed in — is what tells "nothing to clear" from "clear it". The window fields
+are `datetime-local` wall clocks converted on the way in and out (`toInstant` / `toWallClock`),
+because an owner's 8pm is theirs, not UTC's, and the columns hold instants.
 
 ## The conversion seam
 
@@ -335,7 +376,8 @@ index.vue → useCatalog().fetchCatalog()
 Two reads, two policies: a failed product load *is* the page's error state, while a failed
 site-info read costs the visitor the contact channels and nothing else — the same division the home
 page already draws between its catalog and its masthead. The feature consumes both models and issues
-neither request; `app/utils/product-stock.ts` supplies the band the CTA is worded from.
+neither request; `app/utils/product-stock.ts` supplies the band the CTA is worded from and
+`app/utils/product-pricing.ts` the price the message quotes.
 
 ## Desktop vs mobile: what must stay separate
 
@@ -512,6 +554,14 @@ it reaches by answering `/rest/v1`, `/auth/v1` and `/storage/v1` from `scripts/f
 inside the browser. **No real project is contacted and nothing can be written.** Fixtures are
 synthetic and shaped exactly like the `PRODUCT_SELECT` / `CATEGORY_SELECT` embeds and the
 `SITE_INFO_SELECT` row, so the harness also fails loudly if a select string changes shape.
+Promotions are checked in both directions: a row mutated through the stub's own product list paints
+the discounted price with the original crossed out on the card, the detail page and the prepared
+message, a closed window or a spent unit cap paints the original alone, and the admin path is proven
+by the body it sends — five `promo_*` columns, in the browser's local time, on the product PATCH. The
+corner ribbon is measured rather than eyeballed: one across the six fixture cards, its clip box at the
+photo frame's corner, tilted -45° with its centre on the corner diagonal and its ends overhanging the
+box, never touching the gallery's arrows, and `pointer-events: none` so it cannot swallow a tap on the
+link or the zoom control underneath it.
 
 Two checks measure the accessibility floors rather than the tuned motion: the Khmer card eyebrow must
 compute under 1.1px of tracking with an English control on the same elements reading wide, and
@@ -615,6 +665,12 @@ surface should match the logo.
   `verify`, because a newly-shared rule with no measurement behind it is a silent recolour
   waiting to happen. A browser capability wrapper belongs here for the same reason and must
   return a truthful result rather than reporting success it did not witness (`clipboard.ts`).
+  `getProductPricing` is the second such rule and the reason the first one is not the last: a
+  promotion puts a second number on the same four price surfaces, and deciding *which* of the two to
+  charge is one branch no call site may own. The discounted fields themselves are five nullable
+  columns, not a campaign table: one active promotion per product is what the shop asked for, and a
+  `promotions` table with overlap rules and usage counters is worth designing the day a checkout
+  exists to need them.
 - New env var → both `.env.example` and `runtimeConfig` in `nuxt.config.ts`.
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
