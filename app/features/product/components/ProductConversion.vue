@@ -121,7 +121,7 @@ const handleCopyShareMessage = async () => {
   <Teleport to="body">
     <div
       data-sticky-cta
-      class="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200/80 bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md lg:hidden dark:border-zinc-800/80 dark:bg-zinc-900/85"
+      class="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200/80 bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl backdrop-saturate-150 lg:hidden dark:border-zinc-800/80 dark:bg-zinc-900/85"
     >
       <ProductActions
         compact

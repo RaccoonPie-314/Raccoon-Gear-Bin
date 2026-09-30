@@ -2,8 +2,8 @@
 import type { ProductShareDestination, ProductSharePayload } from '../composables/useProductShare'
 import { platformLabel } from '~/utils/social-prefill'
 import { selectOnFocus } from '~/utils/clipboard'
-import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'motion-v'
-import { popover, sheet } from '~/utils/motion'
+import { AnimatePresence, animate, motion, useDragControls, useReducedMotion } from 'motion-v'
+import { copyPop, popover, press, sheet } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 /**
@@ -65,6 +65,18 @@ const panelEl = ref<ComponentPublicInstance | null>(null)
 const panelNode = computed<HTMLElement | null>(() => (panelEl.value?.$el as HTMLElement) ?? null)
 const placed = ref<{ left: number, top: number, side: 'below' | 'above' } | null>(null)
 const reduced = useReducedMotion()
+
+// Tactile copy confirmation (Phase G): a one-shot `copyPop` on the copy button. It fires on `click`,
+// after `while-press` has released on pointer-up, so the two never race for the same transform. The
+// template ref on a motion component is its instance, so the pulse unwraps `.$el` to reach the node.
+const copyLinkBtn = ref<ComponentPublicInstance | null>(null)
+const copyMsgBtn = ref<ComponentPublicInstance | null>(null)
+const popCopy = (inst: ComponentPublicInstance | null) => {
+  const el = inst?.$el as HTMLElement | undefined
+  if (el && !reduced.value) animate(el, { scale: [...copyPop.keyframes] }, copyPop.transition)
+}
+const onCopyLink = () => { emit('copyLink'); popCopy(copyLinkBtn.value) }
+const onCopyMessage = () => { emit('copyMessage'); popCopy(copyMsgBtn.value) }
 
 const place = () => {
   const el = panelNode.value
@@ -199,7 +211,7 @@ onBeforeUnmount(() => {
         key="share-backdrop"
         data-share-backdrop
         class="fixed inset-0 z-[60] outline-none"
-        :class="isDesktop ? '' : 'bg-zinc-950/45 backdrop-blur-[2px] dark:bg-zinc-950/60'"
+        :class="isDesktop ? '' : 'bg-zinc-950/45 backdrop-blur-md backdrop-saturate-150 dark:bg-zinc-950/65'"
         :initial="{ opacity: 0 }"
         :animate="{ opacity: 1 }"
         :exit="{ opacity: 0 }"
@@ -228,7 +240,7 @@ onBeforeUnmount(() => {
           :drag-controls="dragControls"
           :drag-listener="false"
           :drag-constraints="{ top: 0, bottom: 0 }"
-          :drag-elastic="{ top: 0, bottom: 1 }"
+          :drag-elastic="{ top: 0.15, bottom: 1 }"
           :drag-momentum="false"
           @drag-end="onDragEnd"
         >
@@ -250,15 +262,17 @@ onBeforeUnmount(() => {
                 <p class="mt-1 truncate text-sm font-semibold">{{ payload.title }}</p>
                 <p v-if="payload.text" class="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">{{ payload.text }}</p>
               </div>
-              <button
+              <motion.button
                 type="button"
                 data-share-close
                 :aria-label="t('close')"
+                :while-press="reduced ? undefined : { scale: press.scale }"
+                :transition="press.transition"
                 class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-zinc-200/80 bg-white text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
                 @click="close()"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
-              </button>
+              </motion.button>
             </div>
           </div>
 
@@ -266,25 +280,31 @@ onBeforeUnmount(() => {
                px-2 puts the Copy rows' icons on the same vertical line as the destination pills' icons
                below, so the whole panel reads as one column of controls rather than two systems. -->
           <div class="min-w-0 space-y-1.5 px-2">
-            <button
+            <motion.button
+              ref="copyLinkBtn"
               type="button"
               data-share-copy-link
+              :while-press="reduced ? undefined : { scale: press.scale }"
+              :transition="press.transition"
               class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full bg-zinc-950 px-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:focus-visible:ring-white dark:focus-visible:ring-offset-zinc-950"
-              @click="emit('copyLink')"
+              @click="onCopyLink"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
               <span class="min-w-0 flex-1 truncate text-left">{{ t('copyLink') }}</span>
-            </button>
+            </motion.button>
 
-            <button
+            <motion.button
+              ref="copyMsgBtn"
               type="button"
               data-share-copy-message
+              :while-press="reduced ? undefined : { scale: press.scale }"
+              :transition="press.transition"
               class="flex h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-full border border-zinc-300/80 bg-white px-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/70 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
-              @click="emit('copyMessage')"
+              @click="onCopyMessage"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
               <span class="min-w-0 flex-1 truncate text-left">{{ t('copyMessage') }}</span>
-            </button>
+            </motion.button>
           </div>
 
           <!-- The destinations are the shop's own configured accounts, and only the platforms with
@@ -301,17 +321,19 @@ onBeforeUnmount(() => {
             </p>
             <ul class="mt-2 grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2 px-2">
               <li v-for="destination in destinations" :key="destination.key" class="min-w-0">
-                <a
+                <motion.a
                   :href="destination.href"
                   target="_blank"
                   rel="noopener noreferrer"
                   :data-share-destination="destination.platform"
                   :data-share-prefilled="destination.prefilled"
+                  :while-press="reduced ? undefined : { scale: press.scale }"
+                  :transition="press.transition"
                   class="flex h-11 w-full min-w-0 max-w-full items-center justify-center gap-2 rounded-full border border-zinc-200/80 bg-white px-4 text-sm font-semibold text-zinc-800 transition-colors hover:border-zinc-300 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-white dark:focus-visible:ring-white"
                 >
                   <SocialBrandIcon :platform="destination.platform" class="shrink-0 opacity-70" />
                   <span class="min-w-0 truncate">{{ platformLabel(destination.platform) }}</span>
-                </a>
+                </motion.a>
               </li>
             </ul>
           </template>
@@ -343,17 +365,19 @@ onBeforeUnmount(() => {
                repeated here at the bottom edge, inside easy reach. Desktop omits it: the popover is
                anchored under the cursor and already has its header close, and a second control there
                would just be clutter. -->
-          <button
+          <motion.button
             v-if="!isDesktop"
             type="button"
             data-share-close-bottom
             :aria-label="t('close')"
+            :while-press="reduced ? undefined : { scale: press.scale }"
+            :transition="press.transition"
             class="mx-auto mt-3 flex h-11 w-full min-w-0 cursor-pointer items-center justify-center gap-2 rounded-full border border-zinc-300/80 bg-white text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/70 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
             @click="close()"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 shrink-0" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             {{ t('close') }}
-          </button>
+          </motion.button>
         </motion.div>
       </motion.div>
     </AnimatePresence>

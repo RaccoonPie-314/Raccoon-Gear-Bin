@@ -5,7 +5,7 @@ import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
 import { animate, motion, useReducedMotion } from 'motion-v'
-import { panel, press } from '~/utils/motion'
+import { copyPop, panel, press } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
@@ -61,6 +61,15 @@ const shareEl = computed<HTMLElement | null>(() => (shareBtn.value?.$el as HTMLE
 // never changes a rendered attribute and cannot cause a hydration mismatch. The press is gated on it
 // in the template, reproducing the old `motion-safe:` contract: no scale is emitted under `reduce`.
 const reduced = useReducedMotion()
+
+// Tactile copy confirmation (Phase G): a one-shot `copyPop` on the panel's copy button, fired on
+// click after `while-press` releases. The motion-component ref is its instance, so unwrap `.$el`.
+const copyMsgBtn = ref<ComponentPublicInstance | null>(null)
+const onPanelCopy = () => {
+  emit('copy')
+  const el = copyMsgBtn.value?.$el as HTMLElement | undefined
+  if (el && !reduced.value) animate(el, { scale: [...copyPop.keyframes] }, copyPop.transition)
+}
 
 // Out of stock must not read as "buy now": the same action, worded as the question it actually is.
 const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability') : t('contactToOrder'))
@@ -361,15 +370,18 @@ const channelName = platformLabel
         />
 
         <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-          <button
+          <motion.button
+            ref="copyMsgBtn"
             type="button"
             data-copy-message
+            :while-press="reduced ? undefined : { scale: press.scale }"
+            :transition="press.transition"
             class="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full border border-zinc-300/80 bg-white px-4 text-xs font-semibold text-zinc-700 shadow-xs transition-colors duration-200 hover:bg-zinc-50 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-white dark:focus-visible:ring-white"
-            @click="emit('copy')"
+            @click="onPanelCopy"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-3.5 w-3.5 shrink-0" aria-hidden="true"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
             {{ t('copyMessage') }}
-          </button>
+          </motion.button>
           <p class="min-w-0 flex-1 text-xs leading-relaxed text-zinc-500">
             {{ t('contactHint') }}
           </p>
@@ -383,12 +395,14 @@ const channelName = platformLabel
              click handler here, so nothing on this list races a navigation. -->
         <ul class="space-y-1.5">
           <li v-for="channel in channels" :key="channel.key">
-            <a
+            <motion.a
               :href="channel.href"
               :target="channel.external ? '_blank' : undefined"
               :rel="channel.external ? 'noopener noreferrer' : undefined"
               :data-contact-channel="channel.key"
               :data-contact-prefilled="channel.prefilled"
+              :while-press="reduced ? undefined : { scale: press.scale }"
+              :transition="press.transition"
               class="flex min-w-0 items-center gap-2 rounded-full border border-zinc-200/80 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 shadow-xs transition-colors duration-200 hover:border-zinc-300 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-700/60 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:text-white dark:focus-visible:ring-white"
             >
               <!-- The brand marks come from the one source the masthead uses, so a channel is named
@@ -403,7 +417,7 @@ const channelName = platformLabel
               <span v-else class="min-w-0 flex-1 truncate text-right text-xs font-normal text-zinc-500 dark:text-zinc-400">
                 {{ channel.prefilled ? t('channelPrefilled') : t('channelCopyFirst') }}
               </span>
-            </a>
+            </motion.a>
           </li>
         </ul>
       </div>

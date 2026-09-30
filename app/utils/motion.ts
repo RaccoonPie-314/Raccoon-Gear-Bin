@@ -130,3 +130,14 @@ export const iconPop = {
 export const dock = {
   transition: { type: 'spring', stiffness: 360, damping: 34, mass: 0.9 }
 } as const
+
+/**
+ * `copyPop` — the tactile spring pulse when a link or message is copied (Phase G).
+ * Snappy physical acknowledgement ([1, 1.05, 1]) that settles in < 250ms with no lingering wobble.
+ * Fired on the `click` (after `while-press` has released on pointer-up), so it never races the press
+ * scale for the same element. Skipped entirely under prefers-reduced-motion.
+ */
+export const copyPop = {
+  keyframes: [1, 1.05, 1],
+  transition: { type: 'spring', stiffness: 500, damping: 18, mass: 0.6 }
+} as const
