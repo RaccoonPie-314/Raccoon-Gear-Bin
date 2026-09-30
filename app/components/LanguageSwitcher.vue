@@ -27,7 +27,7 @@ const languages: { code: LocaleCode; label: string }[] = [
       :key="language.code"
       :to="switchLocalePath(language.code)"
       :aria-current="locale === language.code ? 'true' : undefined"
-      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wider transition-all duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
+      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wider transition-colors duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
       :class="[
         locale === language.code
           ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-white'

@@ -56,6 +56,10 @@ Covered (this list is the shape of the run, not its check count — the run prin
   transitions, frame-sampled with and without reduced motion; the sticky bar's geometry, safe area,
   breakpoint, surface and stacking under the lightbox; Escape handing focus back; no horizontal
   overflow at seven widths in both colour schemes; canonical and Open Graph metadata.
+- **Accessibility floors**: the Khmer card eyebrow computes under 1.1px of tracking, with a control on
+  the same elements in English that must read wide (2px) — so the bound is known to be measuring the
+  guard and not an empty node list; and `prefers-reduced-transparency` leaves the sticky bar and detail
+  header with `backdropFilter: 'none'` and a fully opaque `backgroundColor`.
 - **Admin flow**: login, add, image upload, save/update, cancel, delete, the site-info editor
   (seed, field edits, link add/toggle/reorder/remove, the singleton upsert body, and the public
   header reflecting it), logout.
@@ -93,7 +97,7 @@ unmodified build is a broken check, not a regression** — fix the check before 
 
 ## Traps when extending the harness
 
-All five have already been paid for once:
+All seven have already been paid for once:
 
 1. **The stub exists only in the browser.** Nuxt's SSR fetches run on the server, un-stubbed, so a
    hard reload into a fake session yields a genuine hydration mismatch and unverifiable reads.
@@ -116,6 +120,15 @@ All five have already been paid for once:
    Hand the gesture to a logged probe: record the events the control receives, and when the platform
    offered pointer events but no click, press and release the same point as a mouse pair — then print
    which path proved the rule (`how: touch` vs `touch-then-mouse`) so the fallback stays visible.
+6. **`nav()` takes an absolute URL, not a path.** It hands its argument straight to `Page.navigate`,
+   so `nav('/')` aborts the whole run with `Cannot navigate to invalid URL` — long before any check
+   reports it. Build the URL the way the existing calls do (`new URL('/', appUrl).href`,
+   `appUrl + 'admin/login'`).
+7. **A Khmer visit stays Khmer on the root path.** `detectBrowserLanguage.redirectOn: 'root'` means
+   the locale cookie set by a `/km/` navigation redirects an unprefixed `/` straight back to `/km/`.
+   Any control that must read the *English* branch of a locale-conditional style has to run before the
+   Khmer navigation, not after it. (Unprefixed deep paths are fine — that is why the run returns to
+   `/products/…` and gets English back.)
 
 ## Measure, don't eyeball
 

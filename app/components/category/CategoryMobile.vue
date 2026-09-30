@@ -22,6 +22,9 @@ const emit = defineEmits<{
 // everything below this line is mobile-only touch behaviour.
 const { computedItems, isItemActive, activeIndex, nextSelection } = useCategoryItems(props)
 
+// The nav's accessible name is a harness selector string (`nav[aria-label="Mobile product categories"]`),
+// so the English value of `mobileProductCategories` must stay byte-identical to it.
+const { t } = useI18n()
 const reduced = useReducedMotion()
 
 // One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it.
@@ -250,7 +253,8 @@ const scrollActiveMobileItemIntoView = () => {
   if (!activeEl || !navEl) return
 
   const targetScrollLeft = activeEl.offsetLeft - (navEl.clientWidth - activeEl.clientWidth) / 2
-  navEl.scrollTo({ left: targetScrollLeft, behavior: 'smooth' })
+  // Reduced motion still has to follow the selection — it just must not travel there.
+  navEl.scrollTo({ left: targetScrollLeft, behavior: reduced.value ? 'auto' : 'smooth' })
 }
 
 // ==========================================
@@ -327,10 +331,10 @@ watch(computedItems, () => {
       :animate="{ y: isMobileNavVisible ? '0%' : '125%' }"
       :transition="reduced ? { duration: 0 } : dock.transition"
     >
-      <div class="pointer-events-auto bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl backdrop-saturate-150 border-t border-white/50 dark:border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_-12px_32px_-14px_rgba(0,0,0,0.3)] px-2 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
+      <div data-site-dock class="pointer-events-auto bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl backdrop-saturate-150 border-t border-white/50 dark:border-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.6),0_-12px_32px_-14px_rgba(0,0,0,0.3)] px-2 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))]">
         <nav
           ref="mobileNavRef"
-          aria-label="Mobile product categories"
+          :aria-label="t('mobileProductCategories')"
           class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto touch-pan-y select-none"
           tabindex="-1"
         >

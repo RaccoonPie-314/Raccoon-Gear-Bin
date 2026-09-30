@@ -4,7 +4,9 @@ import { AnimatePresence, animate, motion, useReducedMotion } from 'motion-v'
 import { lightbox as lightboxPreset } from '~/utils/motion'
 
 const props = defineProps<{ images: CatalogImage[]; name: string }>()
-const { t } = useI18n()
+// `locale` gates the wide Latin tracking on the no-image frame: letter-spacing at that size pulls
+// Khmer clusters apart.
+const { locale, t } = useI18n()
 // Reactive prefers-reduced-motion (false during SSR, synced on mount) — one source for every
 // softened duration here, replacing the per-call `matchMedia` reads.
 const reduced = useReducedMotion()
@@ -99,7 +101,6 @@ const onKeydown = (event: KeyboardEvent) => {
 const isLightboxOpen = ref(false)
 const photoBtn = ref<HTMLElement | null>(null)
 const lightboxCloseBtn = ref<HTMLElement | null>(null)
-const dialogEl = ref<HTMLElement | null>(null)
 const frameEl = ref<HTMLElement | null>(null)
 const zoomControlEl = ref<HTMLElement | null>(null)
 const lightboxImgEl = ref<HTMLImageElement | null>(null)
@@ -463,7 +464,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
           />
         </AnimatePresence>
       </button>
-      <div v-else class="flex h-full items-center justify-center text-xs uppercase tracking-[0.2em] text-zinc-400">
+      <div v-else class="flex h-full items-center justify-center text-xs uppercase text-zinc-400" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.2em]'">
         {{ t('noImage') }}
       </div>
 
@@ -540,7 +541,6 @@ const onDialogKeydown = (event: KeyboardEvent) => {
       <motion.div
         v-if="isLightboxOpen"
         key="lightbox"
-        ref="dialogEl"
         data-lightbox
         role="dialog"
         aria-modal="true"
@@ -596,7 +596,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
             type="button"
             data-lightbox-prev
             :aria-label="t('previousPhoto')"
-            class="absolute left-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            class="absolute left-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             @click="step(-1)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
@@ -605,7 +605,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
             type="button"
             data-lightbox-next
             :aria-label="t('nextPhoto')"
-            class="absolute right-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            class="absolute right-2 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             @click="step(1)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
@@ -622,7 +622,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
         type="button"
         data-lightbox-close
         :aria-label="t('close')"
-        class="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs backdrop-blur transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        class="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-white/20 bg-zinc-900/70 text-white shadow-xs transition-colors hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         @click="closeLightbox"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>

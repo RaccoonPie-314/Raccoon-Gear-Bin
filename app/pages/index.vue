@@ -75,7 +75,8 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
               <LanguageSwitcher />
               <span
                 v-if="isAdminMode"
-                class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
+                class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
+                :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.16em]'"
               >
                 <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
                 {{ t('adminMode') }}
@@ -120,7 +121,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           class="shrink-0 rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs"
           @click="openAddEditor"
         >
-          ＋ {{ t('addProduct') }}
+          <span aria-hidden="true">+</span> {{ t('addProduct') }}
         </UButton>
       </section>
 
@@ -177,7 +178,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
             </div>
             <div class="flex items-center justify-between gap-4 sm:justify-end sm:gap-5">
               <span class="text-xs font-medium text-zinc-400 tabular-nums dark:text-zinc-500">
-                {{ filteredProducts.length }} {{ filteredProducts.length === 1 ? 'item' : 'items' }}
+                {{ t('itemCount', { count: filteredProducts.length }) }}
               </span>
               <USelect
                 v-model="sortOrder"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 const supabase = useSupabaseClient()
 const { signIn } = useAdminAuth()
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
 const email = ref('')
 const password = ref('')
@@ -75,7 +75,7 @@ useHead({ title: pageTitle })
           </div>
         </div>
         <div>
-          <p class="text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-400 dark:text-zinc-500">
+          <p class="text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
             {{ t('adminAccess') }}
           </p>
           <h1 class="mt-1 text-2xl sm:text-3xl font-black tracking-tight text-zinc-950 dark:text-white">

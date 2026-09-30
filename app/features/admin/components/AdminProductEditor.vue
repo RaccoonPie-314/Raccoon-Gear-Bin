@@ -18,7 +18,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ mutated: [] }>()
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
 const {
   editorForm,
@@ -64,7 +64,7 @@ defineExpose({ openAddEditor, openEditEditor })
     >
       <div class="flex items-center justify-between gap-4 border-b border-zinc-200/80 px-6 py-5 dark:border-zinc-800/80">
         <div>
-          <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">{{ t('catalog') }}</p>
+          <p class="text-[10px] font-bold uppercase text-zinc-400" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.2em]'">{{ t('catalog') }}</p>
           <h2 class="mt-1 text-xl font-black">{{ editorForm.id ? t('editProduct') : t('addProduct') }}</h2>
         </div>
         <button

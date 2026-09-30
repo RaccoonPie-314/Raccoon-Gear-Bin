@@ -1,12 +1,6 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
-export type ProductCategory =
-  | 'controllers'
-  | 'keyboards'
-  | 'mice'
-  | 'headphones'
-  | 'earphones'
-
+// Categories are rows in `product_categories`, not an enum — so there is no category union here.
 export type ProductStatus = 'draft' | 'published' | 'archived'
 
 export type AdminRole = 'admin' | 'super_admin'

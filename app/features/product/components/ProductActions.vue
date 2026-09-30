@@ -38,7 +38,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ copy: [], copyLink: [], copyMessage: [] }>()
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
 // Each mount keeps its own open flags — the inline block and the sticky bar are two separate
 // affordances, and opening one should not move the other. Nothing here is shared with the gallery:
@@ -296,10 +296,12 @@ const channelName = platformLabel
          is on the scroll box itself: a region that scrolls but cannot be focused is unreachable
          from the keyboard, and a shop with six channels would otherwise hide four of them from
          exactly the visitor least able to discover the scrollbar.
-         The surface is set once per variant rather than base-plus-override: two background
-         utilities in the same class list are one layer apart in the stylesheet, so the translucent
-         inline wash used to win over the solid one this variant needs — and a see-through panel
-         floats over the product photo, which is the one place a backdrop must not be transparent.
+         The surface is set once per variant rather than base-plus-override: two background utilities
+         in the same class list are one layer apart in the stylesheet, and a see-through panel floats
+         over the product photo — the one place a backdrop must not be transparent. Both variants are
+         therefore opaque, which also means neither pays for a `backdrop-filter` that has nothing to
+         frost: the inline panel sits in normal flow, so the only thing behind it is the page's own
+         flat background.
 
          The order is the sequence it asks for: read the message, copy it, then open a channel.
          A channel row is a plain link and deliberately copies nothing on its way out — an
@@ -308,10 +310,10 @@ const channelName = platformLabel
          activation left and is popup-blocked). Firing the copy and navigating anyway would leave
          the visitor unable to tell whether the copy worked, which is worse than not offering it.
 
-         The enter is a FLIP morph out of the button (see the JS hooks above): the panel is measured
-         against the CTA and scaled up from its footprint on both axes, so it reads as the surface
-         expanding out of the control rather than a box appearing nearby. Transform and opacity only,
-         so the page behind never moves. -->
+         The enter is a popover bloom out of the button (see the JS hooks above): the panel scales up
+         from a slightly-shrunk, offset state on a spring, anchored at the edge that faces its trigger,
+         so it reads as the surface opening out of the control rather than a box appearing nearby.
+         Transform and opacity only, so the page behind never moves. -->
     <Transition
       @enter="onPanelEnter"
       @after-enter="onPanelAfterEnter"
@@ -326,7 +328,7 @@ const channelName = platformLabel
         :aria-label="ctaLabel"
         tabindex="0"
         class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
-        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-white/95 shadow-xl backdrop-blur-md dark:bg-zinc-900/95'"
+        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-white shadow-xl dark:bg-zinc-900'"
       >
         <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
              a browser that refuses the clipboard still leaves them something to select. The field
@@ -336,7 +338,8 @@ const channelName = platformLabel
              a pathologically long product name from turning the panel into a wall of text. -->
         <label
           :for="messageId"
-          class="block text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-400 dark:text-zinc-500"
+          class="block text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500"
+          :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'"
         >
           {{ t('contactMessageLabel') }}
         </label>
@@ -367,7 +370,7 @@ const channelName = platformLabel
           </p>
         </div>
 
-        <p class="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.22em] text-zinc-400 dark:text-zinc-500">
+        <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
           {{ t('chooseChannel') }}
         </p>
 

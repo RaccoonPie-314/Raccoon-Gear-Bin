@@ -22,6 +22,9 @@ const emit = defineEmits<{
 // everything below this line is desktop-only pointer behaviour.
 const { computedItems, isItemActive, activeIndex, nextSelection } = useCategoryItems(props)
 
+// The nav's accessible name is a harness selector string (`nav[aria-label="Product categories"]`),
+// so the English value of `productCategories` must stay byte-identical to it.
+const { t } = useI18n()
 const reduced = useReducedMotion()
 
 // One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it, so a
@@ -46,12 +49,9 @@ const mousePos = ref<{ x: number; y: number } | null>(null)
 
 const isDragging = ref(false)
 const dragHighlightIndex = ref<number | null>(null)
-const dragStretch = ref(0)
 let isMouseDown = false
 let dragStartY = 0
 let grabOffsetY = 0
-let lastDragClientY = 0
-let dragVelocityY = 0
 let dragJustFinished = false
 let dragRafId: number | null = null
 
@@ -106,11 +106,6 @@ const updateDragPosition = (clientY: number) => {
 
   desktopIndicatorStyle.value.top = clampedTop
 
-  const deltaY = clientY - lastDragClientY
-  lastDragClientY = clientY
-  dragVelocityY = dragVelocityY * 0.6 + deltaY * 0.4
-  dragStretch.value = Math.min(0.08, Math.abs(dragVelocityY) * 0.004)
-
   const index = findDesktopItemIndex(clientY)
   if (index !== -1) {
     dragHighlightIndex.value = index
@@ -127,9 +122,6 @@ const handleMouseDown = (event: MouseEvent) => {
   isMouseDown = true
   isDragging.value = false
   dragStartY = event.clientY
-  lastDragClientY = event.clientY
-  dragVelocityY = 0
-  dragStretch.value = 0
 
   window.addEventListener('mousemove', handleWindowMouseMove)
   window.addEventListener('mouseup', handleWindowMouseUp)
@@ -143,7 +135,6 @@ const handleWindowMouseMove = (event: MouseEvent) => {
   if (!isDragging.value) {
     if (Math.abs(event.clientY - dragStartY) > 4) {
       isDragging.value = true
-      lastDragClientY = event.clientY
       const initialItemIndex = findDesktopItemIndex(dragStartY)
       if (initialItemIndex === activeIndex.value && desktopNavRef.value) {
         const navRect = desktopNavRef.value.getBoundingClientRect()
@@ -182,8 +173,6 @@ const handleWindowMouseUp = (event: MouseEvent) => {
     const targetIndex = dragHighlightIndex.value ?? findDesktopItemIndex(event.clientY)
     isDragging.value = false
     dragHighlightIndex.value = null
-    dragStretch.value = 0
-    dragVelocityY = 0
 
     if (targetIndex !== -1) {
       const targetItem = computedItems.value[targetIndex]
@@ -373,7 +362,7 @@ watch(computedItems, () => {
 <template>
   <nav
     ref="desktopNavRef"
-    aria-label="Product categories"
+    :aria-label="t('productCategories')"
     class="relative flex flex-col gap-2.5 overflow-visible py-1 select-none"
     tabindex="-1"
     @mousemove="handleMouseMove"

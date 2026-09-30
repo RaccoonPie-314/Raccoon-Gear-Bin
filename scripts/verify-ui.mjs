@@ -1839,6 +1839,14 @@ const run = async () => {
     // are longer, and wide Latin letter-spacing tears Khmer clusters apart (the rule the storefront
     // already follows for its eyebrows). The visit returns to English afterwards, because every check
     // below this one reads English copy.
+    // Control first, while the page is still English: the same probe must read WIDE here (0.2em at the
+    // 10px phone step = 2px), or the Khmer bound below would only be proving that a probe which never
+    // fires is green. It has to run before the Khmer visit because that visit sets the locale cookie,
+    // and `redirectOn: 'root'` would send an unprefixed `/` back to `/km/`.
+    await nav(new URL('/', appUrl).href)
+    await waitFor('!!document.querySelector(\'main article p.uppercase\')')
+    const enEyebrows = await ev('Array.from(document.querySelectorAll("main article p.uppercase")).map(p => parseFloat(getComputedStyle(p).letterSpacing))')
+    check('the English card eyebrow is wide, so the Khmer bound has something to measure', enEyebrows.length > 0 && enEyebrows.every(px => px > 1.5), { enEyebrows })
     await nav(new URL('/km/products/' + G.manyId, appUrl).href)
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
     await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
@@ -1849,6 +1857,14 @@ const run = async () => {
     check('the Khmer sheet carries no wide Latin tracking and does not widen the page', !!kmType && kmType.transform === 'none' && (kmType.tracking === 'normal' || parseFloat(kmType.tracking) <= 0.5) && !!kmSheet && kmSheet.overflow <= 1, { kmType, overflow: kmSheet && kmSheet.overflow })
     await press('Escape', 'Escape', 27)
     await waitFor('!document.querySelector(\'[data-share-sheet]\')')
+    // The same rule on the storefront itself. Every card eyebrow is a `p.uppercase`, and Khmer is the
+    // locale where wide Latin tracking tears clusters apart. English computes to 2px (0.2em at the
+    // 10px phone step), the guarded Khmer branch to 0.8px (0.08em) — so a 1.1px bound separates the
+    // two, and it is a computed-style read rather than a text-width one (see the font note above).
+    await nav(new URL('/km/', appUrl).href)
+    await waitFor('!!document.querySelector(\'main article p.uppercase\')')
+    const kmEyebrows = await ev('Array.from(document.querySelectorAll("main article p.uppercase")).map(p => parseFloat(getComputedStyle(p).letterSpacing))')
+    check('no Khmer card eyebrow carries wide Latin tracking', kmEyebrows.length > 0 && kmEyebrows.every(px => px <= 1.1), { kmEyebrows })
     await nav(detailUrl(G.manyId))
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
     check('the page is back in English for the checks that follow', (await stickyMount()).ctaText === C.cta.in, { cta: (await stickyMount()).ctaText })
@@ -2008,6 +2024,20 @@ const run = async () => {
     }
     check('the sticky bar and both controls change surface between light and dark', !!surfaces.light && !!surfaces.dark && surfaces.light.bar !== surfaces.dark.bar && surfaces.light.cta !== surfaces.dark.cta && surfaces.light.share !== surfaces.dark.share, surfaces)
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'no-preference' }] })
+    await metrics(1440, 900, false)
+
+    // ---- frosted surfaces under `prefers-reduced-transparency` ---------------------------------
+    // The storefront frosts nine surfaces, and the fallback lives in one `main.css` block rather than
+    // in nine components — so the only thing that proves the flag is wired is measuring it painted:
+    // frost gone, fill opaque, at the phone width where the sticky bar is the surface in question.
+    await metrics(390, 844, true)
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] })
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-sticky-cta]\')')
+    await sleep(600)
+    const unfrosted = await ev('(() => { const alpha = c => { const m = /rgba\\(([^)]+)\\)/.exec(c); return m ? parseFloat(m[1].split(",")[3]) : 1 }; const bar = document.querySelector("[data-sticky-cta]"); const head = document.querySelector("[data-detail-header]"); const bc = bar && getComputedStyle(bar); const hc = head && getComputedStyle(head); return { barFilter: bc ? (bc.backdropFilter || bc.webkitBackdropFilter) : null, barAlpha: bc ? alpha(bc.backgroundColor) : 0, headFilter: hc ? (hc.backdropFilter || hc.webkitBackdropFilter) : null, headAlpha: hc ? alpha(hc.backgroundColor) : 0 } })()')
+    check('reduced transparency leaves the frosted storefront surfaces opaque and unfrosted', unfrosted.barFilter === 'none' && unfrosted.barAlpha === 1 && unfrosted.headFilter === 'none' && unfrosted.headAlpha === 1, unfrosted)
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }] })
     await metrics(1440, 900, false)
     collectErrors()
   }

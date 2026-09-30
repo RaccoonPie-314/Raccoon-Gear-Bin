@@ -383,8 +383,8 @@ and none of them are visible to the compiler or to `build`.
 | Indicator slide | 260ms `cubic-bezier(0.16, 1, 0.3, 1)` — **harness-locked** (`indicator keeps the 260ms tuned curve`) | `CategoryDesktop.vue` |
 | Category button press (Phase F) | `press` scale `0.97`, spring `400/30`; `<motion.button :while-press>`, gated off while dragging and under reduced motion | `CategoryDesktop.vue`, `CategoryMobile.vue` |
 | Category icon pop (Phase F) | `iconPop` scale `[1,1.16,1]`, spring `500/16/0.7`, one-shot `animate()` on the active icon's wrapper div (not the `<svg>` — center origin); skipped under reduced motion | `CategoryDesktop.vue`, `CategoryMobile.vue` |
-| Mobile dock reveal (Phase F) | `dock` spring `360/34/0.9` on `y` (`0%`↔`125%`); `{duration:0}` under reduced motion. Bar is frosted glass (`backdrop-blur-xl backdrop-saturate-150` + inset top-specular / soft drop shadow) | `CategoryMobile.vue` |
-| Product conversion tactile layer (Phase G) | Share-sheet + contact controls are `<motion.button>`/`<motion.a>` with `press` (`:while-press` scale 0.97, spring 400/30), gated on `useReducedMotion()`. The three copy actions (`data-share-copy-link`, `data-share-copy-message`, `data-copy-message`) fire a one-shot `copyPop` (scale `[1,1.05,1]`, spring 500/18/0.6) on `click` — after `while-press` releases on pointer-up, so the two never race for the same element's transform. Sheet upward rubber-band `dragElastic { top: 0.15 }`; sheet backdrop `backdrop-blur-md backdrop-saturate-150`; sticky bar `backdrop-blur-xl backdrop-saturate-150`. **The `[data-sticky-cta] [data-contact-panel]` surface stays opaque (`bg-white`/`dark:bg-zinc-900`) and the sheet's resting transform stays `none`/identity — harness-locked.** | `ProductShareSheet.vue`, `ProductActions.vue`, `ProductConversion.vue` |
+| Mobile dock reveal (Phase F) | `dock` spring `360/34/0.9` on `y` (`0%`↔`125%`); `{duration: 0}` under reduced motion. Bar is frosted glass (`backdrop-blur-xl backdrop-saturate-150` + inset top-specular / soft drop shadow), and its wrapper carries `data-site-dock` — the hook `main.css`'s reduced-transparency block paints flat | `CategoryMobile.vue` |
+| Product conversion tactile layer (Phase G) | Share-sheet + contact controls are `<motion.button>`/`<motion.a>` with `press` (`:while-press` scale 0.97, spring 400/30), gated on `useReducedMotion()`. The three copy actions (`data-share-copy-link`, `data-share-copy-message`, `data-copy-message`) fire a one-shot `copyPop` (scale `[1,1.05,1]`, spring 500/18/0.6) on `click` — after `while-press` releases on pointer-up, so the two never race for the same element's transform. Sheet upward rubber-band `dragElastic { top: 0.15 }`; sheet backdrop `backdrop-blur-md backdrop-saturate-150`; sticky bar `backdrop-blur-xl backdrop-saturate-150`. **Both `[data-contact-panel]` mounts stay opaque (`bg-white`/`dark:bg-zinc-900` — the inline one used to carry a `bg-white/95 backdrop-blur-md` that had nothing behind it to frost) and the sheet's resting transform stays `none`/identity — harness-locked.** | `ProductShareSheet.vue`, `ProductActions.vue`, `ProductConversion.vue` |
 | Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
 | Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion), **anchored on the point that was clicked**: `transform-origin` is that point and the photo carries no other translation, so the clicked detail stays under the pointer instead of sliding to the centre. Pan is clamped per axis to the picture's own edges under that origin (a picture shorter than the frame after the scale is held centred, not given invented travel), and the zoom resets on photo change and on close. No standalone zoom control — the enlarged photo *is* the control. The dialog itself enters and leaves through a **Motion `<AnimatePresence>` opacity fade** on the fixed container (the `lightbox` preset in `app/utils/motion.ts`; Phase D) — opacity only, never a transform on an ancestor of the `<img>`, or the focal maths would measure a mid-animation rect | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
@@ -395,6 +395,8 @@ and none of them are visible to the compiler or to `build`.
 | Share Sheet enter / leave | **Motion owns the whole surface now** (Phase C.2): `<AnimatePresence>` wrapping a `<motion.div>` backdrop (`opacity`, 220ms / 120ms-reduced) around a `<motion.div>` panel. The phone sheet slides on a single `y` (`sheet` spring: stiffness 300 / damping 34, no overshoot) `100% → 0`; the desktop popover unfolds on `scaleY(0.5 → 1)` (`popover` spring 380 / 34), symmetric enter/leave, folded at whichever edge faces the trigger (the side `place()` landed on, carried as `transform-origin`). The old CSS carried a 40ms backdrop-lead and a 90ms opacity-lead — timing details of the two-writer model that a single Motion owner replaces with one coherent motion per interaction. Under reduced motion the sheet's position change drops to a fade while the popover keeps a position-free `scaleY(0.9→1)`, and the transition becomes a short duration | `ProductShareSheet.vue` |
 | Share Sheet phone exits | the header close is repeated as a full-width **Close button at the sheet's bottom edge** (`v-if="!isDesktop"`), and the grabber + header band (`[data-share-drag]`, `touch-action: none`) is a **swipe-to-dismiss handle driven by the same Motion `y`**: `drag="y"` + `useDragControls` started only from the handle (`dragListener` off), `dragConstraints { top: 0, bottom: 0 }` with `dragElastic { top: 0, bottom: 1 }` (1:1 downward follow, upward locked, springs home automatically). `@drag-end` reads pointer `info.offset.y` / `info.velocity.y` and closes past `96px` or a flick (`>16px` at `>500px/s`) — AnimatePresence then plays the exit from wherever the finger lifted, velocity-continuous — while below either gate the dragConstraints return it home. No more WAAPI `el.animate` flick and no CSS leave class: the transform has one owner. Mouse and desktop popover never enter this path | `ProductShareSheet.vue` |
 | Share copy confirmation | `FEEDBACK_MS = 4000`, one speaker at a time (`inline` / `sticky` / `sheet`) | `ProductConversion.vue` |
+| Page-level reduced-motion floor | `main.css` answers `prefers-reduced-motion` for the motion no component owns: `scroll-behavior: auto`, a 120ms opacity-only route transition (the translate is dropped), the root View Transition collapsed to `animation-duration: 1ms`, no `select-morph` animation on the listbox. **Deliberately selector-scoped, never `*` and never `!important`** — a blanket duration here would overwrite the per-component fallbacks the harness measures (the gallery's softened 150ms swap, the gated press spring). Component motion keeps deciding itself at the call site | `main.css` |
+| Reduced-transparency floor | One unlayered `main.css` block defeats all nine frosted surfaces at once: `backdrop-filter: none` plus a flat fill per surface. It is keyed on the `data-*` contracts that already exist (`[data-detail-header]`, `[data-site-dock]`, `[data-sticky-cta]`, `[data-contact-panel]`, `[data-share-sheet]`, `[data-share-backdrop]`, `[data-lightbox]`, `[data-lightbox-*]`, `[data-gallery-prev|next]`) so no component opts in and none carries a duplicate fallback. Fills follow the two dark rungs: `var(--ui-bg)` for surfaces that sit *on* the page, `#09090b` for the ones that belong to it. Unlayered so it outranks the `bg-white/80` utilities it is replacing. Asserted by the harness | `main.css`, the `data-*` surface above |
 | Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
 | Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
 | Masthead levels | contact line above the emblem's top; socials below the utility line and flush right with it; the contact pair stays one line, pinned to both margins, and neither label is ellipsised | `index.vue` header, asserted by `verify-ui.mjs` |
@@ -417,7 +419,10 @@ rendering rather than a missing glyph. `@nuxt/fonts`' network providers stay dis
 The consequence for verification is deliberate and worth knowing before you change a width: text
 metrics are now the *machine's* metrics, so a measurement that depends on how wide a string is cannot
 be an absolute pixel number if it has to pass on a runner too. The harness's @320 guards are therefore
-about overflow, control height and inset — not about where a particular word ends.
+about overflow, control height and inset — not about where a particular word ends. The other
+font-related rule lives below in the masthead section: **eyebrow tracking is locale-conditional at
+every label, not just the two in `index.vue`** — Khmer has no system fallback and wide Latin tracking
+corrupts its clusters rather than merely spacing them.
 
 ### The storefront masthead
 
@@ -453,6 +458,22 @@ line truncates before it collides, and the socials stay reachable, which is the 
 a text baseline, which parks a few pixels of descender beneath it and lifts the logo out of the
 row's vertical centre — 3.5px of visible misalignment against controls that are centred.
 
+**Eyebrow tracking is locale-conditional, everywhere.** Wide Latin letter-spacing pulls Khmer
+clusters apart (a cluster carries marks below the baseline, and tracking separates them), so every
+`uppercase tracking-[…]` label keys its tracking off the locale: `locale === 'km' ? 'tracking-[0.08em]'
+: '<wide>'`. `index.vue` carried the only guards for a long time; the rule now covers all of them —
+card, dock and masthead eyebrows, the panel's field labels, the specs headings, the admin badges —
+each keeping its own Latin value, so English geometry never moved. The guard stays inline per site
+rather than a shared class for two reasons: `main article p.uppercase` is a *harness selector* (moving
+`uppercase` into a component class in `main.css` would break it), and the sizes disagree (10px, 11px,
+10→11px responsive). The pair is measured in both directions — an English control that must read wide,
+and the Khmer eyebrow under 1.1px — because a bound that can only ever pass proves nothing.
+
+`data-*` attributes are also how the global stylesheet reaches a component: `main.css`'s
+reduced-transparency block paints `[data-site-dock]`, `[data-sticky-cta]`, `[data-detail-header]`,
+`[data-contact-panel]`, `[data-share-sheet]`, `[data-share-backdrop]`, `[data-lightbox]` and its
+controls flat. Dropping one of those now costs a fallback, not just a style.
+
 Social glyphs are the platform marks themselves, keyed off the lowercased platform name in
 `SiteInfoSocials`'s `BRAND_ICONS`. A generic outline is not a brand: at 16px the silhouette is
 the whole recognition, which is why TikTok is the TikTok note and not a music icon. Unknown
@@ -481,6 +502,12 @@ it reaches by answering `/rest/v1`, `/auth/v1` and `/storage/v1` from `scripts/f
 inside the browser. **No real project is contacted and nothing can be written.** Fixtures are
 synthetic and shaped exactly like the `PRODUCT_SELECT` / `CATEGORY_SELECT` embeds and the
 `SITE_INFO_SELECT` row, so the harness also fails loudly if a select string changes shape.
+
+Two checks measure the accessibility floors rather than the tuned motion: the Khmer card eyebrow must
+compute under 1.1px of tracking with an English control on the same elements reading wide, and
+`prefers-reduced-transparency` must leave the sticky bar and detail header unfrosted (`backdropFilter:
+'none'`) and fully opaque. Both live in the phone-width part of the run, where those surfaces are the
+painted ones.
 
 When a refactor must be proven behaviour-preserving, run it twice — once against a worktree built
 from the nearest `backup/*` tag — and diff the `PASS`/`FAIL` lines including the recorded request
@@ -536,6 +563,12 @@ surface should match the logo.
 - `SearchDock`'s desktop launcher is absolutely positioned against the `<aside>`; it only
   centres correctly because that element is `relative`.
 - `CategoryMobile` teleports itself to `body`, so DOM order ≠ visual order.
+- **Three accessible names are harness selectors.** `nav[aria-label="Product categories"]`,
+  `nav[aria-label="Mobile product categories"]` and `main article button[aria-label="Edit product"]`
+  are how `verify-ui.mjs` aims ~14 checks. They now come from `t()` (`productCategories`,
+  `mobileProductCategories`, `editProduct`), so **the English values of those three keys are the
+  contract**: reword one and the harness reports "element not found", not "the label changed".
+  Change the checks in the same commit as the copy.
 
 ## Where new code goes
 
@@ -644,8 +677,6 @@ surface should match the logo.
   `phone.replace(/[^\d+]/g, '')`. It was left duplicated on purpose: the masthead's contact line is
   under the harness's inset-and-href invariants and a conversion pass has no business editing it.
   One owner under `app/utils/` is the change a site-info pass should make.
-- **Dead code:** `app/types/product.ts`, `app/types/database.types.ts`, the `ProductCategory`
-  union (the schema stores categories as rows, not an enum), `TemplateMenu.vue`, `AppLogo.vue`.
 - **No `server/api` tier.** `createSupabaseAdminClient()` has zero callers and the
   service-role key is wired into `runtimeConfig` unread. All data access is the browser's
   anon client governed by RLS — which is the actual security model here.

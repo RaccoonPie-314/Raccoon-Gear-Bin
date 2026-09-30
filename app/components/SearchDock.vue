@@ -6,7 +6,7 @@ const searchQuery = defineModel<string>({ default: '' })
 
 withDefaults(defineProps<{ resultCount?: number }>(), { resultCount: 0 })
 
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
 // The icon only takes over once the real search field has scrolled away, so the two never share the screen.
 const SEARCH_FIELD_SELECTOR = '[data-search-anchor]'
@@ -1088,10 +1088,11 @@ onUnmounted(() => {
         </div>
 
         <p
-          class="mt-4 text-[10px] font-bold tracking-[0.22em] text-zinc-400 uppercase tabular-nums dark:text-zinc-500"
+          class="mt-4 text-[10px] font-bold text-zinc-400 uppercase tabular-nums dark:text-zinc-500"
+          :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'"
           :style="{ opacity: contentOpacity, transition: contentTransition }"
         >
-          {{ resultCount }} {{ resultCount === 1 ? 'item' : 'items' }}
+          {{ t('itemCount', { count: resultCount }) }}
         </p>
       </div>
 

@@ -112,3 +112,114 @@ body {
     transform: scaleY(0.24);
   }
 }
+
+/* Page-level reduced-motion floor. Every component decides its own softened motion (`useReducedMotion`
+   at the call site, the gallery's own override below), but the route transition, the select panel and
+   the browser's own smooth-scroll were never gated anywhere — and they move on every route change,
+   which is the highest-frequency motion in the app. Deliberately selector-scoped, never `*`: a blanket
+   `transition-duration` here would silently rewrite the tuned component fallbacks the harness measures
+   (the gallery's softened 150ms swap, the gated press spring).
+   What is left is a short opacity blend, never movement: the route transition keeps a 120ms fade but
+   travels nowhere (`.page-enter-from` loses its translate), and the View Transition — a full-page
+   snapshot cross-fade the UA would otherwise run at its own length — collapses to 1ms, which is how you
+   say "no animation" to a named timeline without deleting the pseudo-element's own duration rule. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .page-enter-active,
+  .page-leave-active {
+    transition-duration: 120ms;
+  }
+
+  .page-enter-from,
+  .page-leave-to {
+    transform: none;
+  }
+
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 1ms;
+  }
+
+  [data-slot="content"][role="listbox"][data-state="open"],
+  [data-slot="content"][role="listbox"][data-state="closed"] {
+    animation: none;
+  }
+}
+
+/* Frosted surfaces, defeated. `prefers-reduced-transparency` is the platform's answer to "do not make
+   me read text over a moving background", and this storefront has nine translucent surfaces — the
+   sticky header, the mobile category dock, the sticky CTA bar, the panels, the sheet, the lightbox and
+   its controls. Nothing here changes what those surfaces look like by default; it only replaces the
+   material with the flat colour the frosted version is trying to be.
+
+   The selectors are the `data-*` contracts the harness already aims at, so this needs no new classes
+   and no per-component opt-in — and one is deliberately absent: `body`, which is already opaque.
+   Fills follow the two dark rungs (ARCHITECTURE → Control language): `--ui-bg` is white in light and
+   zinc-900 in dark for the surfaces that sit *on* the page, and the literal `#09090b` is the page
+   itself for the ones that belong to it. Unlayered on purpose: an unlayered rule outranks a Tailwind
+   utility, which is what lets one line here beat nine `bg-white/80` classes in the markup. */
+@media (prefers-reduced-transparency: reduce) {
+  [data-detail-header],
+  [data-sticky-cta],
+  [data-site-dock],
+  [data-contact-panel],
+  [data-share-sheet],
+  [data-share-backdrop],
+  [data-lightbox],
+  [data-gallery-prev],
+  [data-gallery-next],
+  [data-lightbox-prev],
+  [data-lightbox-next],
+  [data-lightbox-close] {
+    /* Standard property only, deliberately: writing the `-webkit-` twin here makes Lightning CSS
+       collapse the two identical declarations and keep only the prefixed one, which is invisible to
+       Chrome and modern Safari — the frost survives. Asked for once, the prefixer emits the pair. */
+    backdrop-filter: none;
+  }
+
+  [data-contact-panel],
+  [data-share-sheet],
+  [data-sticky-cta] {
+    background-color: var(--ui-bg);
+  }
+
+  [data-detail-header],
+  [data-site-dock] {
+    background-color: #ffffff;
+  }
+
+  .dark [data-detail-header],
+  .dark [data-site-dock] {
+    background-color: #09090b;
+  }
+
+  [data-lightbox] {
+    background-color: rgb(9 9 11 / 0.97);
+  }
+
+  [data-share-backdrop] {
+    background-color: rgb(9 9 11 / 0.6);
+  }
+
+  /* The lightbox's own controls sit on a near-black scrim in both colour schemes, so they take the
+     dark value outright. The gallery arrows float over the photo frame instead, so they follow the
+     page like every other surface here. */
+  [data-lightbox-prev],
+  [data-lightbox-next],
+  [data-lightbox-close] {
+    background-color: #18181b;
+  }
+
+  [data-gallery-prev],
+  [data-gallery-next] {
+    background-color: #ffffff;
+  }
+
+  .dark [data-gallery-prev],
+  .dark [data-gallery-next] {
+    background-color: #18181b;
+  }
+}
