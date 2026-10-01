@@ -68,7 +68,7 @@ selects collapse to `never`.
 ```bash
 bun install
 bun run build                                                 # compiles (CI)
-bun run lint                                                  # eslint app+server (CI — fails on new errors)
+bun run lint                                                  # eslint app (CI — fails on new errors); there is no server/ source
 bun run verify                                                # scripts/verify-ui.mjs (CI) — needs Chrome
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only
 bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too

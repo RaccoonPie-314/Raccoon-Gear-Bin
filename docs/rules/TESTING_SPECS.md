@@ -116,7 +116,7 @@ Covered (this list is the shape of the run, not its check count — the run prin
 ```bash
 bun install
 bun run build
-bun run lint                                  # eslint app+server; CI fails only on new errors
+bun run lint                                  # eslint app; CI fails only on new errors
 bun run verify                                # all checks against the existing .output
 bun run verify --only=guest                   # or --only=admin (fewer checks than the full run)
 node scripts/verify-ui.mjs --build            # build first, in one step

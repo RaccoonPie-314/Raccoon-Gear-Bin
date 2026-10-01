@@ -56,8 +56,10 @@ export default defineNuxtConfig({
     ]
   },
   imports: { dirs: ['~/features/admin/composables', '~/features/product/composables'] },
+  // No service-role key anywhere in the runtime config, and that is deliberate: `nuxt build` inlines
+  // whatever is read here straight into the uploaded Worker bundle, so a key that bypasses RLS would
+  // live in the deploy artifact. Authorisation is RLS in Postgres and the browser holds the anon key.
   runtimeConfig: {
-    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
     public: {
       supabaseUrl: process.env.NUXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co',
       supabaseKey: process.env.NUXT_PUBLIC_SUPABASE_ANON_KEY || 'demo-anon-key'
@@ -67,7 +69,11 @@ export default defineNuxtConfig({
     redirect: false,
     url: process.env.NUXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co',
     key: process.env.NUXT_PUBLIC_SUPABASE_ANON_KEY || 'demo-anon-key',
-    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    // Blank on purpose. The module's own default for `secretKey` falls back to
+    // `process.env.SUPABASE_SERVICE_ROLE_KEY`, and server runtime config is inlined into the
+    // uploaded bundle — so leaving it unset still ships the key whenever `.env` has one. `''` is
+    // what actually stops it: defu skips `undefined`, so only a set value overrides the default.
+    secretKey: '',
     cookieOptions: {
       name: 'raccoon-admin-auth',
       lifetime: 60 * 60 * 8,

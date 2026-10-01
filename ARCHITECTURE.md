@@ -67,7 +67,6 @@ app/
 scripts/
 ├── verify-ui.mjs     CDP regression harness: tuned interactions + the whole admin flow
 └── fixtures.json     synthetic Supabase-shaped rows the harness serves instead of the project
-server/utils/supabase.ts  unused (see Known gaps)
 ```
 
 `app/features/**` is invisible to Nuxt's auto-import until `nuxt.config.ts` registers it: the
@@ -526,6 +525,14 @@ line truncates before it collides, and the socials stay reachable, which is the 
 a text baseline, which parks a few pixels of descender beneath it and lifts the logo out of the
 row's vertical centre — 3.5px of visible misalignment against controls that are centred.
 
+It renders the two themes as two `<img>` with `dark:hidden` / `hidden dark:block` rather than one
+`:src` bound to `useColorMode()`, because the mode is a class on `<html>` that can disagree with the
+OS preference and only CSS picks between them at paint time — no flash, no hydration mismatch. The
+cost of that shape is that a `display:none` `<img>` is fetched anyway, so **`loading="lazy"` on both
+is load-bearing**: the emblem nobody is looking at has no box, never intersects the viewport, and is
+not requested until a toggle gives it one. Measured 2026-10-01 on the live deployment: without it the
+masthead pulled 2.6 MB, more than the whole JS + CSS payload; with it, one 512px file.
+
 The tab icon is the same emblem, and it follows the **browser's** theme the same way `BrandLogo`
 follows the app's: two downscaled 64px PNGs (`favicon-light.png` from `rgb-logo-light`,
 `favicon-dark.png` from `rgb-logo-dark`) wired through `app.head.link` in `nuxt.config.ts` with
@@ -728,9 +735,21 @@ No Cloudflare secrets are configured: the anon key and project URL are inlined f
 into `runtimeConfig.public`, and every write stays authorised by RLS. Measured against the free-plan
 ceilings: 2.6 MB bundle (64 MiB), 55 assets (20,000), 34 ms startup (1 s), SSR responses ~0.6 s
 wall. The ceiling to watch is **10 ms CPU per request** — this is SSR, so a page that starts doing
-real work per request can hit error 1102 on the free plan and not on paid. Known loose end: the
-build also inlines `SUPABASE_SERVICE_ROLE_KEY` into the server bundle, which is the only place the
-(dead, never-called) `createSupabaseAdminClient` would have used it.
+real work per request can hit error 1102 on the free plan and not on paid. Nothing server-side holds
+a key that bypasses RLS: `server/utils/supabase.ts` is deleted, `runtimeConfig` has no service-role
+entry, and `supabase.secretKey` is pinned to `''` because @nuxtjs/supabase's own default reads
+`process.env.SUPABASE_SERVICE_ROLE_KEY` and server runtime config is inlined into the uploaded bundle.
+Prove it after any dependency bump: `grep -cF "<tail of the key>" .output/server -r` must be 0.
+
+**What is cached, and what is not.** Only `/_nuxt/*` is: nitro writes `_headers` with
+`max-age=31536000, immutable` for the content-hashed chunks, and Cloudflare serves them from the
+closest cache. Everything else in `public/` keeps a fixed name, so the asset pipeline gives it
+`max-age=0, must-revalidate` — a returning visitor revalidates it every visit. That is the reason a
+fixed-name file has to be small: `rgb-logo-*.png` are resampled to 512px (the 1254px masters stay in
+`Logo/`), which is 2.5x the tallest place the emblem is ever drawn. Neither the SSR HTML nor the
+Supabase responses are edge-cached, and that is deliberate — the HTML is locale-dependent and the
+catalog carries stock and promo windows the shop edits. Cache the catalog in memory for a session,
+not at the edge, and revisit HTML caching only if a measured TTFB complaint arrives.
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
 
@@ -803,9 +822,14 @@ build also inlines `SUPABASE_SERVICE_ROLE_KEY` into the server bundle, which is 
   `phone.replace(/[^\d+]/g, '')`. It was left duplicated on purpose: the masthead's contact line is
   under the harness's inset-and-href invariants and a conversion pass has no business editing it.
   One owner under `app/utils/` is the change a site-info pass should make.
-- **No `server/api` tier.** `createSupabaseAdminClient()` has zero callers and the
-  service-role key is wired into `runtimeConfig` unread. All data access is the browser's
-  anon client governed by RLS — which is the actual security model here.
+- **No `server/` tier at all.** There is no Nitro route, no server util and no server-side Supabase
+  client: `eslint` runs over `app` only, and re-adding `server` to that script is the change that
+  says a server tier exists again. All data access is the browser's anon client governed by RLS —
+  which is the actual security model here. The one exception is SSR itself: `[id].vue` awaits
+  `fetchProduct` on the server so a shared link carries `og:title` / `og:image` (measured on the
+  live HTML), which is why the detail page costs ~0.8 s TTFB and why the catalog read must not be
+  moved wholesale into `callOnce` — `verify`'s REST stub is browser-level, so server-side reads
+  would leave the harness talking to the real project.
 - **No test suite; lint is opt-in-tight, typecheck is .ts-only.** CI runs `bun run build`,
   `bun run lint` and `bun run verify`. `lint` fails only on new hard errors — the pre-existing
   debt (17 `any` casts, custom-class warnings) is downgraded in `eslint.config.mjs`, and the
