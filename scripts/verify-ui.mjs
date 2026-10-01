@@ -1439,7 +1439,7 @@ const run = async () => {
     }
     const zoomedNow = () => ev('(() => { const ls = [...document.querySelectorAll(\'[data-lightbox] [data-lightbox-main]\')]; const i = ls.find(x => !/leave-(from|active|to)/.test(x.className)) || ls[ls.length - 1]; return i && i.getAttribute("data-zoomed") === "true" })()')
     check('the lightbox photo itself takes the tap, with no standalone zoom control left', (await ev('document.querySelectorAll(\'[data-lightbox-zoom]\').length')) === 0 && await ev(`!!document.querySelector('${MTAP}')`))
-    await tapAt(195, 300)
+    await tapOnPhoto(195, 300)
     check('a tap on the photo magnifies it in place on touch', await zoomedNow())
     await touch('touchStart', [{ x: 195, y: 420 }])
     for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: 195 - 30 * i, y: 420 }]); await sleep(30) }
@@ -1461,7 +1461,7 @@ const run = async () => {
     const armedForNav = await zoomedNow()
     const selBeforeNav = await ev(SEL_IDX)
     const mLbNext = (await ev(boxesExpr('[data-lightbox-next]')))[0]
-    await tapAt(mLbNext.x, mLbNext.y)
+    await clickAt(mLbNext.x, mLbNext.y)
     await sleep(200)
     check('the arrow still navigates while the photo is magnified, and the swap resets the zoom', armedForNav === true && (await ev(SEL_IDX)) === (selBeforeNav + 1) % G.manyImages && !(await zoomedNow()), { armedForNav, armed: armed.how, selBeforeNav })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
