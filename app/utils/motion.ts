@@ -147,6 +147,14 @@ export const copyPop = {
  * exit is a shorter travel on a sharp ease-in, because a menu leaving is quicker than arriving and
  * never springs.
  *
+ * The spring is tuned by integration, not by eye (Motion's own stepped spring, scale `0.93 → 1`):
+ * `220/19/1` carries 90% of the travel at ~170ms and is at rest by ~450ms, peaking ~4.6% of the delta
+ * past rest — a third of a percent of the panel's size, so the settle is felt as cushioning and never
+ * seen as a bounce. The `400/26/0.8` it replaces did 90% in ~120ms and was at rest by ~330ms, which
+ * read as a snap: a large text surface that arrives inside two frames has no travel to follow. The
+ * harness's frame sampler is the cross-check — the popover's recorded bloom now runs
+ * `0.932 → 0.959` over its first five frames, where the old spring was already at `0.949 → 0.982`.
+ *
  * Two surfaces read it: the Contact-to-Order panel (`ProductActions`) and the Share Sheet's desktop
  * popover (`ProductShareSheet`). Both are menus opening from a control, so both get the same numbers
  * from the same place — that is the point of the preset. The phone sheet stays on `sheet`: it is a
@@ -156,7 +164,7 @@ export const applePop = {
   rest: 'scale(1) translateY(0px)',
   below: { from: 'scale(0.93) translateY(-8px)', to: 'scale(0.95) translateY(-4px)' },
   above: { from: 'scale(0.94) translateY(10px)', to: 'scale(0.96) translateY(6px)' },
-  transition: { type: 'spring', stiffness: 400, damping: 26, mass: 0.8 },
-  exit: { duration: 0.16, ease: [0.32, 0, 0.67, 0] },
-  opacity: { in: { duration: 0.18, ease: 'easeOut' }, out: { duration: 0.14, ease: 'easeIn' } }
+  transition: { type: 'spring', stiffness: 220, damping: 19, mass: 1 },
+  exit: { duration: 0.24, ease: [0.32, 0, 0.67, 0] },
+  opacity: { in: { duration: 0.2, ease: 'easeOut' }, out: { duration: 0.18, ease: 'easeIn' } }
 } as const

@@ -102,14 +102,20 @@ const reposition = () => {
   requestAnimationFrame(() => { repositionQueued = false; if (props.open) place() })
 }
 
+// The panel's coordinates come from `placed` and nowhere else. It used to fall back to
+// `props.anchor.getBoundingClientRect()` here, which put a forced layout in the render path: this
+// computed re-runs on every re-place (a scroll frame, a resize), so each one read a rect and then
+// wrote inline styles — read–write–read on the very frame the popover is trying to move, and the
+// second read of the same box `place()` already measured. Nothing is lost by dropping it: while
+// `placed` is still null the panel is `visibility: hidden`, so its coordinates cannot be seen.
 const panelStyle = computed(() => {
   if (!isDesktop.value) return undefined
-  const box = props.anchor?.getBoundingClientRect()
+  const box = placed.value
   return {
-    left: `${placed.value?.left ?? Math.max(12, (box?.left ?? 0))}px`,
-    top: `${placed.value?.top ?? Math.max(12, (box?.bottom ?? 0) + 8)}px`,
-    'transform-origin': placed.value?.side === 'above' ? 'center bottom' : 'center top',
-    visibility: placed.value ? 'visible' : 'hidden'
+    left: `${box?.left ?? 12}px`,
+    top: `${box?.top ?? 12}px`,
+    'transform-origin': box?.side === 'above' ? 'center bottom' : 'center top',
+    visibility: box ? 'visible' : 'hidden'
   }
 })
 
