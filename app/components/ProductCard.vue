@@ -32,11 +32,14 @@ const localePath = useLocalePath()
         <ProductSaleRibbon :product="product" />
         <!-- Always visible, not reveal-on-hover: this button only exists in admin mode, so the
              hover gate bought nothing for its entire audience and cost the affordance itself —
-             an `opacity-0` element is still clickable, which reads as a dead spot that works. -->
+             an `opacity-0` element is still clickable, which reads as a dead spot that works.
+             The transition list says `scale`, not `transform`: Tailwind v4's scale utilities write
+             the standalone `scale` property, so a `transform` list animates neither the hover pop nor
+             the press, and `active:` is listed after `hover:` so the press wins while the finger is down. -->
         <button
           v-if="isAdmin"
           type="button"
-          class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-800 dark:text-zinc-200 shadow-sm border border-zinc-200/60 dark:border-zinc-700/60 transition-[transform,background-color,border-color] duration-200 ease-out hover:scale-105 hover:bg-white dark:hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white cursor-pointer"
+          class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 dark:bg-zinc-900/90 text-zinc-800 dark:text-zinc-200 shadow-sm border border-zinc-200/60 dark:border-zinc-700/60 transition-[scale,background-color,border-color] duration-150 ease-out hover:scale-105 hover:bg-white dark:hover:bg-zinc-900 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white cursor-pointer"
           :aria-label="t('editProduct')"
           @click.stop="emit('edit', product)"
         >

@@ -50,8 +50,13 @@ defineExpose({ openAddEditor, openEditEditor })
 <template>
   <UAlert v-if="actionError" class="mt-6" color="error" variant="soft" :title="actionError" />
 
-  <!-- Admin Edit Modal -->
-  <div
+  <!-- Admin Edit Modal. The `modal` transition fades the scrim and scales the card in (see
+       `main.css`); the wrapper shares the overlay's opening and closing lines so a hundred and thirty
+       lines of form markup do not shift two spaces for a cosmetic indent.
+       The overlay's direct child is the card in both modals, which is what `.modal-*  > section`
+       aims at — no new `data-*` hook, and no rule that could reach the Share Sheet or the contact
+       panel (both are `<motion>` surfaces whose transform has one owner). -->
+  <Transition name="modal"><div
     v-if="editorOpen"
     class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/40 backdrop-blur-sm overflow-y-auto"
     @click.self="editorOpen = false"
@@ -179,10 +184,11 @@ defineExpose({ openAddEditor, openEditEditor })
         </div>
       </form>
     </section>
-  </div>
+  </div></Transition>
 
-  <!-- Delete Confirmation Modal -->
-  <div
+  <!-- Delete Confirmation Modal: same `modal` transition, because closing the form and opening this
+       is one intent (see `deleteEditedProduct`) and the two surfaces must therefore move alike. -->
+  <Transition name="modal"><div
     v-if="deleteTarget"
     class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
     @click.self="deleteTarget = null"
@@ -207,5 +213,5 @@ defineExpose({ openAddEditor, openEditEditor })
         </UButton>
       </div>
     </section>
-  </div>
+  </div></Transition>
 </template>

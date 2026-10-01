@@ -77,6 +77,79 @@ body {
   transform: translateY(4px);
 }
 
+/* The two admin surfaces that used to be hard cuts: the editor's modals and the category row list. The
+   numbers are the storefront's own, not new ones — 200ms in / 180ms out (the `lightbox` preset's entry
+   and `applePop.opacity.out`), `cubic-bezier(0.33, 1, 0.68, 1)` arriving and `cubic-bezier(0.42, 0, 1, 1)`
+   leaving, which is the same mirrored pair the route transition above runs. Exit is shorter than enter
+   everywhere: a surface leaving is quicker than one arriving. They live here rather than in
+   `app/utils/motion.ts` because neither is a gesture and neither is reactive state — a fixed-duration
+   fade on a Vue transition is CSS's job, and it keeps the preset file's scope (interruptible physics).
+   `> section` is the card: the overlay's only direct child in both modals, so no new `data-*` contract
+   and no rule that could reach a `<motion>` surface whose transform has one owner. Modals are the
+   trigger-origin exemption, so the default centred origin is correct and deliberately not set. */
+.modal-enter-active {
+  transition: opacity 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.modal-enter-from {
+  opacity: 0;
+}
+
+.modal-enter-from > section {
+  transform: scale(0.95); /* never scale(0) — nothing appears out of nothing */
+}
+
+.modal-enter-active > section {
+  /* Same 200ms as the scrim on purpose: Vue sizes the transition off the *overlay* element's own
+     computed duration, so a longer child transition would have its `enter-active` class taken off two
+     frames early and snap the last couple of percent of the scale. */
+  transition: transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.modal-leave-active {
+  transition: opacity 180ms cubic-bezier(0.42, 0, 1, 1);
+}
+
+.modal-leave-to {
+  opacity: 0;
+}
+
+/* Rows in the category editor. Unlayered on purpose, and that is load-bearing rather than stylistic: an
+   inactive row carries Tailwind's `opacity-60`, and an unlayered rule outranks a utility of the same
+   specificity (the mechanism the reduced-transparency block below already relies on), so the fade paints
+   and the dim comes straight back when Vue takes the transition classes off.
+   The leaving row is lifted out of flow — `position: absolute` inside the list's own `relative` box — so
+   the rows below it slide up on `.row-move` *while* it fades instead of after it. `pointer-events: none`
+   is not decoration either: `verify` clicks `[data-category-remove="N"]` by index, `querySelector`
+   answers the first node in DOM order, and a row that is only on its way out must never be hittable. */
+.row-enter-from,
+.row-leave-to {
+  opacity: 0;
+  transform: scale(0.97);
+}
+
+/* Rule ORDER here is load-bearing, not tidiness. `.row-move` uses the `transition` shorthand, and Vue's
+   TransitionGroup puts `row-move` on the leaving row as well (going absolute changes its measured
+   position), so with `row-move` last its shorthand replaced the leave's `opacity 160ms` with
+   `transform 200ms` — measured in a real browser as the row jumping from opacity 1 straight to 0 with
+   `transition-duration: 0.2s` on a node carrying `row-leave-to`. Move first, enter second, leave last:
+   a node that is both relocating and leaving should fade, and every other combination keeps its own. */
+.row-move {
+  transition: transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.row-enter-active {
+  transition: opacity 200ms cubic-bezier(0.33, 1, 0.68, 1), transform 200ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+.row-leave-active {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  transition: opacity 160ms cubic-bezier(0.42, 0, 1, 1), transform 160ms cubic-bezier(0.42, 0, 1, 1);
+}
+
 /* Nuxt UI gives popper-positioned selects a 100ms scale, which reads as an instant pop.
    Unfold the panel out of the trigger instead: reka anchors
    --reka-select-content-transform-origin at whichever edge touches the control, so a plain
@@ -155,6 +228,24 @@ body {
   [data-slot="content"][role="listbox"][data-state="open"],
   [data-slot="content"][role="listbox"][data-state="closed"] {
     animation: none;
+  }
+
+  /* The admin modal card and the category rows keep their fade and give up their movement, exactly how
+     `.page-enter-from` above loses its translate. A leaving row also goes back to `position: static`: it
+     has no transition left to run, so holding it out of the list's flow for a frame would buy nothing. */
+  .modal-enter-from > section,
+  .row-enter-from,
+  .row-leave-to {
+    transform: none;
+  }
+
+  .row-leave-active {
+    position: static;
+    transition: none;
+  }
+
+  .row-move {
+    transition: none;
   }
 }
 

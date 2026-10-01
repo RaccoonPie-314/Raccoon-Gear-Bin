@@ -89,7 +89,15 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                 {{ t('noCategories') }}
               </p>
 
-              <ul v-else class="mt-6 space-y-3">
+              <!-- Rows enter, leave and reorder instead of teleporting: `sort_order` is this editor's
+                   whole subject, so a row that jumps past its neighbours to a new position hides the
+                   thing the owner just did. `relative` is load-bearing — the leaving row goes absolute
+                   so it stops taking up space while it fades, and that needs a containing block.
+                   ponytail: a row added but not yet saved is keyed `new-<index>`, so deleting one
+                   re-keys the rows after it and can read as a content swap rather than a leave. Stored
+                   rows are keyed by id and animate correctly, reorder included; fixing the ceiling
+                   starts in the row model, not here. -->
+              <TransitionGroup v-else tag="ul" name="row" class="relative mt-6 space-y-3">
                 <li
                   v-for="(row, index) in categoryRows"
                   :key="row.id || `new-${index}`"
@@ -110,7 +118,7 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                   <span class="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
                       :aria-label="t('moveUp')"
                       :disabled="index === 0"
                       :data-category-up="index"
@@ -120,7 +128,7 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                     </button>
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
                       :aria-label="t('moveDown')"
                       :disabled="index === categoryRows.length - 1"
                       :data-category-down="index"
@@ -130,7 +138,7 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                     </button>
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-error/10 hover:text-error dark:text-zinc-400"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-error/10 hover:text-error dark:text-zinc-400"
                       :aria-label="t('removeCategory')"
                       :disabled="isSaving"
                       :data-category-remove="index"
@@ -140,7 +148,7 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                     </button>
                   </span>
                 </li>
-              </ul>
+              </TransitionGroup>
             </section>
 
             <div class="flex items-center justify-end gap-3 border-t border-zinc-200/80 pt-6 dark:border-zinc-800/80">

@@ -4,13 +4,25 @@ import type { SiteInfoDraft } from '~/types/site-info'
 /** The editor's copy of one social link. `sortOrder` is deliberately absent: position in the
  * list *is* the order, and `socialLinksToColumn` rewrites the stored number from it on save.
  * Both visibility flags are carried, because the editor must be able to say "show it, but don't
- * let anyone order through it" — the two switches are one row's two independent answers. */
+ * let anyone order through it" — the two switches are one row's two independent answers.
+ *
+ * `uid` is client-only identity, and it is what makes a row's DOM node track the row instead of
+ * its slot. Without it the list can only be keyed by index, and an index key means a reorder
+ * patches one row's fields into another row's element — nothing moves, so no transition has
+ * anything to animate, and the two switches and the drag would fight over stale component state.
+ * It never reaches the database: `socialLinksToColumn` builds each stored object field by field. */
 export type AdminSocialLinkRow = {
+  uid: string
   platform: string
   url: string
   enabled: boolean
   contactEnabled: boolean
 }
+
+// A monotonic local id, not a crypto uuid: these rows live and die inside one page session, and
+// the only thing the id has to guarantee is that two rows are never the same row.
+let socialUidSeq = 0
+const nextSocialUid = () => `social-${++socialUidSeq}`
 
 export type AdminSiteInfoForm = {
   id: number
@@ -32,7 +44,7 @@ const draftToForm = (draft: SiteInfoDraft): AdminSiteInfoForm => ({
   phone: draft.phone,
   locationUrl: draft.locationUrl,
   locationLabels: Object.fromEntries(draft.locationLabels.map((entry) => [entry.locale, entry.label])),
-  socialLinks: draft.socialLinks.map((link) => ({ platform: link.platform, url: link.url, enabled: link.enabled, contactEnabled: link.contactEnabled }))
+  socialLinks: draft.socialLinks.map((link) => ({ uid: nextSocialUid(), platform: link.platform, url: link.url, enabled: link.enabled, contactEnabled: link.contactEnabled }))
 })
 
 /**
@@ -73,7 +85,7 @@ export const useAdminSiteInfoEditor = (options: { canMutate: () => boolean }) =>
 
   // A new link starts visible and contactable: the owner narrowing it is an edit, and the row the
   // editor seeds from an old stored link already carries the value the inheritance rule produced.
-  const addSocialLink = () => { siteForm.value.socialLinks.push({ platform: '', url: '', enabled: true, contactEnabled: true }) }
+  const addSocialLink = () => { siteForm.value.socialLinks.push({ uid: nextSocialUid(), platform: '', url: '', enabled: true, contactEnabled: true }) }
   const removeSocialLink = (index: number) => { siteForm.value.socialLinks.splice(index, 1) }
   const moveSocialLink = (index: number, delta: number) => {
     const target = index + delta
@@ -83,6 +95,20 @@ export const useAdminSiteInfoEditor = (options: { canMutate: () => boolean }) =>
     if (!moved || !other) return
     links[index] = other
     links[target] = moved
+  }
+
+  // The drag's reorder: move the dragged row to the row the pointer is currently over. It is keyed
+  // on the uid rather than on "from, to" indices because the array re-indexes under every move —
+  // an index pair captured at dragstart is stale by the second dragover. Returning early when the
+  // row is already at that slot is what makes this convergent: the dragged row follows the pointer,
+  // so once it lands there the events stop changing anything.
+  const reorderSocialLink = (uid: string, toIndex: number) => {
+    const links = siteForm.value.socialLinks
+    const from = links.findIndex((link) => link.uid === uid)
+    const moved = from < 0 ? undefined : links[from]
+    if (!moved || from === toIndex) return
+    links.splice(from, 1)
+    links.splice(toIndex, 0, moved)
   }
 
   const saveSiteInfo = async () => {
@@ -119,6 +145,7 @@ export const useAdminSiteInfoEditor = (options: { canMutate: () => boolean }) =>
     saveSiteInfo,
     addSocialLink,
     removeSocialLink,
-    moveSocialLink
+    moveSocialLink,
+    reorderSocialLink
   }
 }

@@ -93,12 +93,16 @@ useHead({ title: pageTitle })
           <UInput v-model="password" type="password" :placeholder="t('passwordPlaceholder')" class="w-full" />
         </UFormField>
 
-        <UAlert
-          v-if="errorMessage"
-          color="error"
-          variant="soft"
-          :title="errorMessage"
-        />
+        <!-- The failure arrives with the same opacity-only `reveal` the catalog grid uses, so the
+             message is not pasted onto the form between two frames. -->
+        <Transition name="reveal">
+          <UAlert
+            v-if="errorMessage"
+            color="error"
+            variant="soft"
+            :title="errorMessage"
+          />
+        </Transition>
 
         <UButton
           type="submit"

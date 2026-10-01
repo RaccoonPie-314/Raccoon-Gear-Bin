@@ -18,8 +18,30 @@ const {
   saveSiteInfo,
   addSocialLink,
   removeSocialLink,
-  moveSocialLink
+  moveSocialLink,
+  reorderSocialLink
 } = useAdminSiteInfoEditor({ canMutate: () => isAdminMode.value })
+
+// Drag-to-reorder, on the browser's own drag and drop. The uid of the row being dragged is the only
+// state it needs: the list itself is the order, and every dragover just asks the editor to move that
+// uid to the slot under the pointer (see `reorderSocialLink`).
+const dragUid = ref('')
+const onSocialDragStart = (event: DragEvent, uid: string) => {
+  dragUid.value = uid
+  const transfer = event.dataTransfer
+  // Firefox starts no drag at all unless the payload is set; the row element is then handed back as
+  // the drag image so the ghost is the whole row, not the small grip under the cursor.
+  if (!transfer) return
+  transfer.setData('text/plain', uid)
+  transfer.effectAllowed = 'move'
+  const row = (event.currentTarget as HTMLElement | null)?.closest('[data-social-row]')
+  if (row) {
+    const rect = row.getBoundingClientRect()
+    transfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top)
+  }
+}
+const onSocialDragOver = (index: number) => { if (dragUid.value) reorderSocialLink(dragUid.value, index) }
+const onSocialDragEnd = () => { dragUid.value = '' }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
 watch(user, () => { void refreshAdminMode() }, { immediate: true })
@@ -107,14 +129,38 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                 {{ t('noSocialLinks') }}
               </p>
 
-              <ul v-else class="mt-6 space-y-3">
+              <!-- Same `row` transition the category editor uses (one owner for the enter / leave /
+                   move numbers in `main.css`), and it only works because each row now carries a
+                   `uid`: keyed by index, a reorder patched one link's fields into another link's
+                   element, so no node ever moved and the arrows had nothing to animate.
+                   ponytail: the drag is HTML5 drag-and-drop — mouse and trackpad only, and the row
+                   ghost is a snapshot rather than a 1:1 surface. Touch keeps the two arrows, which
+                   now animate too. A pointer-driven drag with springs means motion-v `Reorder`, and
+                   that owns each row's transform, which is a fight with these enter/leave classes —
+                   reach for it only if the arrows stop being enough. -->
+              <TransitionGroup v-else tag="ul" name="row" class="relative mt-6 space-y-3">
                 <li
                   v-for="(link, index) in siteForm.socialLinks"
-                  :key="index"
+                  :key="link.uid"
                   class="flex flex-wrap items-center gap-2.5 rounded-xl border border-zinc-200/80 bg-white p-3 sm:flex-nowrap dark:border-zinc-800/80 dark:bg-zinc-900"
-                  :class="link.enabled ? '' : 'opacity-60'"
+                  :class="[link.enabled ? '' : 'opacity-60', dragUid === link.uid ? 'ring-2 ring-zinc-900/15 dark:ring-white/25' : '']"
                   data-social-row
+                  @dragover.prevent="onSocialDragOver(index)"
+                  @drop.prevent="onSocialDragEnd"
                 >
+                  <!-- The grip is the only draggable thing in the row on purpose: with `draggable` on
+                       the row itself, selecting text inside a field would start a row drag. -->
+                  <button
+                    type="button"
+                    draggable="true"
+                    class="flex h-8 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:cursor-grabbing dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    :aria-label="t('dragToReorder')"
+                    :title="t('dragToReorder')"
+                    @dragstart="onSocialDragStart($event, link.uid)"
+                    @dragend="onSocialDragEnd"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4" aria-hidden="true"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>
+                  </button>
                   <UInput v-model="link.platform" :placeholder="t('platform')" class="w-full min-w-0 sm:w-36" :data-social-platform="index" />
                   <UInput v-model="link.url" :placeholder="t('linkUrl')" type="url" class="w-full min-w-0 flex-1" :data-social-url="index" />
                   <!-- Two switches, two questions. `enabled` answers "does the site show this link",
@@ -133,7 +179,7 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                   <span class="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
                       :aria-label="t('moveUp')"
                       :disabled="index === 0"
                       :data-social-up="index"
@@ -143,7 +189,7 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                     </button>
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
                       :aria-label="t('moveDown')"
                       :disabled="index === siteForm.socialLinks.length - 1"
                       :data-social-down="index"
@@ -153,7 +199,7 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                     </button>
                     <button
                       type="button"
-                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      class="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-[color,background-color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                       :aria-label="t('removeLink')"
                       :data-social-remove="index"
                       @click="removeSocialLink(index)"
@@ -162,7 +208,7 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                     </button>
                   </span>
                 </li>
-              </ul>
+              </TransitionGroup>
             </section>
 
             <div class="flex items-center justify-end gap-3 border-t border-zinc-200/80 pt-6 dark:border-zinc-800/80">
