@@ -164,6 +164,21 @@ export const applePop = {
   rest: 'scale(1) translateY(0px)',
   below: { from: 'scale(0.93) translateY(-8px)', to: 'scale(0.95) translateY(-4px)' },
   above: { from: 'scale(0.94) translateY(10px)', to: 'scale(0.96) translateY(6px)' },
+  /**
+   * The phone mount's pair: the SAME travel, the SAME spring, no scale.
+   *
+   * The sticky bar is `backdrop-blur-xl`, and a scale animation inside a filtered ancestor makes the
+   * engine re-run that filter pass every frame: traced at 390×844 @3× with a 4× CPU throttle, the
+   * scale bloom inside the frosted bar cost 28.9ms of main-thread Layout+Paint+PrePaint over four
+   * plays, and 19.0–20.7ms for every shape that removed either half (no frost, no scale, or the panel
+   * detached). A phone also re-rasterises the scaled text of a viewport-wide, 55vh scroll panel
+   * mid-pop — the same 90ms of work the desktop does with a GPU to spare. `scale(1) translateY()`
+   * keeps the surface's texture untouched (and keeps the keyframe list the same shape as `rest`, so
+   * nothing leans on transform-list padding), so the panel still rises out of the bar on the same
+   * curve and lands in the same place. Desktop keeps the bloom: it is a menu leaving a small control,
+   * and the two desktop surfaces still share one preset.
+   */
+  slide: { from: 'scale(1) translateY(10px)', to: 'scale(1) translateY(6px)' },
   transition: { type: 'spring', stiffness: 220, damping: 19, mass: 1 },
   exit: { duration: 0.24, ease: [0.32, 0, 0.67, 0] },
   opacity: { in: { duration: 0.2, ease: 'easeOut' }, out: { duration: 0.18, ease: 'easeIn' } }

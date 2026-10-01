@@ -139,6 +139,8 @@ onBeforeUnmount(unpinColumn)
 // anchored at the edge that faces its trigger — top for the inline block (drops down out of the CTA),
 // bottom for the sticky bar (rises up out of the bar). Enter rides the `applePop` spring; exit is a
 // short sharp ease-in shrink. Under reduced motion both become brief eased durations.
+// The phone mount keeps the travel, the spring and the fade but drops the scale — it blooms inside the
+// frosted sticky bar, and that combination is the one shape this trace measured as expensive.
 let running: { stop(): void } | null = null
 // The bloom's rest value is the identity, but the box must be measured at rest before it is animated.
 // Stopping a running animation and clearing its transform, then forcing the reflow that commits the
@@ -149,14 +151,20 @@ const settleForMeasurement = (p: HTMLElement) => {
   running = null
   p.style.transform = ''
   p.style.opacity = ''
-  void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
+  // The reflow that commits the rest geometry exists for the desktop reveal: `watch(isOpen)` reads
+  // the panel's `offsetTop` and the host's live rect, so a rect taken mid-pop would aim at the morph
+  // instead of the destination. The phone mount reads nothing after the pop (it has no reveal to
+  // aim), so forcing a full-column layout inside its first animation frame is pure cost — paid on
+  // the slowest device this surface runs on.
+  if (!props.compact) void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
 // The bloom's numbers all live in `applePop` now — the same preset the Share Sheet's desktop popover
 // reads — so the two menus cannot drift apart. `rest` is the identity the spring settles on; the
 // shrunk/offset start and the shorter exit travel are keyed by which side of its trigger this mount's
 // panel sits on (the inline block drops *down* out of the CTA, the sticky bar's panel rises *up* out of
-// the bar), which is also the edge `transform-origin` is pinned to.
-const popSide = () => props.compact ? 'above' : 'below'
+// the bar), which is also the edge `transform-origin` is pinned to. The sticky-bar mount takes
+// `applePop.slide`: same travel, same spring, no scale, because it blooms inside the frosted bar.
+const popPair = () => props.compact ? applePop.slide : applePop.below
 
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
@@ -171,7 +179,7 @@ const onPanelEnter = (el: Element, done: () => void) => {
   // Opacity rides its own fast clean curve, transform rides the spring — split so the text is legible
   // on the shrunk first frames and the bloom stays interruptible.
   animate(p, { opacity: [0, 1] }, red ? { duration: 0.16, ease: 'easeOut' } : applePop.opacity.in)
-  const a = animate(p, { transform: [applePop[popSide()].from, applePop.rest] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
+  const a = animate(p, { transform: [popPair().from, applePop.rest] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }
@@ -192,7 +200,7 @@ const onPanelLeave = (el: Element, done: () => void) => {
   p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
   animate(p, { opacity: [1, 0] }, red ? { duration: 0.12, ease: 'easeIn' } : applePop.opacity.out)
-  const a = animate(p, { transform: [applePop.rest, applePop[popSide()].to] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
+  const a = animate(p, { transform: [applePop.rest, popPair().to] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }

@@ -239,6 +239,18 @@ const mobileIndicatorTransform = computed(() => {
 })
 
 const updateMobileIndicator = () => {
+  // While a drag owns the pill, this writer stands down — it aims at the *active* item, and the drag
+  // has moved the pill away from it on purpose.
+  //
+  // The edge auto-scroll makes this the difference between a glide and a flicker: panning the bar
+  // writes `scrollLeft`, every `scrollLeft` change fires the `scroll` listener below, and this
+  // function used to answer it by re-measuring the active item's box. So the moment a drag reached
+  // the end of the list and started panning, the pill alternated at touch frequency between the
+  // finger and the active item — measured as a 264px retreat in one frame, on a transform still
+  // scaled 1.6 by the drag. `handleTouchEnd` re-aims the pill itself once the finger lifts, and
+  // `watch(activeIndex)` keeps it there, so nothing waits on these frames.
+  if (isTouchDragging.value) return
+
   const activeEl = mobileItemRefs.value[activeIndex.value]
   const navEl = mobileNavRef.value
   if (!activeEl || !navEl) return

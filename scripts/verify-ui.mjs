@@ -303,7 +303,10 @@ const run = async () => {
   await cdp.connect()
   // Product photos come from the rig, not the network. `Fetch` is the only CDP domain that can answer
   // an `<img>` request — the in-browser `fetch` stub cannot — and it is scoped to the one bucket the
-  // app builds public URLs from, so nothing else is intercepted.
+  // app builds public URLs from, so nothing else is intercepted. Both storage paths are listed because
+  // every catalog URL now carries a `?width=` transform and arrives on `/render/image/`, while an
+  // absolute `storage_path` still comes back on `/object/`. `photoFor` cuts the query off first, so
+  // the transform never changes which synthetic size a fixture filename asks for.
   cdp.onEvent = async (m) => {
     if (m.method !== 'Fetch.requestPaused') return
     const body = Buffer.from(photoFor(m.params.request.url)).toString('base64')
@@ -317,7 +320,7 @@ const run = async () => {
     } catch { /* the request was already dropped; the picture is decorative here */ }
   }
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('DOM.enable')
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/storage/v1/object/public/*', requestStage: 'Request' }] })
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/storage/v1/render/image/public/*', requestStage: 'Request' }, { urlPattern: '*/storage/v1/object/public/*', requestStage: 'Request' }] })
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stubSource })
 
   // 3. helpers built on the client
@@ -956,11 +959,25 @@ const run = async () => {
     const mOver = await ev('(() => { const nav = document.querySelector(\'nav[aria-label="Mobile product categories"]\'); return { o: nav.scrollWidth - nav.clientWidth, sl: nav.scrollLeft } })()')
     const mEdge = await ev('(() => { const r = document.querySelector(\'nav[aria-label="Mobile product categories"]\').getBoundingClientRect(); return { right: r.right } })()')
     const mbox2 = await ev(boxesExpr('nav[aria-label="Mobile product categories"] button'))
+    // Flicker lock. While a drag owns the pill, the edge auto-scroll fires a `scroll` event on every
+    // pan step, and that handler re-aimed the indicator at the *active* item's box — hundreds of px to
+    // the left of the finger — in the same breath as the drag wrote its own position. The two writers
+    // alternated at touch frequency, which is what reads as the icons flickering once the drag reaches
+    // the end of the list. Sampled frame by frame and only until the finger lifts (the settle after a
+    // release is allowed to travel back), because a pill under the finger may hold or advance but must
+    // never retreat.
+    const START_PILL_FRAMES = '(() => { window.__PF = []; window.__PFstop = false; const t0 = performance.now(); const tick = function () { if (window.__PFstop) return; const nav = document.querySelector(\'nav[aria-label="Mobile product categories"]\'); const p = nav && nav.firstElementChild; if (p) { const m = new DOMMatrixReadOnly(getComputedStyle(p).transform); window.__PF.push({ e: +m.e.toFixed(1), w: +m.d.toFixed(1), sl: Math.round(nav.scrollLeft) }) } if (performance.now() - t0 < 3000) requestAnimationFrame(tick) }; requestAnimationFrame(tick); return true })()'
+    await ev(START_PILL_FRAMES)
     await touch('touchStart', [{ x: mbox2[0].x, y: mbox2[0].y }])
     for (let i = 1; i <= 10; i++) { await touch('touchMove', [{ x: mbox2[0].x + (mEdge.right - 6 - mbox2[0].x) * i / 10, y: mbox2[0].y }]); await sleep(30) }
     for (let i = 0; i < 6; i++) { await touch('touchMove', [{ x: mEdge.right - 4, y: mbox2[0].y }]); await sleep(30) }
     const mScrolled = await ev('document.querySelector(\'nav[aria-label="Mobile product categories"]\').scrollLeft')
     await touch('touchEnd', [])
+    await ev('window.__PFstop = true')
+    const pillFrames = await ev('window.__PF || []')
+    let pillDrop = 0
+    for (let i = 1; i < pillFrames.length; i++) if (pillFrames[i].sl > pillFrames[i - 1].sl) pillDrop = Math.max(pillDrop, pillFrames[i - 1].e - pillFrames[i].e)
+    check('the dragged pill does not snap back while the bar pans', mOver.o > 40 && mScrolled > mOver.sl + 20 && pillDrop < 12, { pan: mScrolled - mOver.sl, worstPillDropPx: pillDrop, frames: pillFrames.length, sample: pillFrames.filter((f, i) => i && f.sl > pillFrames[i - 1].sl).slice(0, 6) })
     check('dragging a mobile category to the right edge pans the overflowing bar', mOver.o > 40 && mScrolled > mOver.sl + 20, { overflow: mOver.o, before: mOver.sl, after: mScrolled })
     check('the tab icon is the logo, scoped to the browser theme', await ev(`!!document.querySelector('link[rel="icon"][media*="light"][href="/favicon-light.png"]') && !!document.querySelector('link[rel="icon"][media*="dark"][href="/favicon-dark.png"]')`))
     await stopForNextDocument(mobileManyScript)
@@ -2178,7 +2195,18 @@ const run = async () => {
     await metrics(390, 844, true)
     await sleep(250)
     await armClipboard('ok')
+    // The phone mount blooms in a different shape from the desktop one on purpose: it hangs off the
+    // sticky bar, which is `backdrop-blur-xl`, and a scale animation inside a filtered ancestor makes
+    // the engine re-run that filter pass every frame (traced at 390x844 @3x with a 4x CPU throttle:
+    // 28.9ms of main-thread Layout+Paint+PrePaint over four plays, against 19.0-20.7ms for any shape
+    // that dropped either the frost or the scale). Sampled frame by frame rather than at rest, because
+    // a settled panel reports the identity matrix whatever curve got it there.
+    const START_STICKY_FRAMES = '(() => { window.__KF = []; window.__KFdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (p) { const c = getComputedStyle(p); const m = new DOMMatrixReadOnly(c.transform); window.__KF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +c.opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__KFdone = true }; requestAnimationFrame(tick); return true })()'
+    await ev(START_STICKY_FRAMES)
     await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
+    await waitFor('!!window.__KFdone', 4000)
+    const kframes = await ev('window.__KF || []')
+    check('the mobile panel rises out of the bar on a travel and never on a scale', kframes.some(f => Math.abs(f.f) >= 2) && !kframes.some(f => f.a > 0.5 && f.a < 0.995) && kframes.some(f => f.o > 0.02 && f.o < 0.98), { frames: kframes.slice(0, 5) })
     const stickyOpen = await stickyMount()
     check('the sticky panel offers the same channels and the same message as the inline block', JSON.stringify(stickyOpen.channels.map(c => c.href)) === JSON.stringify(inlineNow.channels.map(c => c.href)) && stickyOpen.message === inlineNow.message && stickyOpen.ctaText === inlineNow.ctaText, { channels: stickyOpen.channels.map(c => c.href), cta: stickyOpen.ctaText })
     // Two things the desktop-only geometry checks could not see, both found by looking at the page:
