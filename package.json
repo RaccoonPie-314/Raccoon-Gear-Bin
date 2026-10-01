@@ -7,6 +7,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
+    "deploy": "NITRO_PRESET=cloudflare_module nuxt build && bunx wrangler deploy",
     "lint": "eslint app server",
     "verify": "node scripts/verify-ui.mjs",
     "postinstall": "nuxt prepare"

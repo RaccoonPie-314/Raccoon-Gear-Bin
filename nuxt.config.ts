@@ -25,6 +25,12 @@ export default defineNuxtConfig({
       googleicons: false,
     },
   },
+  // The Cloudflare preset fails to bundle with server sourcemaps on (`Multiple conflicting
+  // contents for sourcemap source i18n.config.ts`), and nothing here reads production server
+  // traces, so no preset gets them.
+  nitro: {
+    sourceMap: false
+  },
   // A feature keeps its UI and the logic only it uses in one folder. Neither half is reachable by
   // auto-import from `app/features` on its own, so each is registered: the component dir with no
   // directory prefix (the file name is the component name) and the composable dir exactly like

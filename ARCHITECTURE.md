@@ -673,6 +673,29 @@ surface should match the logo.
   exists to need them.
 - New env var → both `.env.example` and `runtimeConfig` in `nuxt.config.ts`.
 
+## Deployment
+
+One target: **Cloudflare Workers** on the free plan (`wrangler.jsonc`, `bun run deploy` →
+`raccoon-gear-bin.<account>.workers.dev`). Two invariants hold it up, and both look like
+accidents if you don't know they are deliberate:
+
+- **The preset is an env var in the `deploy` script, never `nitro.preset` in `nuxt.config.ts`.**
+  `verify` boots `.output/server/index.mjs` with `node`, and a `cloudflare_module` bundle has no
+  Node entry — setting the preset in config makes the CI harness measure a build that cannot run.
+  The same reason `wrangler.jsonc` is hand-written: nitro only generates a deploy config when
+  `cloudflare.deployConfig` is on, and reading ours is also how `nodejs_compat` reaches the build.
+- **`nitro.sourceMap: false` is global.** The Cloudflare preset cannot bundle server sourcemaps at
+  all (`Multiple conflicting contents for sourcemap source i18n.config.ts`), and nothing here reads
+  production server traces, so no preset gets them.
+
+No Cloudflare secrets are configured: the anon key and project URL are inlined from `.env` at build
+into `runtimeConfig.public`, and every write stays authorised by RLS. Measured against the free-plan
+ceilings: 2.6 MB bundle (64 MiB), 55 assets (20,000), 34 ms startup (1 s), SSR responses ~0.6 s
+wall. The ceiling to watch is **10 ms CPU per request** — this is SSR, so a page that starts doing
+real work per request can hit error 1102 on the free plan and not on paid. Known loose end: the
+build also inlines `SUPABASE_SERVICE_ROLE_KEY` into the server bundle, which is the only place the
+(dead, never-called) `createSupabaseAdminClient` would have used it.
+
 ## Known gaps (Phase 2+ targets, not current behaviour)
 
 - **Admin identity is checked in four places.** The `admin_users` existence query is written
