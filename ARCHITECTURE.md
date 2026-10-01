@@ -536,11 +536,23 @@ not requested until a toggle gives it one. Measured 2026-10-01 on the live deplo
 masthead pulled 2.6 MB, more than the whole JS + CSS payload; with it, one 512px file.
 
 The tab icon is the same emblem, and it follows the **browser's** theme the same way `BrandLogo`
-follows the app's: two downscaled 64px PNGs (`favicon-light.png` from `rgb-logo-light`,
-`favicon-dark.png` from `rgb-logo-dark`) wired through `app.head.link` in `nuxt.config.ts` with
+follows the app's: two 64px PNGs (`favicon-light.png`, `favicon-dark.png`) wired through
+`app.head.link` in `nuxt.config.ts` with
 `media="(prefers-color-scheme: …)"` — a native platform feature, so there is no JS theme probe. It
-keys off the OS/browser theme (as asked), not the in-app `ColorModeToggle`. `favicon.ico` stays as
-the legacy fallback for clients that request it directly.
+keys off the OS/browser theme (as asked), not the in-app `ColorModeToggle`. Both are transparent
+(`Logo/*.png` are RGB with a painted background, so the key is a luminance ramp, not a border flood —
+flooding eats the connected black body of the dark variant), which is what lets them sit on any tab
+strip. `favicon.ico` stays as the legacy fallback for clients that request it directly.
+
+**Mobile reuses the same declaration, and picks it differently.** Google's favicon guidance asks for
+a square icon larger than 48px precisely because one file is reused on surfaces much bigger than a
+desktop tab, and no picker's taste in `media` can be relied on across engines. So a 192px pair is
+declared as well, and unlike the 64px pair each of these carries its own opaque background (white
+tile / the storefront's zinc-950 tile): whichever one a browser picks, it is readable on any strip.
+`apple-touch-icon.png` is opaque for the mirror reason — iOS puts a letterbox behind a transparent
+home-screen icon instead of compositing it. `verify` asserts all of it: a declared icon above 48px,
+minimum alpha 0 on the 64px pair and 255 on the tiles and the 180 icon, and that `favicon.ico`
+carries 16 / 32 / 48 / 64 PNG entries rather than the framework's 32px BMP default.
 
 **Eyebrow tracking is locale-conditional, everywhere.** Wide Latin letter-spacing pulls Khmer
 clusters apart (a cluster carries marks below the baseline, and tracking separates them), so every

@@ -6,13 +6,33 @@ export default defineNuxtConfig({
     pageTransition: { name: 'page', mode: 'out-in' },
     // Tab icon follows the browser's own theme, no JS: `media` on <link rel="icon"> is the native
     // platform feature and matches the BrandLogo mapping (light theme -> rgb-logo-light, dark ->
-    // rgb-logo-dark). The 64px PNGs are downscaled from the 1254px source art; favicon.ico stays as
-    // the legacy fallback for clients that request it directly and ignore `media`.
+    // rgb-logo-dark). Every file is a crop of the raccoon head out of the 1254px master
+    // (`Logo/RGB Logo*.png`, 460px at offset 60/520) — at tab size the full lockup's wordmark and
+    // circle collapse into one grey square. Two sizes are declared:
+    // - 64px, transparent: what desktop paints, and the pair that can honour `media`.
+    // - 192px: Google's favicon guidance asks for more than 48px because the same file is reused on
+    //   surfaces far bigger than a desktop tab (a phone strip is 2-3x that), and a picker that
+    //   ignores `media` cannot be predicted — so each of this pair carries its own background (white
+    //   tile / the storefront's zinc-950 tile) and is readable whichever one gets chosen.
+    // `favicon.ico` is the legacy fallback for clients that request it directly and ignore `media`;
+    // it holds 16/32/48/64 transparent PNG entries of the light art, and `verify` asserts that.
+    //
+    // `?v=2` is not decoration: a browser keys its saved icon by URL and does not re-check it when
+    // the bytes behind that URL change, so a redeploy alone cannot dislodge the framework default an
+    // earlier build served (the iPhone in particular keeps it in the Safari/SpringBoard store until
+    // the history entry goes away). Changing the URL is the only thing that reaches visitors who
+    // already cached the wrong icon. Bump it whenever the artwork changes; leave it alone otherwise,
+    // because Google's guidance is that a favicon URL should be stable. `favicon.ico` carries no
+    // version because a blind request never reads the declaration it would have to copy.
     head: {
       link: [
-        { rel: 'icon', type: 'image/png', href: '/favicon-light.png', media: '(prefers-color-scheme: light)' },
-        { rel: 'icon', type: 'image/png', href: '/favicon-dark.png', media: '(prefers-color-scheme: dark)' },
-        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }
+        { rel: 'icon', type: 'image/png', href: '/favicon-light.png?v=2', sizes: '64x64', media: '(prefers-color-scheme: light)' },
+        { rel: 'icon', type: 'image/png', href: '/favicon-dark.png?v=2', sizes: '64x64', media: '(prefers-color-scheme: dark)' },
+        { rel: 'icon', type: 'image/png', href: '/favicon-192-light.png?v=2', sizes: '192x192', media: '(prefers-color-scheme: light)' },
+        { rel: 'icon', type: 'image/png', href: '/favicon-192-dark.png?v=2', sizes: '192x192', media: '(prefers-color-scheme: dark)' },
+        // iOS puts a letterbox behind a transparent home-screen icon instead of compositing it, so
+        // this one is opaque by design — unlike the 64px favicons.
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png?v=2', sizes: '180x180' }
       ]
     }
   },

@@ -979,7 +979,32 @@ const run = async () => {
     for (let i = 1; i < pillFrames.length; i++) if (pillFrames[i].sl > pillFrames[i - 1].sl) pillDrop = Math.max(pillDrop, pillFrames[i - 1].e - pillFrames[i].e)
     check('the dragged pill does not snap back while the bar pans', mOver.o > 40 && mScrolled > mOver.sl + 20 && pillDrop < 12, { pan: mScrolled - mOver.sl, worstPillDropPx: pillDrop, frames: pillFrames.length, sample: pillFrames.filter((f, i) => i && f.sl > pillFrames[i - 1].sl).slice(0, 6) })
     check('dragging a mobile category to the right edge pans the overflowing bar', mOver.o > 40 && mScrolled > mOver.sl + 20, { overflow: mOver.o, before: mOver.sl, after: mScrolled })
-    check('the tab icon is the logo, scoped to the browser theme', await ev(`!!document.querySelector('link[rel="icon"][media*="light"][href="/favicon-light.png"]') && !!document.querySelector('link[rel="icon"][media*="dark"][href="/favicon-dark.png"]')`))
+    check('the tab icon is the logo, scoped to the browser theme', await ev(`!!document.querySelector('link[rel="icon"][media*="light"][href^="/favicon-light.png"]') && !!document.querySelector('link[rel="icon"][media*="dark"][href^="/favicon-dark.png"]')`))
+    // Mobile reuses this declaration but has its own taste: Google's favicon guidance asks for more
+    // than 48px because the same file is painted on surfaces far bigger than a desktop tab, and no
+    // engine's choice between `media`-scoped links can be predicted. So the 192 pair and the 180 tile
+    // carry their own background, and the 64 pair must keep NOT carrying one or the theme-following
+    // above is worthless. Measured as the minimum alpha over the whole image — a corner probe is not
+    // it, because the emblem's ring reaches the corner of the crop. These are same-origin images, so
+    // the canvas read is not tainted. The URLs are read from the DOM rather than hardcoded, so the
+    // version query the declarations carry (`?v=2`, which is how a cached wrong icon gets dislodged)
+    // is part of what is proven to resolve — a declared path that 404s is exactly a blank tab icon.
+    check('an icon above the 48px favicon recommendation is declared', await ev(`!!document.querySelector('link[rel="icon"][sizes="192x192"]')`))
+    const iconAlpha = await ev(`(async () => { const out = {}; for (const l of document.querySelectorAll('link[rel~="icon"], link[rel="apple-touch-icon"]')) { const key = new URL(l.href).pathname; try { const img = new Image(); img.src = l.href; await img.decode(); const n = img.naturalWidth, cv = document.createElement('canvas'); cv.width = cv.height = n; const g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, n, n).data; let min = 255; for (let i = 3; i < d.length; i += 4) if (d[i] < min) min = d[i]; out[key] = { size: n, minAlpha: min } } catch (e) { out[key] = { error: String(e).slice(0, 60) } } } return out })()`)
+    const keyable = p => iconAlpha[p]?.size === 64 && iconAlpha[p]?.minAlpha === 0
+    const solid = (p, n) => iconAlpha[p]?.size === n && iconAlpha[p]?.minAlpha === 255
+    check('every declared icon resolves, at the size it claims and the opacity it needs', Object.keys(iconAlpha).length === 5 && !Object.values(iconAlpha).some(v => v.error) && keyable('/favicon-light.png') && keyable('/favicon-dark.png') && solid('/favicon-192-light.png', 192) && solid('/favicon-192-dark.png', 192) && solid('/apple-touch-icon.png', 180), iconAlpha)
+    // The case the two media-scoped links above do not cover: a client that ignores `media` asks for
+    // `/favicon.ico` directly. That file was still the framework's own default logo for ten days and
+    // nothing in this harness looked at it, so the deployed tab icon was wrong while every check ran
+    // green. An ICO is 6 header bytes then 16 per entry, and the entry starts with its width and
+    // height bytes (0 means 256) with `imageOffset` 12 bytes later — `p` below already carries the
+    // 6-byte header, so `u[p]`/`u[p+1]` are the size and `p + 12` the offset. All entries are walked
+    // because a single 64px entry is legal and still renders as mush: the tab paints at 16 CSS px
+    // (32 device px on a Retina screen), so the file has to carry those sizes or the browser
+    // resamples artwork nobody designed for them.
+    const ico = await ev(`fetch('/favicon.ico').then(r => r.arrayBuffer()).then(b => { const u = new Uint8Array(b), dv = new DataView(b), n = dv.getUint16(4, true), e = []; for (let i = 0; i < n; i++) { const p = 6 + 16 * i, off = dv.getUint32(p + 12, true); e.push({ w: u[p] || 256, h: u[p + 1] || 256, png: u[off] === 0x89 && u[off + 1] === 0x50 && u[off + 2] === 0x4e && u[off + 3] === 0x47 }) } return { type: dv.getUint16(2, true), n, e } })`)
+    check('/favicon.ico is the emblem at every tab size, not the framework default', ico.type === 1 && ico.n >= 4 && ico.e.every(x => x.png) && [16, 32, 64].every(px => ico.e.some(x => x.w === px && x.h === px)), ico)
     await stopForNextDocument(mobileManyScript)
     await metrics(1440, 900, false)
     await nav(new URL('/', appUrl).href)
