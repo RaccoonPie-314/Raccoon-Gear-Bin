@@ -97,6 +97,18 @@ const updateMobileDragPosition = (clientX: number) => {
   if (!isTouchDragging.value || !mobileNavRef.value) return
   const navEl = mobileNavRef.value
   const navRect = navEl.getBoundingClientRect()
+
+  // Edge auto-scroll: `touch-pan-y` keeps the browser from panning the bar horizontally, so before
+  // this the only way to reach an off-screen category was to tap the last item (selection then
+  // centres it). Dragging into a horizontal edge pans the bar, making every category reachable in
+  // one gesture while leaving the tuned drag-select engine and indicator maths untouched.
+  // touchmove-driven — no rAF timer to leak; upgrade to a timed loop only if hold-at-edge
+  // continuous scrolling is actually wanted.
+  const EDGE_ZONE = 40
+  const MAX_EDGE_STEP = 34
+  if (clientX > navRect.right - EDGE_ZONE) navEl.scrollLeft += Math.min(MAX_EDGE_STEP, clientX - (navRect.right - EDGE_ZONE))
+  else if (clientX < navRect.left + EDGE_ZONE) navEl.scrollLeft -= Math.min(MAX_EDGE_STEP, (navRect.left + EDGE_ZONE) - clientX)
+
   const rawLeft = clientX - navRect.left + navEl.scrollLeft - grabOffsetX
   const minLeft = mobileItemRefs.value[0]?.offsetLeft ?? 0
   const lastIndex = mobileItemRefs.value.length - 1
@@ -355,10 +367,13 @@ watch(computedItems, () => {
             }"
           />
 
-          <!-- Mobile Category Buttons -->
+          <!-- Keyed on `item.value` (the row id, or `all`) rather than `item.key`, which is the glyph
+               name: two categories without a bespoke glyph share one key. See the same note in
+               CategoryDesktop.vue — the buttons do render, the undefined part is a keyed diff on a
+               list that changes length without a remount. -->
           <motion.button
             v-for="(item, index) in computedItems"
-            :key="`mobile-${item.key}`"
+            :key="`mobile-${item.value}`"
             :ref="(el) => setMobileItemRef(el, index)"
             type="button"
             role="tab"

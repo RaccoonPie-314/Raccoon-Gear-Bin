@@ -71,12 +71,17 @@ bun run build                                                 # compiles (CI)
 bun run lint                                                  # eslint app+server (CI — fails on new errors)
 bun run verify                                                # scripts/verify-ui.mjs (CI) — needs Chrome
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only
+bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too
 ```
 
 `build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
-compiled, not that it works, and there is no test suite or template typecheck: `tsc` cannot parse
-`.vue`, so **template bindings are unchecked** — `verify`'s painted-geometry asserts and the IDE
-language server are the backstop. What each command actually proves, the harness's coverage and
+compiled, not that it works, and there is no test suite. `bun run typecheck` (vue-tsc) does
+mechanically check template bindings — a mistyped prop or missing variable in a `.vue` template
+fails on it. It is NOT in CI and currently exits non-zero on a handful of pre-existing script-side
+typing errors (`app.config.ts` slot classes, `useHead` meta in `[id].vue`, `nuxt.config.ts` cookie
+options); treat new template-binding errors it reports as real. `tsc` alone cannot parse `.vue`,
+so the remaining backstops for what typecheck misses are `verify`'s painted-geometry asserts and
+the IDE language server. What each command actually proves, the harness's coverage and
 the CDP measurement traps are in [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md).
 
 ## Localhost use for testing

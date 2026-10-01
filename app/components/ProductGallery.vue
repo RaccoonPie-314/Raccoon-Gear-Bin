@@ -37,6 +37,10 @@ const windowImages = computed(() => props.images.slice(windowStart.value, window
 const transitionDirection = ref<'next' | 'previous'>('next')
 const swapTransition = computed(() => `gallery-${transitionDirection.value}`)
 // One swap cadence for the inline main photo (Motion) and, kept in sync, the lightbox CSS swap.
+// The inline swap is a full-width slide with NO opacity: two photos crossing the frame is what reads
+// as one continuous object moving, and a cross-fade on top of it is what made a swipe look like the
+// old picture dissolving into a new one. `swapDuration` is also the return clock for the swipe's
+// finger-follow (see `onCyclePointerUp`), so the two stay in step by construction, not by copy.
 const swapDuration = computed(() => (reduced.value ? 0.15 : 0.22))
 
 const select = (index: number) => {
@@ -374,6 +378,102 @@ const onZoomPointerUp = (event: PointerEvent) => {
 }
 
 const openLightbox = () => { isLightboxOpen.value = true }
+
+// ---- swipe to cycle (inline main photo, touch only) ----
+// The arrows, the filmstrip and the keyboard already own the selection; this is the gesture a phone
+// visitor reaches for first. It follows the same three rules the lightbox swipe established: a 4px
+// axis lock before committing, distance OR flick velocity to fire (a fast short swipe cycles where a
+// slow long pull does not), and a mostly-vertical drag abandoned to the page — `touch-action: pan-y`
+// is what lets the browser keep that axis, and it cancels our pointer when it does. A mouse press is
+// never a swipe: on a desktop the press is the click-to-enlarge affordance.
+//
+// The offset is written to the BUTTON, never to the `<motion.img>` inside it. Motion owns that
+// element's transform for the directional swap, and a second writer on the same property is the
+// jitter this repo has already paid for once — one transform, one owner. Releasing hands the return
+// trip to the same `animate()` the filmstrip advance uses, with an explicit start value so nothing is
+// read back out of a transform another writer owns.
+const SWIPE_CYCLE_MIN_PX = 44
+const SWIPE_CYCLE_MIN_VEL = 0.45 // px/ms on the last sample — a flick cycles where a slow drag does not
+const SWIPE_CYCLE_MIN_TRAVEL = 10 // a flick must have actually moved the photo to count
+let cycleId: number | null = null
+let cycleStartX = 0
+let cycleStartY = 0
+let cycleLastX = 0
+let cycleLastT = 0
+let cycleVel = 0
+let cycleOffset = 0
+let cycleLocked = false
+let cycleSwiped = false
+
+const endCycle = () => { cycleId = null; cycleLocked = false }
+
+const onCyclePointerDown = (event: PointerEvent) => {
+  // Every press clears the swallow flag before anything else. Chrome drops the click that trails a
+  // long drag, so a flag left set by the previous gesture would eat the *next* tap instead — which is
+  // how a swipe on the photo can end up disabling click-to-enlarge. The flag only ever covers the
+  // click that follows its own pointerup; pointerdown cannot arrive before that click does.
+  cycleSwiped = false
+  if (event.pointerType === 'mouse' || imageCount.value < 2) return
+  cycleId = event.pointerId
+  cycleStartX = event.clientX
+  cycleStartY = event.clientY
+  cycleLastX = event.clientX
+  cycleLastT = event.timeStamp
+  cycleVel = 0
+  cycleOffset = 0
+  cycleLocked = false
+  try { (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId) } catch { /* the pointer is already released */ }
+}
+
+const onCyclePointerMove = (event: PointerEvent) => {
+  if (cycleId === null || event.pointerId !== cycleId) return
+  const dx = event.clientX - cycleStartX
+  const dy = event.clientY - cycleStartY
+  const dt = event.timeStamp - cycleLastT
+  if (dt > 0) cycleVel = (event.clientX - cycleLastX) / dt
+  cycleLastX = event.clientX
+  cycleLastT = event.timeStamp
+  if (!cycleLocked) {
+    // Commit to the cycle only once the move is unmistakably horizontal. Under 4px nothing has
+    // happened yet; a crooked-or-vertical drag belongs to the page, not the gallery.
+    if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    if (Math.abs(dy) > Math.abs(dx)) { endCycle(); return }
+    cycleLocked = true
+  }
+  cycleOffset = dx
+  if (photoBtn.value) photoBtn.value.style.transform = `translateX(${dx}px)`
+}
+
+const onCyclePointerUp = (event: PointerEvent) => {
+  if (cycleId === null || event.pointerId !== cycleId) return
+  const offset = cycleOffset
+  const travel = Math.abs(offset)
+  const flick = travel > SWIPE_CYCLE_MIN_TRAVEL && Math.abs(cycleVel) > SWIPE_CYCLE_MIN_VEL
+  const commit = cycleLocked && (travel > SWIPE_CYCLE_MIN_PX || flick)
+  // Whatever click trails a real drag is the end of a gesture, not an intent to enlarge. Below the
+  // axis lock this stays false, so an ordinary tap keeps its meaning.
+  cycleSwiped = cycleLocked
+  endCycle()
+  // The return trip is not a snap-back — it is the other half of the slide. The parent carries the
+  // finger's offset and eases to rest over exactly the swap's clock, while the outgoing photo exits
+  // to ∓100% and the incoming one enters from ±100% on the same duration and curve. Adding the two:
+  //   old(t) = offset·(1−t) − W·t   and   new(t) = (1−t)·(offset + W)
+  // both of which are monotonic in the swipe direction for any |offset| < W — so neither photo ever
+  // reverses, and the gesture reads as one continuous push rather than a release, a reset and a fade.
+  // Sharing `swapDuration` is what keeps it true; a different clock here reintroduces the jump.
+  if (photoBtn.value) {
+    animate(photoBtn.value, { x: [offset, 0] }, { duration: swapDuration.value, ease: [0.33, 1, 0.68, 1] })
+  }
+  // Dragging left advances (next), dragging right goes back — the same direction the swap animation
+  // reads, so the photo the finger pushed is the one that arrives.
+  if (commit) step(offset < 0 ? 1 : -1)
+}
+
+const onPhotoClick = () => {
+  if (cycleSwiped) { cycleSwiped = false; return }
+  openLightbox()
+}
+
 const closeLightbox = () => {
   // Zoom is a view inside one lightbox visit: leaving the visit — by any of the three exits —
   // resets it, so reopening always starts from the contained photo the frame showed. A swipe in
@@ -446,10 +546,22 @@ const onDialogKeydown = (event: KeyboardEvent) => {
         type="button"
         data-gallery-zoom
         :aria-label="t('enlargePhoto')"
-        class="relative flex h-full w-full cursor-zoom-in items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
-        @click="openLightbox"
+        class="relative flex h-full w-full cursor-zoom-in touch-pan-y items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
+        @click="onPhotoClick"
+        @pointerdown="onCyclePointerDown"
+        @pointermove="onCyclePointerMove"
+        @pointerup="onCyclePointerUp"
+        @pointercancel="onCyclePointerUp"
       >
-        <AnimatePresence>
+        <!-- `:initial="false"` skips the enter animation for the FIRST photo only. That photo has
+             nothing to slide away from, so the slide-in is pure decoration — and it was the fragile
+             path: if the enter animation never runs (SPA navigation into the page, an interrupted or
+             backgrounded frame), the `<motion.img>` was left stuck at `initial={x:'100%'}`, pushed a
+             full width right and clipped by the frame's `overflow-hidden`, so only a sliver of the
+             photo showed until a reload (SSR renders it at rest). Later selection changes still
+             animate — `initial={false}` suppresses only the first mount, exactly like the category
+             dock's reveal. -->
+        <AnimatePresence :initial="false">
           <motion.img
             v-if="selectedImage"
             :key="selectedImage.id"
@@ -457,9 +569,9 @@ const onDialogKeydown = (event: KeyboardEvent) => {
             :src="selectedImage.url"
             :alt="selectedImage.altText || name"
             class="absolute inset-0 h-full w-full object-contain"
-            :initial="{ opacity: 0, x: transitionDirection === 'next' ? '18%' : '-18%' }"
-            :animate="{ opacity: 1, x: 0 }"
-            :exit="{ opacity: 0, x: transitionDirection === 'next' ? '-18%' : '18%' }"
+            :initial="{ x: transitionDirection === 'next' ? '100%' : '-100%' }"
+            :animate="{ x: 0 }"
+            :exit="{ x: transitionDirection === 'next' ? '-100%' : '100%' }"
             :transition="{ duration: swapDuration, ease: [0.33, 1, 0.68, 1] }"
           />
         </AnimatePresence>

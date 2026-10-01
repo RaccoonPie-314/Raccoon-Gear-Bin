@@ -2,10 +2,13 @@
 import type { CategoryIconName } from '~/composables/useCategoryItems'
 
 /**
- * The six category glyphs, previously duplicated line-for-line in CategoryDesktop and
+ * The category glyphs, previously duplicated line-for-line in CategoryDesktop and
  * CategoryMobile. Only the geometry lives here; sizing and colour-transition classes are
  * passed in by each consumer, because the desktop dock renders the glyphs one step larger
  * from the `sm` breakpoint up while the mobile dock does not.
+ *
+ * Anything the shop adds beyond the original five categories falls through to the crate mark:
+ * a category is a category, it is not required to have bespoke art to be navigable.
  */
 defineProps<{ name: CategoryIconName }>()
 </script>
@@ -69,6 +72,13 @@ defineProps<{ name: CategoryIconName }>()
       <path d="M18 5a3 3 0 0 0-3 3v3a3 3 0 0 0 3 3h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1z" />
       <path d="M18 14v5a1 1 0 0 0 1 1" />
       <line x1="21" y1="9" x2="22.5" y2="9" stroke-width="2" />
+    </template>
+
+    <!-- Everything else: a crate. Deliberately the same line weight and corner radius as the rest. -->
+    <template v-else>
+      <path d="M12 3l8 4v10l-8 4-8-4V7z" />
+      <path d="M4 7l8 4 8-4" />
+      <path d="M12 11v10" />
     </template>
   </svg>
 </template>

@@ -85,6 +85,8 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
                 {{ t('adminMode') }}
               </span>
+              <!-- One entry for the admin tools, not one per tool: the editors each keep their own
+                   page and section, and `AdminTabs` is what moves between them. -->
               <UButton
                 v-if="isAdminMode"
                 size="xs"
@@ -92,7 +94,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 variant="ghost"
                 @click="navigateTo('/admin/site-info')"
               >
-                {{ t('siteInfo') }}
+                {{ t('adminTools') }}
               </UButton>
               <UButton
                 v-if="isAdminMode"
@@ -136,10 +138,28 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
           <p class="hidden lg:block mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
             {{ t('shopByCategory') }}
           </p>
-          <CategoryNav
-            v-model="selectedCategory"
-            :categories="categories"
-          />
+          <!-- The dock's length is now the shop's to decide, so the box it lives in has to bound it.
+               Measured: eighteen categories made the nav 1204px tall in a 900px viewport, and a
+               `top`-only sticky element pins its top forever — every category past the fold existed on
+               the page and could not be reached. Only the nav scrolls: the mobile bar teleports
+               itself out of this box, and the overflow must never go on the <aside>, because the
+               collapsed search launcher is anchored to that element's bottom edge. The padding is the
+               clip box's room, and it has to be generous: measured while dragging, the selection pill
+               scales 25px past the nav on each side and 4px past it vertically, and `overflow-y: auto`
+               clips at the padding edge — a 16px gutter cut the pill's rounded ends off. The negative
+               margin puts that space back into the transparent gutter, so the rows stay exactly where
+               they were and only the clip moves.
+               The cap is counted in rows rather than in viewport fractions: a row is 57px and the gap
+               10px, so 7 whole rows are 7*57 + 6*10 = 459, plus the nav's own 4+4 padding and the 8+8
+               of clip padding above = 483px. `68vh` was the wrong unit for this — on a shorter window it
+               landed mid-row and drew half an icon at the bottom edge. `verify` now asserts the rail
+               rests on whole rows. -->
+          <div data-category-nav-scroll class="lg:-mx-7 lg:-my-2 lg:max-h-[483px] lg:px-7 lg:py-2 lg:overflow-y-auto">
+            <CategoryNav
+              v-model="selectedCategory"
+              :categories="categories"
+            />
+          </div>
           <SearchDock
             v-model="search"
             :result-count="filteredProducts.length"

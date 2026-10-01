@@ -3,7 +3,18 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
   app: {
-    pageTransition: { name: 'page', mode: 'out-in' }
+    pageTransition: { name: 'page', mode: 'out-in' },
+    // Tab icon follows the browser's own theme, no JS: `media` on <link rel="icon"> is the native
+    // platform feature and matches the BrandLogo mapping (light theme -> rgb-logo-light, dark ->
+    // rgb-logo-dark). The 64px PNGs are downscaled from the 1254px source art; favicon.ico stays as
+    // the legacy fallback for clients that request it directly and ignore `media`.
+    head: {
+      link: [
+        { rel: 'icon', type: 'image/png', href: '/favicon-light.png', media: '(prefers-color-scheme: light)' },
+        { rel: 'icon', type: 'image/png', href: '/favicon-dark.png', media: '(prefers-color-scheme: dark)' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }
+      ]
+    }
   },
   modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase', 'motion-v/nuxt'],
   // @nuxt/ui auto-registers @nuxt/fonts, whose default provider fetches fonts.googleapis.com at

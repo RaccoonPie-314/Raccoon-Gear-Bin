@@ -27,7 +27,8 @@ app/
 │   ├── products/index.vue  redirect shim to /  (note: NOT app/pages/index.vue)
 │   └── admin/
 │       ├── login.vue
-│       └── site-info.vue   Site Info admin page (uses useAdminSiteInfoEditor)
+│       ├── site-info.vue   Site Info admin page (uses useAdminSiteInfoEditor)
+│       └── categories.vue  Categories admin page (uses useAdminCategoryEditor)
 ├── features/         a feature owns its UI *and* the logic only that UI uses
 │   ├── admin/
 │   │   ├── components/AdminProductEditor.vue   the product editor's modals + error banner
@@ -41,12 +42,14 @@ app/
 ├── composables/
 │   ├── useCatalog.ts            the only public catalog data layer
 │   ├── useCatalogBrowse.ts      browsing state: search / sort / category / filteredProducts
-│   ├── useCategoryItems.ts      category model shared by both docks (Phase 2)
+│   ├── useCategoryItems.ts      the dock's category model, built from the live rows (Phase 2)
 │   ├── useScrollReveal.ts       window scroll-direction rule (Phase 3)
 │   ├── useSiteInfo.ts           the only site_settings read + jsonb conversion
 │   ├── useAdminSiteInfoEditor.ts admin site-info editor: form, link rows, singleton save
+│   ├── useAdminCategoryEditor.ts admin category editor: row list, two-table save, delete
 │   └── useAdminAuth.ts          admin identity
 ├── components/       presentational; never import a data composable
+│   ├── AdminTabs.vue  the left rail both admin editor pages carry, in the category sidebar's shape
 │   ├── category/     CategoryNav (facade) + CategoryDesktop + CategoryMobile
 │   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
 │   ├── ProductPrice.vue    the price pair one product shows: what it costs, plus the original crossed out
@@ -81,6 +84,10 @@ shared component silently stops resolving (the build stays green; the page rende
    from its select), and read as intentional because the generated wiki described the
    unified version. Since Phase 5 the catalog pages hold no Supabase client at all; the one
    page that still does is `admin/login.vue` (see Known gaps).
+   `categories` has exactly two readers and both are here: `fetchCategories` (the public view —
+   active rows, `sort_order`, one locale picked per row) and `fetchCategoryDrafts` (the admin view —
+   every row, both locale names kept apart). Same table, one module, so the row shape cannot drift;
+   the writes are the category editor's and it reads through this module rather than around it.
 2. **`useCatalogBrowse` owns browsing state and nothing else** — no network, no DOM, no
    refs to components. Search, sort and category selection are one interaction with three
    inputs (`filteredProducts`), not three features.
@@ -394,8 +401,8 @@ Keep the split where it reflects a genuinely different input model:
 
 | Duplicated on purpose, or since shared | State |
 |---|---|
-| Category item model + active matching | shared since Phase 2 — `useCategoryItems.ts` |
-| The six category icons | shared since Phase 2 — `CategoryIcon.vue` |
+| Category item model + active matching | shared since Phase 2 — `useCategoryItems.ts`. The list is the shop's own `categories` rows in `sort_order` plus the virtual `all`; it used to be a hardcoded six, which left any category the admin added unreachable from the storefront. Both docks iterate it and measure whatever arrives, which is why the list can change length without touching either input model |
+| The category glyphs | shared since Phase 2 — `CategoryIcon.vue`. Six bespoke marks plus the crate fallback every unrecognised slug falls through to; a category is not required to have bespoke art to be navigable |
 | Scroll-direction hide/show rule (`60` / `6`) | rule shared since Phase 3 — `useScrollReveal.ts`, used by `CategoryMobile`. `SearchDock` still carries its own copy: its scroll pass is interleaved with the morph/collapse logic and the component is hands-off (see Known gaps) |
 | Indicator geometry scaffolding (observers, `fonts.ready`, watches) | deliberately **not** extracted. The two components observe different elements and write different geometry; only the shape of the code looks alike |
 
@@ -433,10 +440,10 @@ and none of them are visible to the compiler or to `build`.
 | Category icon pop (Phase F) | `iconPop` scale `[1,1.16,1]`, spring `500/16/0.7`, one-shot `animate()` on the active icon's wrapper div (not the `<svg>` — center origin); skipped under reduced motion | `CategoryDesktop.vue`, `CategoryMobile.vue` |
 | Mobile dock reveal (Phase F) | `dock` spring `360/34/0.9` on `y` (`0%`↔`125%`); `{duration: 0}` under reduced motion. Bar is frosted glass (`backdrop-blur-xl backdrop-saturate-150` + inset top-specular / soft drop shadow), and its wrapper carries `data-site-dock` — the hook `main.css`'s reduced-transparency block paints flat | `CategoryMobile.vue` |
 | Product conversion tactile layer (Phase G) | Share-sheet + contact controls are `<motion.button>`/`<motion.a>` with `press` (`:while-press` scale 0.97, spring 400/30), gated on `useReducedMotion()`. The three copy actions (`data-share-copy-link`, `data-share-copy-message`, `data-copy-message`) fire a one-shot `copyPop` (scale `[1,1.05,1]`, spring 500/18/0.6) on `click` — after `while-press` releases on pointer-up, so the two never race for the same element's transform. Sheet upward rubber-band `dragElastic { top: 0.15 }`; sheet backdrop `backdrop-blur-md backdrop-saturate-150`; sticky bar `backdrop-blur-xl backdrop-saturate-150`. **Both `[data-contact-panel]` mounts stay opaque (`bg-white`/`dark:bg-zinc-900` — the inline one used to carry a `bg-white/95 backdrop-blur-md` that had nothing behind it to frost) and the sheet's resting transform stays `none`/identity — harness-locked.** | `ProductShareSheet.vue`, `ProductActions.vue`, `ProductConversion.vue` |
-| Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail | `CategoryMobile.vue` |
+| Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail. The bar is `touch-pan-y`, so the browser never pans it horizontally — dragging into a horizontal edge (`EDGE_ZONE = 40`, capped `MAX_EDGE_STEP = 34` per `touchmove`) pans it via `scrollLeft`, which is how an off-screen category becomes reachable now that the list is the shop's to grow. This is the drag-select engine's only addition; the indicator maths and axis-lock are unchanged (measured: `after 69 > before 0`) | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
 | Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion), **anchored on the point that was clicked**: `transform-origin` is that point and the photo carries no other translation, so the clicked detail stays under the pointer instead of sliding to the centre. Pan is clamped per axis to the picture's own edges under that origin (a picture shorter than the frame after the scale is held centred, not given invented travel), and the zoom resets on photo change and on close. No standalone zoom control — the enlarged photo *is* the control. The dialog itself enters and leaves through a **Motion `<AnimatePresence>` opacity fade** on the fixed container (the `lightbox` preset in `app/utils/motion.ts`; Phase D) — opacity only, never a transform on an ancestor of the `<img>`, or the focal maths would measure a mid-animation rect | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
-| Gallery presentation motion | Phase D moved only the **presentation layer** to Motion, leaving the **Direct-Manipulation Layer** (zoom, pan, focal maths, swipe) untouched: the lightbox dialog fades on `<AnimatePresence>` (opacity-only, above); the filmstrip advance slides on a single `motion-v animate` `x` (was a lone WAAPI `strip.animate` — same ±one-slot travel, 240ms / 170ms-reduced); the **inline** main photo slides directionally via `<AnimatePresence>` + `<motion.img>` (`absolute inset-0`, x `±100%` → `0`, **no opacity** — see the swipe row: two fully opaque layers exactly one photo box apart read as one surface crossing the frame, where the old `±18% + cross-fade` read as the picture dissolving into the next one; `swapDuration` 220ms / 150ms-reduced is shared with the swipe's parent return so the composite stays monotonic). The **enlarged lightbox `<img>`** (`[data-lightbox-main]` / `[data-zoomed]`) and its CSS `.gallery-*` swap are deliberately **not** Motion — that element's `transform` belongs to the zoom engine alone, so a second writer (or a wrapped ancestor) would jitter the focal tracking. One transform, one owner | `ProductGallery.vue` |
+| Gallery presentation motion | Phase D moved only the **presentation layer** to Motion, leaving the **Direct-Manipulation Layer** (zoom, pan, focal maths, swipe) untouched: the lightbox dialog fades on `<AnimatePresence>` (opacity-only, above); the filmstrip advance slides on a single `motion-v animate` `x` (was a lone WAAPI `strip.animate` — same ±one-slot travel, 240ms / 170ms-reduced); the **inline** main photo slides directionally via `<AnimatePresence>` + `<motion.img>` (`absolute inset-0`, x `±100%` → `0`, **no opacity** — see the swipe row: two fully opaque layers exactly one photo box apart read as one surface crossing the frame, where the old `±18% + cross-fade` read as the picture dissolving into the next one; `swapDuration` 220ms / 150ms-reduced is shared with the swipe's parent return so the composite stays monotonic). The `<AnimatePresence>` is `:initial="false"`, so the **first** photo renders at rest and does not slide in — that slide relied on its enter animation to undo `initial={x:'100%'}`, and when no frames were produced (SPA navigation into the page, an interrupted/backgrounded tab) the photo stayed a full width right, clipped by the frame's `overflow-hidden`, until a reload. Selection changes still animate. The **enlarged lightbox `<img>`** (`[data-lightbox-main]` / `[data-zoomed]`) and its CSS `.gallery-*` swap are deliberately **not** Motion — that element's `transform` belongs to the zoom engine alone, so a second writer (or a wrapped ancestor) would jitter the focal tracking. One transform, one owner | `ProductGallery.vue` |
 | Inline photo: swipe to cycle | A horizontal touch drag on `[data-gallery-zoom]` follows the finger and, past `44px` **or** a flick (`>10px` travel at `>0.45px/ms`), calls the same `step(±1)` the arrows use — so wrapping, the directional swap and the filmstrip window all come free. Dragging left advances. Rules inherited from the lightbox swipe: a 4px axis lock, a mostly-vertical drag abandoned to the page (`touch-action: pan-y` is what keeps the page scrollable *and* hands the browser the right to cancel us — `pointercancel` is wired to the same release path), and a mouse press is never a swipe. **The offset is written to the button, never to the `<motion.img>`: Motion owns that element's transform for the swap, so one transform has one owner.** The return trip is the same `animate(el, { x: [offset, 0] })` the filmstrip advance uses, with an explicit start value so nothing is read back out of a transform another writer holds. The click that trails a real drag is swallowed by `cycleSwiped`, and **every `pointerdown` clears that flag first** — Chrome drops the click after a long drag, so a flag left set would eat the next tap and silently kill click-to-enlarge (it did, on the first version of this). **The release is not a snap-back:** the parent eases from the finger's offset to rest on `swapDuration` — the *same* clock and curve the child swap runs on — so `old(t) = offset·(1−t) − W·t` and `new(t) = (1−t)·(offset + W)` are both monotonic in the swipe direction for any `|offset| < W`, and the two layers stay exactly `W` apart the whole way. Give either clock its own value and the photo visibly reverses. | `ProductGallery.vue` |
 | Lightbox exits | close button sits **bottom-centre under the photo** (thumb reach), not the top corner; a vertical touch drag on the contained photo follows the finger as a `translateY` on the `<img>` itself (never on the dialog — see the fade rule above) and closes on release past `72px` or a flick (`>12px` at `>0.45px/ms`), snapping back below either. Horizontal drags are **not** an exit gesture there — the lightbox keeps that axis for the swap arrows and the zoom pan, and the inline photo above is where a horizontal swipe lives | `ProductGallery.vue` |
 | Contact panel enter / leave | **An Apple popover bloom, not a FLIP** (Phase H). Phase C's FLIP scaled the whole panel onto the CTA's footprint (`translate(Δ) scale(ctaW/panelW, ctaH/panelH)`, `transform-origin: top left`), which stretched the textarea and channel pills mid-flight. The panel now **blooms in place on a uniform scale** via Vue `<Transition>` JS hooks + Motion, reading every number from `applePop` (see the Share Sheet row below): `transform-origin` is `center top` (inline, drops down out of the CTA) or `center bottom` (sticky, rises up out of the bar), and the enter runs `applePop.below/above.from` (`scale(0.93) translateY(-8px)` / `scale(0.94) translateY(10px)`) → `applePop.rest` on `applePop.transition` (spring 400/26/0.8), while the exit shrinks to `.to` (`scale(0.95) translateY(-4px)` / `scale(0.96) translateY(6px)`) on `applePop.exit`. Opacity rides its own curve (`applePop.opacity.in` 0.18 / `.out` 0.14), never the spring. `will-change: transform, opacity` is applied in the enter/leave hooks and cleared in `after-enter`, so the layer is promoted for the length of the pop only and never left resident. **`settleForMeasurement` is unchanged** — both hooks stop any running animation and clear the in-flight transform first, so an interrupted enter→leave retargets from the live value instead of compounding transforms. Opening the desktop panel still **reveals** it (column pinned `static` in the enter hook, smooth-scroll to `12px` under `[data-detail-header]`), but the `scrollTo` is now deferred one `requestAnimationFrame` so the first bloom frame paints before the viewport moves. Reduced motion keeps the bloom (a short contained move) with eased durations (200ms in / 160ms out). **Harness: the old "panel lands on the CTA rect / scale<0.75" FLIP assertions were retargeted to `bloomed` (some frame `scaleX<0.98`, settles to identity) — the pop genuinely does not collapse onto the button.** | `ProductActions.vue`, `app/utils/motion.ts` |
@@ -509,6 +516,13 @@ line truncates before it collides, and the socials stay reachable, which is the 
 `BrandLogo`'s root is `flex`, not `inline-flex`. As an atomic inline box the emblem would sit on
 a text baseline, which parks a few pixels of descender beneath it and lifts the logo out of the
 row's vertical centre — 3.5px of visible misalignment against controls that are centred.
+
+The tab icon is the same emblem, and it follows the **browser's** theme the same way `BrandLogo`
+follows the app's: two downscaled 64px PNGs (`favicon-light.png` from `rgb-logo-light`,
+`favicon-dark.png` from `rgb-logo-dark`) wired through `app.head.link` in `nuxt.config.ts` with
+`media="(prefers-color-scheme: …)"` — a native platform feature, so there is no JS theme probe. It
+keys off the OS/browser theme (as asked), not the in-app `ColorModeToggle`. `favicon.ico` stays as
+the legacy fallback for clients that request it directly.
 
 **Eyebrow tracking is locale-conditional, everywhere.** Wide Latin letter-spacing pulls Khmer
 clusters apart (a cluster carries marks below the baseline, and tracking separates them), so every
@@ -635,6 +649,19 @@ surface should match the logo.
 - New read of catalog data → extend `useCatalog` (and its derived row type).
 - New read or write of public site info → extend `useSiteInfo` (reads and jsonb shapes) or
   `useAdminSiteInfoEditor` (editor behaviour). Never a third copy of the row's shape.
+- A new admin tool → a page under `app/pages/admin/` plus one entry in `AdminTabs.vue`'s `TABS`. The
+  storefront header carries exactly **one** button into the admin area (`Admin tools`, landing on the
+  first entry); adding a second header pill per tool is the thing the rail exists to prevent. The rail
+  is a sidebar on the left of the tool — eyebrow over a vertical column of rounded rows, the current
+  one filled — deliberately the same shape as the storefront's category sidebar, but *without* its
+  sliding indicator or drag: that pill is a tuned engine for manipulating a filter, and a two-item
+  navigation list has nothing to drag. Each tool keeps its own page, composable and section — the rail
+  is navigation, not a panel switcher.
+- A new category → data only: a row in the Categories admin page (`/admin/categories`). Its name is
+  stored per locale, the storefront dock picks it up from the rows, and a slug the shop already knows
+  keeps its own glyph while anything else takes the crate mark. No migration, no component edit.
+  A new *glyph* is one entry in `useCategoryItems`' `ICON_BY_SLUG` plus one `<template>` in
+  `CategoryIcon.vue`; there is deliberately no per-category icon column.
 - A new social platform → data only: a row in the Site Info editor. The header and the contact rows
   render a known mark or a globe fallback for anything else; making the fallback a real mark is one
   entry in `SocialBrandIcon.vue`'s `BRAND_ICONS`, never a schema or composable change. Deciding
@@ -787,8 +814,19 @@ build also inlines `SUPABASE_SERVICE_ROLE_KEY` into the server bundle, which is 
   inside a `handleScroll` that also resolves the field-collapse hysteresis, in the one
   component that is hands-off. Migrating it is a separate change with its own measurement
   budget, not a drive-by.
-- **No category CRUD** in the UI, although RLS permits it. Generated docs that describe
-  category administration are **PROPOSED**, not current.
+- **Category administration exists; its ceilings are measured, not accidental.** The Categories page
+  writes `categories` + `category_translations` (both locales), the dock renders whatever rows come
+  back, and `verify` proves the two cases that used to break: two added categories with unknown slugs
+  are two separate tabs (the list is keyed on the row id, not the glyph), and a long dock reaches its
+  last item by scrolling inside `data-category-nav-scroll` — eighteen categories made the nav 1204px
+  tall against a 900px viewport, which a `top`-only sticky rail cannot recover. The save is one write
+  per row plus one per locale set (≈ 2N+1 round-trips, validated for duplicates *before* the first
+  write, so a rejected save writes nothing); batch it when a save is visibly slow, and note that the
+  loop is still not a transaction across those statements.
+- **Hiding a category is not the same as emptying it.** `is_active = false` also removes the row from
+  every product's embedded `categories` object, because the public RLS policy filters the embed — so
+  those cards fall back to "Uncategorized" while still filtering correctly by id. The harness cannot
+  see this: it answers category GETs from fixtures and runs no RLS at all.
 
 ## Verifying a change
 

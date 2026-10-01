@@ -3,7 +3,7 @@ import type { ProductShareDestination, ProductSharePayload } from '../composable
 import { platformLabel } from '~/utils/social-prefill'
 import { selectOnFocus } from '~/utils/clipboard'
 import { AnimatePresence, animate, motion, useDragControls, useReducedMotion } from 'motion-v'
-import { copyPop, popover, press, sheet } from '~/utils/motion'
+import { applePop, copyPop, press, sheet } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 /**
@@ -142,20 +142,40 @@ const onDragEnd = (_event: PointerEvent, info: { offset: { y: number }, velocity
   if (dismissed) close()
 }
 
-// One motion language for both shapes: the phone sheet slides on `y`, the desktop popover unfolds on
-// `scaleY` out of the edge `panelStyle` names as the transform-origin. Reduced motion drops the
-// sheet's position change to a fade and keeps the popover's position-free scale — the same tiering
-// the removed CSS classes carried, now expressed as the enter/exit targets.
+// Both shapes are one motion language but two physics, because they are two kinds of thing. The
+// desktop popover is a menu, so it reads `applePop` — the SAME preset the Contact-to-Order panel
+// animates with: a uniform scale plus a few px of travel back toward the control that opened it,
+// opacity on its own short curve rather than on the spring, and a shorter ease-in exit. It used to
+// unfold on `scaleY(0.5 → 1)` with the fade blended into the spring, which both stretched the copy
+// rows vertically and made the two menus feel different. The phone sheet keeps its `y` slide: that one
+// is a dragged gesture surface, so its spring has to stay velocity-aware for the drag handoff.
+// Reduced motion drops the sheet's position change to a fade and keeps the popover's position-free
+// scale — the same tiering the removed CSS classes carried.
+//
+// Which offset the bloom starts from is whichever edge of the popover faces the trigger. `place()`
+// decides that on the frame the panel enters, and until it does the panel is `visibility: hidden`;
+// the common case (a popover hanging below its control) is the default, so in the rare flip to
+// `above` the first unpainted frames start from the other 8px. The settle target is reactive, so it
+// still lands in the right place and travels the same distance.
+const popSide = computed(() => placed.value?.side ?? 'below')
+const popShrink = 'scale(0.94) translateY(0px)'
+
 const panelInitial = computed(() => isDesktop.value
-  ? (reduced.value ? { opacity: 0, scaleY: 0.9 } : { opacity: 0, scaleY: 0.5 })
+  ? (reduced.value ? { opacity: 0, transform: popShrink } : { opacity: 0, transform: applePop[popSide.value].from })
   : (reduced.value ? { opacity: 0 } : { opacity: 0, y: '100%' }))
-const panelAnimate = computed(() => (isDesktop.value ? { opacity: 1, scaleY: 1 } : { opacity: 1, y: 0 }))
+const panelAnimate = computed(() => (isDesktop.value
+  ? { opacity: 1, transform: applePop.rest }
+  : { opacity: 1, y: 0 }))
 const panelExit = computed(() => isDesktop.value
-  ? (reduced.value ? { opacity: 0, scaleY: 0.9 } : { opacity: 0, scaleY: 0.5 })
+  ? (reduced.value
+      ? { opacity: 0, transform: popShrink }
+      // motion-v honours a `transition` key inside a variant target (it destructures it off the
+      // resolved variant), which is what lets the exit be a 160ms ease-in while the enter stays a spring.
+      : { opacity: 0, transform: applePop[popSide.value].to, transition: { ...applePop.exit, opacity: applePop.opacity.out } })
   : (reduced.value ? { opacity: 0 } : { opacity: 0, y: '100%' }))
 const panelTransition = computed(() => reduced.value
   ? { duration: 0.18 }
-  : (isDesktop.value ? popover.transition : sheet.transition))
+  : (isDesktop.value ? { ...applePop.transition, opacity: applePop.opacity.in } : sheet.transition))
 
 const close = (returnFocus = true) => {
   emit('close')

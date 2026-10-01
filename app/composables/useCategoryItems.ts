@@ -1,16 +1,23 @@
 import type { CatalogCategory } from '~/types/catalog'
 
-/** Static definition of every navigable category, in dock order. */
-interface CategoryItemDef {
-  key: CategoryIconName
-  slug: string
-  labelKey: string
-  defaultName: string
+/**
+ * The glyphs `CategoryIcon.vue` actually draws. `other` is the fallback every category outside the
+ * original five wears, so a category the shop adds from the admin is navigable on the same terms as
+ * one that shipped with the schema.
+ */
+export type CategoryIconName = 'all' | 'controllers' | 'keyboards' | 'mice' | 'headphones' | 'earphones' | 'other'
+
+/** Slug → glyph. Matched on the stored slug and never on a translated name, so a Khmer label keeps
+ * its icon and a renamed category keeps its glyph. */
+const ICON_BY_SLUG: Record<string, CategoryIconName> = {
+  controllers: 'controllers',
+  keyboards: 'keyboards',
+  mice: 'mice',
+  headphones: 'headphones',
+  earphones: 'earphones'
 }
 
-export type CategoryIconName = 'all' | 'controllers' | 'keyboards' | 'mice' | 'headphones' | 'earphones'
-
-/** A definition resolved against the live category rows and the current locale. */
+/** A dock entry resolved against the live `categories` rows. */
 export interface CategoryItem {
   key: CategoryIconName
   slug: string
@@ -19,57 +26,32 @@ export interface CategoryItem {
   dbId?: string
 }
 
-const CATEGORY_ITEMS: CategoryItemDef[] = [
-  { key: 'all', slug: 'all', labelKey: 'all', defaultName: 'All Gear' },
-  { key: 'controllers', slug: 'controllers', labelKey: 'controllers', defaultName: 'Controllers' },
-  { key: 'keyboards', slug: 'keyboards', labelKey: 'keyboards', defaultName: 'Keyboards' },
-  { key: 'mice', slug: 'mice', labelKey: 'mice', defaultName: 'Mice' },
-  { key: 'headphones', slug: 'headphones', labelKey: 'headphones', defaultName: 'Headphones' },
-  { key: 'earphones', slug: 'earphones', labelKey: 'earphones', defaultName: 'Earphones' }
-]
-
 /**
- * The category model shared by the desktop and mobile docks: which items exist, how a
- * definition resolves against the rows loaded from Supabase, and which one is selected.
+ * The category model shared by the desktop and mobile docks: which items exist, and which one is
+ * selected. The list *is* the shop's own rows in the order it sorted them (`fetchCategories` is
+ * `is_active` + `sort_order`), plus the one virtual item that clears the filter. It used to be a
+ * hardcoded six, which meant an added category was real — products could be filed under it, the admin
+ * select offered it — but nobody could reach it from the storefront.
  *
- * Deliberately free of anything to do with pointers, touch, geometry or animation — those
- * differ per input model and stay inside each component.
+ * Deliberately free of anything to do with pointers, touch, geometry or animation — those differ per
+ * input model and stay inside each component, and both of them iterate `computedItems` and measure
+ * whatever arrives rather than assuming a length.
  *
  * `props` is the caller's reactive props object; it is read, never held or mutated.
  */
 export const useCategoryItems = (props: { modelValue: string; categories?: CatalogCategory[] }) => {
   const { t } = useI18n()
 
-  const computedItems = computed<CategoryItem[]>(() => CATEGORY_ITEMS.map((item) => {
-    if (item.key === 'all') {
-      return {
-        key: 'all' as const,
-        slug: 'all',
-        value: 'all',
-        name: t('all') || item.defaultName
-      }
-    }
-
-    // Rows are matched loosely so the dock keeps working whether the page identified a
-    // category by slug, by uuid, or only by its English display name.
-    const matchedDbCat = props.categories?.find((cat) => {
-      if (cat.slug && cat.slug.toLowerCase() === item.slug.toLowerCase()) return true
-      if (cat.id && cat.id.toLowerCase() === item.slug.toLowerCase()) return true
-      if (cat.name && cat.name.toLowerCase() === item.defaultName.toLowerCase()) return true
-      return false
-    })
-
-    const name = matchedDbCat?.name || (t(item.labelKey) !== item.labelKey ? t(item.labelKey) : item.defaultName)
-    const value = matchedDbCat?.id || item.slug
-
-    return {
-      key: item.key,
-      slug: item.slug,
-      value,
-      dbId: matchedDbCat?.id,
-      name
-    }
-  }))
+  const computedItems = computed<CategoryItem[]>(() => [
+    { key: 'all', slug: 'all', value: 'all', name: t('all') },
+    ...(props.categories || []).map((category) => ({
+      key: ICON_BY_SLUG[(category.slug || '').toLowerCase()] || 'other',
+      slug: category.slug || category.id,
+      value: category.id,
+      name: category.name,
+      dbId: category.id
+    }))
+  ])
 
   const isItemActive = (item: CategoryItem) => {
     const current = props.modelValue

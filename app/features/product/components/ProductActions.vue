@@ -151,10 +151,12 @@ const settleForMeasurement = (p: HTMLElement) => {
   p.style.opacity = ''
   void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
-// A hair of scale and a few px of travel, uniform on both axes so nothing inside stretches.
-const REST = 'scale(1) translateY(0px)'
-const popFrom = (compact: boolean) => compact ? 'scale(0.94) translateY(10px)' : 'scale(0.93) translateY(-8px)'
-const popTo = (compact: boolean) => compact ? 'scale(0.96) translateY(6px)' : 'scale(0.95) translateY(-4px)'
+// The bloom's numbers all live in `applePop` now — the same preset the Share Sheet's desktop popover
+// reads — so the two menus cannot drift apart. `rest` is the identity the spring settles on; the
+// shrunk/offset start and the shorter exit travel are keyed by which side of its trigger this mount's
+// panel sits on (the inline block drops *down* out of the CTA, the sticky bar's panel rises *up* out of
+// the bar), which is also the edge `transform-origin` is pinned to.
+const popSide = () => props.compact ? 'above' : 'below'
 
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
@@ -162,11 +164,14 @@ const onPanelEnter = (el: Element, done: () => void) => {
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
   p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
+  // Promote for the length of the pop only: without this the panel is rasterised on the first
+  // animated frame, which is the hitch at the start of the bloom. Cleared in `onPanelAfterEnter`.
+  p.style.willChange = 'transform, opacity'
   const red = reduced.value
   // Opacity rides its own fast clean curve, transform rides the spring — split so the text is legible
   // on the shrunk first frames and the bloom stays interruptible.
-  animate(p, { opacity: [0, 1] }, { duration: red ? 0.16 : 0.18, ease: 'easeOut' })
-  const a = animate(p, { transform: [popFrom(props.compact), REST] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
+  animate(p, { opacity: [0, 1] }, red ? { duration: 0.16, ease: 'easeOut' } : applePop.opacity.in)
+  const a = animate(p, { transform: [applePop[popSide()].from, applePop.rest] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }
@@ -176,6 +181,7 @@ const onPanelAfterEnter = (el: Element) => {
   p.style.transform = ''
   p.style.opacity = ''
   p.style.transformOrigin = ''
+  p.style.willChange = ''
 }
 const onPanelLeave = (el: Element, done: () => void) => {
   const p = el as HTMLElement
@@ -183,9 +189,10 @@ const onPanelLeave = (el: Element, done: () => void) => {
   // that interrupts an open retargets cleanly instead of compounding transforms.
   settleForMeasurement(p)
   p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
+  p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
-  animate(p, { opacity: [1, 0] }, { duration: red ? 0.12 : 0.14, ease: 'easeIn' })
-  const a = animate(p, { transform: [REST, popTo(props.compact)] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
+  animate(p, { opacity: [1, 0] }, red ? { duration: 0.12, ease: 'easeIn' } : applePop.opacity.out)
+  const a = animate(p, { transform: [applePop.rest, applePop[popSide()].to] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }

@@ -10,6 +10,7 @@
     "deploy": "NITRO_PRESET=cloudflare_module nuxt build && bunx wrangler deploy",
     "lint": "eslint app server",
     "verify": "node scripts/verify-ui.mjs",
+    "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
@@ -31,6 +32,7 @@
     "@nuxt/eslint": "^1.17.0",
     "eslint": "^10.11.0",
     "eslint-plugin-better-tailwindcss": "^4.7.0",
-    "typescript": "6"
+    "typescript": "6",
+    "vue-tsc": "^3.3.11"
   }
 }

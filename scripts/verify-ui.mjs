@@ -97,6 +97,9 @@ const stubSource = [
   `  var SITE = ${JSON.stringify(FIXTURES.siteSettings)};`,
   '  var FIXED_USER = "00000000-0000-4000-8000-0000000000ad";',
   '  var NEW_ROW_ID = "11111111-2222-4333-8444-555555555555";',
+  // The id a newly inserted category comes back with, so the category flow can assert the DELETE it
+  // issues later targets the row it just created rather than one of the fixtures.
+  '  var NEW_CAT_ID = "33333333-4444-4555-8666-777777777777";',
   '  function b64(o) { return btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/[+]/g, "-").replace(/[/]/g, "_") }',
   '  var iat = Math.floor(Date.now() / 1000);',
   '  var jwt = b64({ alg: "HS256", typ: "JWT" }) + "." + b64({ sub: FIXED_USER, role: "authenticated", aud: "authenticated", session_id: "verify", iat: iat, exp: iat + 7200 }) + ".sig";',
@@ -110,6 +113,7 @@ const stubSource = [
   // the same REST stub as everything else) without adding a seventh product row that every card and
   // price count in this file would then have to chase.
   '  window.__PRODUCTS = PRODUCTS;',
+  '  window.__CATEGORIES = CATEGORIES;',
   '  window.__SITE = SITE;',
   '  function json(body, status) { return new Response(body === null ? null : JSON.stringify(body), { status: status, headers: { "content-type": "application/json" } }) }',
   '  var orig = window.fetch.bind(window);',
@@ -130,6 +134,8 @@ const stubSource = [
   '    if (new RegExp("^/storage/v1/object").test(p) && method !== "GET") return json({ Key: "ok", Id: NEW_ROW_ID }, 200);',
   '    if (p === "/rest/v1/products" && method === "GET") { var one = new RegExp("id=eq[.]([0-9a-f-]+)").exec(q); return json(one ? (PRODUCTS.filter(function (x) { return x.id === one[1] })[0] || null) : PRODUCTS, 200) }',
   '    if (p === "/rest/v1/categories" && method === "GET") return json(CATEGORIES, 200);',
+  // An inserted category answers with one object, because the editor asks for `id` with `.single()`.
+  '    if (p === "/rest/v1/categories" && method === "POST") return json({ id: NEW_CAT_ID }, 201);',
   '    if (p === "/rest/v1/site_settings" && method === "GET") return json([SITE], 200);',
   // The site-info singleton is editable in-stub so the "public reflects the save" check can
   // read back what the admin flow wrote, without any real project being touched.
@@ -598,6 +604,82 @@ const run = async () => {
     check('desktop drag selects its target and snaps', await waitFor(`(() => { const nav = document.querySelector(\'nav[aria-label="Product categories"]\'); const sel = (nav.querySelector(\'[aria-selected="true"]\').textContent || "").trim(); const p = nav.firstElementChild.getBoundingClientRect(); const a = nav.querySelector(\'[aria-selected="true"]\').getBoundingClientRect(); return sel === ${JSON.stringify(dock[3].t)} && Math.abs(p.top - a.top) < 1.5 })()`), { want: dock[3].t })
     await clickByText('nav[aria-label="Product categories"] button', 'All categories', 'document.querySelectorAll("main article").length === ' + EXP.cards)
 
+    // ---- categories the shop added ---------------------------------------------------------------
+    // The dock used to be a hardcoded six, which made a new category real to the database and to the
+    // product editor while nobody could reach it from the storefront. The stub's own category
+    // collection is aliased for exactly this case. TWO rows, both with unknown slugs on purpose: they
+    // share the one fallback glyph, so this is the first time the list ever holds two items with the
+    // same `key` field. It proves both reach the dock and that each one selects on its own; it does
+    // NOT prove the keying (measured: the old glyph key passed this too), only that nothing broke.
+    const CAT_SEL = 'nav[aria-label="Product categories"]'
+    const CAT_BTN = CAT_SEL + ' button'
+    const addedCats = 'for (const c of [[8, "monitors", "Monitors"], [9, "speakers", "Speakers"]]) window.__CATEGORIES.push({ id: "ffffffff-0000-4000-8000-00000000000" + c[0], slug: c[1], sort_order: c[0], is_active: true, category_translations: [{ id: "gggggggg-0000-4000-8000-00000000000" + c[0], locale: "en", name: c[2] }] });'
+    const newCatScript = await forNextDocument(addedCats)
+    await nav(new URL('/', appUrl).href)
+    await waitFor('document.querySelectorAll(' + JSON.stringify(CAT_BTN) + ').length === 8')
+    const added = await ev('(() => { const btns = [...document.querySelectorAll(' + JSON.stringify(CAT_BTN) + ')]; return { count: btns.length, last: (btns[btns.length - 1].textContent || "").trim(), marks: btns.slice(-2).map(b => { const s = b.querySelector("svg"); const bb = s ? s.getBBox() : null; return bb ? [Math.round(bb.width), Math.round(bb.height)] : null }) } })()')
+    // The rail is seven rows tall now, so the eighth row lives behind the scroll: bring it into view
+    // the way a visitor would, then aim at it.
+    await ev('(() => { const box = document.querySelector("[data-category-nav-scroll]"); box.scrollTop = box.scrollHeight; return true })()')
+    await sleep(120)
+    const lastAdded = (await ev(boxesExpr(CAT_BTN))).pop()
+    await clickAt(lastAdded.x, lastAdded.y)
+    // Selecting the *second* added category is the proof the two are separate rows: a shared key makes
+    // one of them either vanish or answer for the other.
+    const addedSelected = await waitFor('(() => { const sel = document.querySelector(' + JSON.stringify(CAT_SEL + ' [aria-selected="true"]') + '); return !!sel && (sel.textContent || "").trim() === "Speakers" && document.body.innerText.includes("No products match this view.") })()')
+    check('two added categories both reach the dock, each with its own mark and its own selection', !!added && added.count === 8 && added.last === 'Speakers' && added.marks.every(m => !!m && m[0] > 12 && m[1] > 12) && addedSelected, { added, addedSelected })
+    await clickByText(CAT_SEL + ' button', 'All categories', 'document.querySelectorAll("main article").length === ' + EXP.cards)
+    await park()
+    await stopForNextDocument(newCatScript)
+
+    // ---- how long a dock the shop can now build has to be -----------------------------------------
+    // Eighteen categories put the desktop nav's own bottom at 1204px inside a 900px viewport, and a
+    // `top`-only sticky element pins its top forever: everything past the fold was unreachable. So the
+    // nav bounds itself, and what proves that is reachability after scrolling it, plus no horizontal
+    // overflow at any of the widths the storefront is measured at.
+    const manyCats = 'for (let i = 0; i < 12; i++) window.__CATEGORIES.push({ id: "ffffffff-0000-4000-8000-000000000f" + (10 + i), slug: "cat-" + i, sort_order: 20 + i, is_active: true, category_translations: [{ id: "gggggggg-0000-4000-8000-000000000f" + (10 + i), locale: "en", name: "Category " + i }] });'
+    const manyScript = await forNextDocument(manyCats)
+    await nav(new URL('/', appUrl).href)
+    await waitFor('document.querySelectorAll(' + JSON.stringify(CAT_BTN) + ').length === 18')
+    const tall = await ev('(() => { const box = document.querySelector("[data-category-nav-scroll]"); const nav = document.querySelector(' + JSON.stringify(CAT_SEL) + '); const btns = [...nav.querySelectorAll("button")]; const last = btns[btns.length - 1]; window.scrollTo({ top: 700, behavior: "instant" }); box.scrollTop = 0; const before = last.getBoundingClientRect(); box.scrollTop = box.scrollHeight; const after = last.getBoundingClientRect(); return { items: btns.length, pinned: Math.round(box.getBoundingClientRect().top), scrolled: box.scrollHeight - box.clientHeight, unreachableBefore: before.bottom > innerHeight, reachableAfter: after.bottom <= innerHeight && after.top >= 0, overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    check('a long dock scrolls to its last category instead of pinning it below the fold', !!tall && tall.items === 18 && tall.pinned > 40 && tall.pinned < 120 && tall.scrolled > 100 && tall.unreachableBefore && tall.reachableAfter && tall.overflowX === 0, tall)
+    // The rail's scroll box must not become a guillotine: the selection pill scales past its row
+    // while an item is hovered or dragged, and at the first and last row that overhang lands on the
+    // clip edge. Select the last row, hover it, and measure the pill against the box.
+    const lastRow = (await ev(boxesExpr(CAT_BTN))).pop()
+    await clickAt(lastRow.x, lastRow.y)
+    await waitFor('!!document.querySelector(' + JSON.stringify(CAT_SEL + ' [aria-selected="true"]') + ')')
+    await mouse('mouseMoved', lastRow.x, lastRow.y)
+    await sleep(150)
+    // Held and dragged a little, which is when the pill is at its tallest: the row it mirrors scales,
+    // and the clip edge does not move.
+    await mouse('mousePressed', lastRow.x, lastRow.y, 1)
+    for (const step of [4, 8, 12]) { await mouse('mouseMoved', lastRow.x, lastRow.y - step, 1); await sleep(45) }
+    // The cap is expressed in rows, not viewport fractions, and this is the invariant that keeps it
+    // honest: at the scroll position the rail rests at, every row crossing the bottom edge must be
+    // fully inside the window — a row that is half in is a half-drawn icon.
+    const wholeRows = await ev('(() => { const box = document.querySelector("[data-category-nav-scroll]"); const b = box.getBoundingClientRect(); const pad = getComputedStyle(box); const top = b.top + parseFloat(pad.paddingTop); const bottom = b.bottom - parseFloat(pad.paddingBottom); const rows = [...document.querySelector(' + JSON.stringify(CAT_SEL) + ').querySelectorAll("button")].map(r => r.getBoundingClientRect()); const crossing = rows.filter(r => r.top < bottom - 0.5 && r.bottom > top + 0.5); const whole = crossing.filter(r => r.top >= top - 0.5 && r.bottom <= bottom + 0.5); return { crossing: crossing.length, whole: whole.length } })()')
+    check('the rail rests on whole rows — no half-drawn icon at its bottom edge', !!wholeRows && wholeRows.crossing === 7 && wholeRows.crossing === wholeRows.whole, wholeRows)
+    const pillFit = await ev('(() => { const box = document.querySelector("[data-category-nav-scroll]"); const pill = document.querySelector(' + JSON.stringify(CAT_SEL) + ').firstElementChild; const b = box.getBoundingClientRect(); const r = pill.getBoundingClientRect(); return { clipped: r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5 || r.left < b.left - 0.5 || r.right > b.right + 0.5, room: [Math.round(r.top - b.top), Math.round(b.bottom - r.bottom), Math.round(r.left - b.left), Math.round(b.right - r.right)] } })()')
+    await mouse('mouseReleased', lastRow.x, lastRow.y - 12)
+    await sleep(120)
+    check('the selection pill is never cut by the rail scroll box, held or dragging', !!pillFit && !pillFit.clipped, pillFit)
+
+    const narrowFaults = []
+    for (const w of [320, 390, 640]) {
+      await metrics(w, 844, true)
+      await nav(new URL('/', appUrl).href)
+      await waitFor('!!document.querySelector(' + JSON.stringify(CAT_SEL) + ')')
+      const over = await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')
+      if (over > 0) narrowFaults.push(w + 'px: ' + over + 'px of horizontal overflow')
+    }
+    check('eighteen categories do not widen the page at any narrow width', narrowFaults.length === 0, narrowFaults)
+    await stopForNextDocument(manyScript)
+    await metrics(1440, 900, false)
+    await nav(new URL('/', appUrl).href)
+    await waitFor('!!document.querySelector(' + JSON.stringify(CAT_SEL) + ')')
+    await park()
+
     const sortTrigger = (await ev('(() => { const el = [...document.querySelectorAll(\'button, [role="combobox"]\')].find(b => (b.textContent || "").includes("Newest")); const r = el.getBoundingClientRect(); return [{ x: r.left + r.width / 2, y: r.top + r.height / 2 }] })()'))[0]
     await clickAt(sortTrigger.x, sortTrigger.y)
     const priceLow = await clickByText('[role="option"], [role="listbox"] [data-slot="item"]', 'Price: low to high', 'true')
@@ -861,6 +943,30 @@ const run = async () => {
     await touch('touchEnd', [])
     check('mobile drag selects its target', await waitFor(`(document.querySelector(\'nav[aria-label="Mobile product categories"] [aria-selected="true"]\').textContent || "").trim() === ${JSON.stringify(mbox[3].t)}`), { want: mbox[3].t })
 
+    // The bar no longer relies on tapping the last item to cycle: a long list overflows the
+    // phone-width bar, and dragging a category into the right edge must pan it. Seed the overflow,
+    // then prove the drag actually moved scrollLeft (the in-view drag-select check above never
+    // reaches an edge, so it cannot cover this).
+    const mobileMany = 'for (let i = 0; i < 12; i++) window.__CATEGORIES.push({ id: "ffffffff-0000-4000-8000-000000000e" + (10 + i), slug: "mcat-" + i, sort_order: 30 + i, is_active: true, category_translations: [{ id: "gggggggg-0000-4000-8000-000000000e" + (10 + i), locale: "en", name: "MCategory " + i }] });'
+    const mobileManyScript = await forNextDocument(mobileMany)
+    await metrics(390, 844, true)
+    await nav(new URL('/', appUrl).href)
+    await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(600)
+    if (!await waitFor(barOff + ' < -2', 4000)) check('mobile dock is back before edge-dragging', false)
+    const mOver = await ev('(() => { const nav = document.querySelector(\'nav[aria-label="Mobile product categories"]\'); return { o: nav.scrollWidth - nav.clientWidth, sl: nav.scrollLeft } })()')
+    const mEdge = await ev('(() => { const r = document.querySelector(\'nav[aria-label="Mobile product categories"]\').getBoundingClientRect(); return { right: r.right } })()')
+    const mbox2 = await ev(boxesExpr('nav[aria-label="Mobile product categories"] button'))
+    await touch('touchStart', [{ x: mbox2[0].x, y: mbox2[0].y }])
+    for (let i = 1; i <= 10; i++) { await touch('touchMove', [{ x: mbox2[0].x + (mEdge.right - 6 - mbox2[0].x) * i / 10, y: mbox2[0].y }]); await sleep(30) }
+    for (let i = 0; i < 6; i++) { await touch('touchMove', [{ x: mEdge.right - 4, y: mbox2[0].y }]); await sleep(30) }
+    const mScrolled = await ev('document.querySelector(\'nav[aria-label="Mobile product categories"]\').scrollLeft')
+    await touch('touchEnd', [])
+    check('dragging a mobile category to the right edge pans the overflowing bar', mOver.o > 40 && mScrolled > mOver.sl + 20, { overflow: mOver.o, before: mOver.sl, after: mScrolled })
+    check('the tab icon is the logo, scoped to the browser theme', await ev(`!!document.querySelector('link[rel="icon"][media*="light"][href="/favicon-light.png"]') && !!document.querySelector('link[rel="icon"][media*="dark"][href="/favicon-dark.png"]')`))
+    await stopForNextDocument(mobileManyScript)
+    await metrics(1440, 900, false)
+    await nav(new URL('/', appUrl).href)
+
     // detail pages: every stored specification shape
     await metrics(1440, 900, false)
     for (const id of Object.keys(EXP.specRows)) {
@@ -885,6 +991,21 @@ const run = async () => {
     const winJson = () => ev(WINDOW).then(w => JSON.stringify(w))
     const detailUrl = id => new URL('/products/' + id, appUrl).href
     const pathnameIs = id => `location.pathname === '/products/${id}'`
+
+    // SPA navigation into a detail page — the path every direct-URL mount below skips. The first
+    // photo must be on-frame at rest, not left a full width to the right (clipped by the frame's
+    // overflow-hidden) by an enter animation that only completes when frames are produced. This is
+    // the regression the inline <motion.img> carried: it started at initial={x:'100%'} and relied on
+    // its enter animation to slide back, so when that animation never ran (SPA nav / an interrupted
+    // or backgrounded frame) the photo stayed off-frame until a reload. `:initial="false"` fixes it.
+    await metrics(1440, 900, false)
+    await nav(appUrl)
+    await waitFor('!!document.querySelector(\'a[href^="/products/"]\')')
+    await ev('(() => { document.querySelector(\'a[href^="/products/"]\').click(); return true })()')
+    await waitFor('location.pathname.startsWith("/products/")')
+    await waitFor('!!document.querySelector(\'[data-gallery-main]\')')
+    const spaFirst = await ev('(() => { const i = document.querySelector(\'[data-gallery-main]\'); const b = document.querySelector(\'[data-gallery-zoom]\'); if (!i || !b) return null; const r = i.getBoundingClientRect(); const s = b.parentElement.getBoundingClientRect(); return { vis: +(Math.max(0, Math.min(r.right, s.right) - Math.max(r.left, s.left)) / r.width).toFixed(2), tf: getComputedStyle(i).transform } })()')
+    check('the first photo is on-frame after navigating from the storefront', !!spaFirst && spaFirst.vis > 0.9 && (spaFirst.tf === 'none' || spaFirst.tf === 'matrix(1, 0, 0, 1, 0, 0)'), spaFirst)
 
     await nav(detailUrl(G.manyId))
     if (!await waitFor('!!document.querySelector(\'[data-product-gallery]\')')) check('product gallery mounts', false)
@@ -2293,10 +2414,78 @@ const run = async () => {
     check('delete issues exactly one DELETE on the product row', delW.length === 1 && delW[0].method === 'DELETE' && delW[0].p === '/rest/v1/products' && /^id=eq[.]/.test(delW[0].q), seqOf(delW))
     check('no error alert surfaced by any admin flow', !(await ev('document.body.innerText.includes("could not be")')))
 
+    // --- category editor: open, seed, rename, add, reorder, save, delete ---
+    // The order is not a field: the list's position is the order, and saving rewrites `sort_order`
+    // from it, so the assert reads the numbers the rows were patched with rather than a box an owner
+    // could leave disagreeing with the list.
+    const CAT_FORM = '[data-category-form]'
+    // One header entry for the admin tools, then the tab strip moves between the editors. Each tool is
+    // still its own page, so the flow asserts the route changed, not just that something rendered.
+    check('the admin tools button opens the editors', await clickByText('header button', 'Admin tools', `location.pathname === "/admin/site-info" && !!document.querySelector('[data-admin-tabs]')`))
+    check('the Categories tab is the current one only on its own page', await ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")]; const on = tabs.filter(t => t.getAttribute("aria-current") === "page"); return tabs.length === 2 && on.length === 1 && on[0].getAttribute("data-admin-tab") === "site-info" })()'))
+    await clickSelector('[data-admin-tab="categories"]', `location.pathname === "/admin/categories" && !!document.querySelector('${CAT_FORM}')`)
+    check('the Categories tab opens the category editor', await ev(`!!document.querySelector('${CAT_FORM}')`))
+    const catSeed = await ev('(() => { const f = document.querySelector(' + JSON.stringify(CAT_FORM) + '); if (!f) return null; const rows = [...f.querySelectorAll("[data-category-row]")]; const val = (r, k) => { const el = r.querySelector(k); return el ? el.value : null }; return { rows: rows.length, names: rows.map(r => val(r, "[data-category-en]")), slugs: rows.map(r => val(r, "[data-category-slug]")), on: rows.map(r => r.querySelector("[data-category-active]").getAttribute("aria-checked")) } })()')
+    check('category editor seeds every stored row with both names and its visibility', !!catSeed && catSeed.rows === 5 && catSeed.names[0] === 'Controllers' && catSeed.slugs.join(',') === 'controllers,keyboards,mice,headphones,earphones' && catSeed.on.every(v => v === 'true'), catSeed)
+    await ev(setInput('[data-category-en="4"]', 'Earphones Renamed'))
+    await clickByText(CAT_FORM + ' button', 'Add category', 'document.querySelectorAll("[data-category-row]").length === 6')
+    await ev(setInput('[data-category-en="5"]', 'Monitors'))
+    // Move the new row up one: position five, so its stored order must come out as 5 and not 6.
+    await clickSelector(CAT_FORM + ' [data-category-up="5"]', '(() => { const rows = document.querySelectorAll("[data-category-row]"); return (rows[4].textContent || "").includes("Monitors") })()')
+    await resetW()
+    await clickByText(CAT_FORM + ' button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Categories saved")')
+    const catW = await writes()
+    const catPatches = catW.filter(w => w.method === 'PATCH' && w.p === '/rest/v1/categories')
+    const catInsert = JSON.parse(catW.find(w => w.method === 'POST' && w.p === '/rest/v1/categories')?.body || '{}')
+    const catTrans = catW.filter(w => w.method === 'POST' && w.p === '/rest/v1/category_translations').map(w => JSON.parse(w.body || '[]')).flat()
+    check('one save writes every category row and both locale names per row', catPatches.length === 5 && catTrans.filter(entry => entry.locale === 'en').length === 6 && catTrans.some(entry => entry.name === 'Earphones Renamed') && catTrans.some(entry => entry.name === 'Monitors' && entry.locale === 'en'), { patches: catPatches.length, translations: catTrans })
+    check('position in the list is the stored order, and the moved row takes its place not the end', catInsert.slug === 'monitors' && catInsert.sort_order === 5 && catInsert.is_active === true && catPatches.map(p => JSON.parse(p.body).sort_order).join(',') === '1,2,3,4,6', { catInsert, orders: catPatches.map(p => JSON.parse(p.body).sort_order) })
+    // The save reloads from the stub, which answers GETs from its fixture rows and keeps nothing an
+    // admin flow writes (only `site_settings` is mutable in-stub) — so the created category is gone
+    // again here and the list is the stored five. What this step proves is the row's own delete: one
+    // DELETE on the id it was loaded with, and the row leaving the list.
+    await resetW()
+    await clickSelector(CAT_FORM + ' [data-category-remove="4"]', 'document.querySelectorAll("[data-category-row]").length === 4')
+    const catDeleteW = await writes()
+    check('a stored category\'s delete is one DELETE on its own row, and it leaves the list', catDeleteW.length === 1 && catDeleteW[0].method === 'DELETE' && catDeleteW[0].p === '/rest/v1/categories' && /^id=eq[.]/.test(catDeleteW[0].q), seqOf(catDeleteW))
+    // A name the owner erases has to leave the database. An upsert only writes what is there, so a
+    // stored Khmer name that is now blank would keep showing in the dock forever — and the stub does
+    // not persist writes, which is why the stored value comes from the fixture row, not from an
+    // earlier save in this flow.
+    await resetW()
+    await ev(setInput('[data-category-km="0"]', ''))
+    await clickByText(CAT_FORM + ' button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Categories saved")')
+    const clearedW = await writes()
+    const clearedDeletes = clearedW.filter(w => w.method === 'DELETE' && w.p === '/rest/v1/category_translations')
+    check('erasing a stored Khmer name deletes that translation row instead of leaving it live', clearedDeletes.length === 1 && /locale=eq[.]km/.test(clearedDeletes[0].q) && /category_id=eq[.]/.test(clearedDeletes[0].q), seqOf(clearedW))
+
+    // Two rows that resolve to the same slug have to fail before the first write. The save loop is not
+    // a transaction, so discovering the collision mid-loop would leave a half-saved dock order.
+    // The list was reloaded by the save above, so it is the stored five again and the two new rows
+    // are indices 5 and 6. Each Add waits for the count it should produce, and the refusal is asserted
+    // by its message as well as by the absence of writes — an off-by-one here used to trip the *other*
+    // guard (an empty row) and still satisfy a check that only counted requests.
+    await clickByText(CAT_FORM + ' button', 'Add category', 'document.querySelectorAll("[data-category-row]").length === 6')
+    await ev(setInput('[data-category-en="5"]', 'Duplicate Test'))
+    await clickByText(CAT_FORM + ' button', 'Add category', 'document.querySelectorAll("[data-category-row]").length === 7')
+    await ev(setInput('[data-category-en="6"]', 'Duplicate Test'))
+    await resetW()
+    await clickByText(CAT_FORM + ' button[type="submit"]', 'Save changes', 'document.body.textContent.includes("same slug")')
+    const dupW = await writes()
+    check('a duplicate slug is refused before anything is written', dupW.length === 0 && await ev('document.body.textContent.includes("Two categories ended up with the same slug")'), { seq: seqOf(dupW) })
+
+    // The rail must be a sidebar beside the tool — an eyebrow over a vertical column, to the left of
+    // the form — because that is the shape the storefront's category sidebar taught the owner.
+    const railShape = contentSel => ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")].map(t => t.getBoundingClientRect()); const content = document.querySelector(' + JSON.stringify(contentSel) + '); if (tabs.length !== 2 || !content) return null; const c = content.getBoundingClientRect(); return { stacked: tabs[1].top >= tabs[0].bottom - 0.5, leftOfContent: tabs[0].right <= c.left + 0.5 } })()')
+    const catRail = await railShape(CAT_FORM)
+    check('the admin tools rail is a sidebar beside the category editor', !!catRail && catRail.stacked && catRail.leftOfContent, catRail)
+
     // --- site info editor: open, seed, edit, add/toggle/reorder/remove links, save, reflect ---
     const SI = FIXTURES.siteSettings
     const SITE_FORM = '[data-site-info-form]'
-    check('site info editor opens from the header', await clickByText('header button', 'Site info', `location.pathname === "/admin/site-info" && !!document.querySelector('${SITE_FORM}')`))
+    check('the Site info tab opens the site-info editor', await clickSelector('[data-admin-tab="site-info"]', `location.pathname === "/admin/site-info" && !!document.querySelector('${SITE_FORM}')`))
+    const siteRail = await railShape(SITE_FORM)
+    check('the same rail heads the site-info tool too', !!siteRail && siteRail.stacked && siteRail.leftOfContent, siteRail)
     const seed = await ev('(() => { const f = document.querySelector(' + JSON.stringify(SITE_FORM) + '); if (!f) return null; const v = (k) => (f.querySelector("[data-field=" + k + "]") || {}).value; return { phone: v("phone"), url: v("location-url"), en: v("location-en"), km: v("location-km"), rows: f.querySelectorAll("[data-social-row]").length } })()')
     check('editor seeds every stored value, disabled links included', !!seed && seed.phone === SI.phone && seed.url === SI.location_url && seed.en === 'Phnom Penh, Cambodia' && seed.km === 'ភ្នំពេញ កម្ពុជា' && seed.rows === 3, seed)
     await ev(setInput('[data-field=phone]', '+855 99 888 777'))
@@ -2350,6 +2539,8 @@ const run = async () => {
     check('editor reloads the saved row', await waitFor('document.querySelectorAll("[data-social-row]").length === 3'))
     await ev('document.querySelector("main header a")?.click(); true')
     check('public header reflects the saved values', await waitFor('location.pathname === "/" && document.querySelector("header a[data-site-phone]")?.getAttribute("href") === "tel:+85599888777" && document.querySelector("header a[data-site-location]")?.getAttribute("href") === "https://maps.example/hq" && [...document.querySelectorAll("header a[data-site-social]")].map(a => a.getAttribute("data-platform")).join() === "youtube,tiktok"'))
+
+    check('back on the catalog, the dock is the stored five again', await waitFor('document.querySelectorAll(' + JSON.stringify('nav[aria-label="Product categories"] button') + ').length === 6'))
     // Every enabled platform must land on its own mark rather than the globe stand-in. TikTok is
     // the one that used to render as a generic music icon; youtube is asserted by name because it
     // is the platform the site owner asks for by name.

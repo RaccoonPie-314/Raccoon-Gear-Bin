@@ -247,26 +247,36 @@
     {
       "id": "cccccccc-0000-4000-8000-0000000000c01",
       "slug": "controllers",
-      "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000304", "locale": "en", "name": "Controllers" }]
+      "sort_order": 1,
+      "is_active": true,
+      "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000304", "locale": "en", "name": "Controllers" }, { "id": "ffffffff-0000-4000-8000-000000000309", "locale": "km", "name": "គ្លឰរង៏ដំᜇ" }]
     },
     {
       "id": "cccccccc-0000-4000-8000-0000000000k01",
       "slug": "keyboards",
+      "sort_order": 2,
+      "is_active": true,
       "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000301", "locale": "en", "name": "Keyboards" }]
     },
     {
       "id": "cccccccc-0000-4000-8000-0000000000m01",
       "slug": "mice",
+      "sort_order": 3,
+      "is_active": true,
       "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000302", "locale": "en", "name": "Mice" }]
     },
     {
       "id": "cccccccc-0000-4000-8000-0000000000h01",
       "slug": "headphones",
+      "sort_order": 4,
+      "is_active": true,
       "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000303", "locale": "en", "name": "Headphones" }]
     },
     {
       "id": "cccccccc-0000-4000-8000-0000000000e01",
       "slug": "earphones",
+      "sort_order": 5,
+      "is_active": true,
       "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000305", "locale": "en", "name": "Earphones" }]
     }
   ],

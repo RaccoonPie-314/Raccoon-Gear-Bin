@@ -10,11 +10,13 @@ works, and before extending `scripts/verify-ui.mjs`.
 | `bun install` | Deps resolve against the committed `bun.lock`. |
 | `bun run build` (`nuxt build`) | It compiled. It does not start the app, does not type-check, and says nothing about the tuned interactions or the admin write path. CI runs this **and** `bun run verify` on every push. |
 | `bun run verify` (`node scripts/verify-ui.mjs`) | The tuned interactions, the conversion flow and the whole admin flow still behave, measured in a real browser against a stubbed backend. A CI gate since 2026-09-28: `.github/workflows/ci.yml` runs it after Build with `CHROME_PATH=/usr/bin/google-chrome` and Node 24 (the harness needs global `WebSocket`; Bun's bundled Node is older). |
-| `./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit` | `.ts` files only. `tsc` cannot parse `.vue`, so **template bindings are unchecked** — re-read the IDE language server's diagnostics after editing a `<template>`. |
+| `./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit` | `.ts` files only. `tsc` cannot parse `.vue`. |
+| `bun run typecheck` (`nuxt typecheck` → vue-tsc) | Template bindings too: a mistyped prop or missing variable in a `.vue` template fails on it (verified 2026-09-30 by mistyping `<StockStatus :quantity>` — caught as `ProductCard.vue(60,8)`). Not a CI gate (it adds wall time and currently exits non-zero on pre-existing script-side typing errors in `app.config.ts`, `nuxt.config.ts` and `[id].vue`'s `useHead` meta). Treat new template-binding errors it reports as real. |
 
-There is **no test suite and no template typecheck — in CI or anywhere else** (verified
-2026-09-28: Nuxt 4.5.2 ships no `typecheck` route and `vue-tsc` is not a dependency — checking
-templates would mean adding it). CI runs build + lint + verify on every push; `bun run lint`
+There is **no test suite**. Template bindings ARE mechanically checked by `bun run typecheck`
+(vue-tsc, added 2026-09-30 — the 2026-09-28 note that no route existed is obsolete: `nuxt
+typecheck` works once `vue-tsc` is a devDependency). CI runs build + lint + verify on every
+push; `bun run lint`
 fails only on new hard errors (the pre-existing debt — 17 `any` casts, custom-class warnings — is
 documented in `eslint.config.mjs`; the `no-explicit-any` rule being off does **not** relax
 AGENTS.md's Supabase `as any` prohibition, which stays a review rule). Run `bun run verify`
@@ -34,14 +36,23 @@ nothing can be written.** If a select string changes shape, the harness fails lo
 Covered (this list is the shape of the run, not its check count — the run prints
 `N/M checks passed` itself, and hand-kept totals in docs drift out of date):
 
-- **Tuned interactions**: category drag, indicator snap and its 260ms curve, the magnification
+- **Tuned interactions**: category drag, indicator snap and its 260ms curve, the mobile bar's
+  edge auto-scroll (a long list overflows the phone-width bar and dragging into the right edge must
+  move `scrollLeft` — the in-view drag-select check never reaches an edge so it cannot cover this),
+  the magnification
   profile, scroll reveal, the spotlight morph, the scroll-collapse field↔launcher flight in both
   directions including a mid-flight reversal, and never more than one interactive search control.
 - **Masthead**: its two levels and the emblem height step at five widths; contact line above the
   brand row; phone and location on their own margins; socials stacked under the utility line;
   icon-only socials; no collision; no horizontal overflow.
 - **Detail page**: photo carousel (bounded strip window, one-slot advance on adjacent selection,
-  wrapping and hover-gated arrows), the shared-state lightbox and its **click-to-zoom** (the enlarged
+  wrapping and hover-gated arrows), and — reached by **clicking a card from the storefront**, not a
+  direct URL, because every other gallery check mounts the page in isolation and an isolated mount
+  never exercises the SPA enter path — the **first main photo is asserted on-frame** (its rect inside
+  the frame, `transform: none`): it used to start at `x:'100%'` and lean on its enter animation to
+  return, so a skipped/interrupted frame left it clipped to a sliver until reload. The fix is
+  `:initial="false"`; note the interrupted-frame path itself is not forceable in CI, so this locks the
+  settled invariant rather than reproducing the glitch. The detail page also carries the shared-state lightbox and its **click-to-zoom** (the enlarged
   photo is the control: the clicked point stays anchored, two different points give two different
   focal points, the pan stops at the photo's own bound, and the zoom resets on photo change and on
   close — measured with a mouse and with touch), the stock band on every card read
@@ -72,6 +83,30 @@ Covered (this list is the shape of the run, not its check count — the run prin
   cut is real, never overlapping the gallery's prev arrow, and `pointer-events: none` with a hit-test at
   its centre landing on what sits under it. A card that grew a second
   `p.tabular-nums` would break the sort check's selector, so the pair count is asserted alongside.
+- **Categories**: on the storefront side, categories appended to the stub's own `window.__CATEGORIES`
+  before the app boots must join the dock, draw their marks (`getBBox`, not DOM presence) and filter
+  the grid to their own empty state — the check that proves the dock is built from the rows and not a
+  hardcoded list, and it appends **two** unknown-slug rows on purpose: they share the one fallback
+  glyph, so a list keyed on the glyph instead of the row collapses them into one button. Eighteen
+  categories then have to stay reachable — the nav must be a scroll box that can bring the last row
+  into the viewport once the rail is stuck, with no horizontal overflow at 320 / 390 / 640. On the
+  admin side, the editor seeds every stored row (both names, the slug, the visibility switch), one
+  save issues a PATCH per stored row plus one INSERT for the new one, the translations POST carries
+  both locales, `sort_order` comes out as the row's position in the list, the trash button is exactly
+  one `DELETE …?id=eq.…` that also removes the row, erasing a stored Khmer name issues the matching
+  `DELETE …&locale=eq.km`, and a duplicate slug is refused with **zero** writes and its own message —
+  asserting only the empty write list let an off-by-one row index trip the *other* guard and still pass.
+- **Tab icon**: the two `media="(prefers-color-scheme: …)"` logo `<link rel="icon">` tags are asserted
+  present in the head — the theme swap is native config with no JS, so a typo in an `href` or `media`
+  would render the wrong icon silently.
+- **The rail's scroll box and the admin rail**: with eighteen categories the desktop nav must scroll the
+  last row into view once the sticky rail is stuck, must rest on **whole rows** (7 crossing the window,
+  7 fully inside — a row half in is a half-drawn icon), and the selection pill must stay fully inside the
+  clip box **while held and dragged** (it scales ~25px past its row — this is what caught the first
+  version of the scroll box chopping the pill's rounded ends). On the admin side, one header button opens
+  the tools, each `[data-admin-tab]` moves to its own page, only the tab whose route is on screen carries
+  `aria-current="page"`, and on **both** tool pages the rail is measured as a sidebar: the two entries
+  stacked vertically, entirely to the left of the form.
 - **Admin flow**: login, add, image upload, save/update, cancel, delete, the site-info editor
   (seed, field edits, link add/toggle/reorder/remove, the singleton upsert body, and the public
   header reflecting it), logout.

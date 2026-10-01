@@ -48,3 +48,16 @@ export interface CatalogCategory {
   name: string
   slug?: string
 }
+
+/**
+ * The admin editor's view of a category row: everything the public list resolves away — both
+ * locales' names, the sort number and whether the shop has hidden it. A locale with no stored row is
+ * simply absent from `names`, which is what the public view's English fallback reads.
+ */
+export interface CatalogCategoryDraft {
+  id: string
+  slug: string
+  sortOrder: number
+  isActive: boolean
+  names: Record<string, string>
+}

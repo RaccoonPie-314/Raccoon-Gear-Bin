@@ -61,15 +61,6 @@ export const sheet = {
 } as const
 
 /**
- * `popover` — the desktop anchored popover (the Share Sheet's desktop shape), unfolding on `scaleY`
- * out of whichever edge faces the trigger. A touch stiffer than the sheet (a smaller, faster surface)
- * but equally restrained — no overshoot.
- */
-export const popover = {
-  transition: { type: 'spring', stiffness: 380, damping: 34 }
-} as const
-
-/**
  * `lightbox` — the full-screen photo dialog's entry/exit. Opacity only, never transform:
  * the zoom maths reads the enlarged `<img>`'s and its frame's untransformed rects, and a
  * scaled/translated ancestor of that image would corrupt the focal-point geometry mid-flight
@@ -143,12 +134,29 @@ export const copyPop = {
 } as const
 
 /**
- * `applePop` — iOS / macOS popover spring physics (Phase H). The Contact-to-Order panel blooms from
- * a slightly-shrunk, offset state to full size on a uniform scale (no X/Y stretch, so the textarea
- * and channel pills never distort), then settles with a crisp cushion. The exit is a short, sharp
- * ease-in fade+shrink — a popover leaving is quicker than arriving, and never springs.
+ * `applePop` — the iOS / macOS menu bloom (Phase H), and the single owner of what that bloom *is*.
+ *
+ * A surface hangs off the control that opened it, so it starts slightly shrunk and pulled toward that
+ * control, then settles to full size on a UNIFORM scale — no X/Y stretch, so a textarea or a channel
+ * pill never distorts mid-pop. `below` / `above` name where the surface sits relative to its trigger,
+ * which is also which edge `transform-origin` belongs to; the offset always points back at the trigger
+ * (-8px for a menu dropping out of a button, +10px for one rising out of the bar).
+ *
+ * Opacity is deliberately NOT on the spring. It rides its own short curve (`opacity.in` / `.out`) so
+ * the text is legible on the shrunk first frames while the transform stays interruptible — and the
+ * exit is a shorter travel on a sharp ease-in, because a menu leaving is quicker than arriving and
+ * never springs.
+ *
+ * Two surfaces read it: the Contact-to-Order panel (`ProductActions`) and the Share Sheet's desktop
+ * popover (`ProductShareSheet`). Both are menus opening from a control, so both get the same numbers
+ * from the same place — that is the point of the preset. The phone sheet stays on `sheet`: it is a
+ * dragged gesture surface, so its spring has to carry release velocity.
  */
 export const applePop = {
+  rest: 'scale(1) translateY(0px)',
+  below: { from: 'scale(0.93) translateY(-8px)', to: 'scale(0.95) translateY(-4px)' },
+  above: { from: 'scale(0.94) translateY(10px)', to: 'scale(0.96) translateY(6px)' },
   transition: { type: 'spring', stiffness: 400, damping: 26, mass: 0.8 },
-  exit: { duration: 0.16, ease: [0.32, 0, 0.67, 0] }
+  exit: { duration: 0.16, ease: [0.32, 0, 0.67, 0] },
+  opacity: { in: { duration: 0.18, ease: 'easeOut' }, out: { duration: 0.14, ease: 'easeIn' } }
 } as const

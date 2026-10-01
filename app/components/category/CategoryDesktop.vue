@@ -388,10 +388,14 @@ watch(computedItems, () => {
       }"
     />
 
-    <!-- Desktop Category Buttons -->
+    <!-- `item.value` and not `item.key`: the key is the *glyph* name, and every category outside the
+         original five shares the `other` glyph, so two added categories mount two buttons under one
+         key. Measured on the old key, both still render and both stay selectable — what a duplicate
+         key actually costs is Vue's dev warning and a diff that is undefined for the list *changing*
+         in place, which is exactly what a refetch or an HMR patch does to a dock that can now grow. -->
     <motion.button
       v-for="(item, index) in computedItems"
-      :key="`desktop-${item.key}`"
+      :key="`desktop-${item.value}`"
       :ref="(el) => setDesktopItemRef(el, index)"
       type="button"
       role="tab"

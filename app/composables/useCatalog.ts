@@ -1,11 +1,15 @@
 import type { Database } from '~/types/database'
-import type { CatalogCategory, CatalogProduct, CatalogSpecification } from '~/types/catalog'
+import type { CatalogCategory, CatalogCategoryDraft, CatalogProduct, CatalogSpecification } from '~/types/catalog'
 
 // The select strings have to stay inline literals: supabase-js infers the result type by
 // parsing the query text, so building one at runtime (join/concat/template) degrades every
 // row to `any`.
 const PRODUCT_SELECT = 'id, category_id, slug, sku, price, currency, stock_quantity, status, promo_price, promo_label, promo_quantity, promo_starts_at, promo_ends_at, product_translations(id, locale, name, short_description, description, specifications), product_images(id, storage_path, alt_text, sort_order), categories(id, slug, category_translations(id, locale, name))'
 const CATEGORY_SELECT = 'id, slug, category_translations(id, locale, name)'
+// The admin's second view of the same table: inactive rows are included (the shop has to be able to
+// bring one back, and RLS is what decides that this visitor may read them), and no locale is picked
+// away, because the editor writes both names at once.
+const CATEGORY_DRAFT_SELECT = 'id, slug, sort_order, is_active, category_translations(locale, name)'
 
 const FALLBACK_LOCALE = 'en'
 
@@ -33,12 +37,14 @@ export const useCatalog = () => {
 
   const productsQuery = () => supabase.from('products').select(PRODUCT_SELECT)
   const categoriesQuery = () => supabase.from('categories').select(CATEGORY_SELECT)
+  const categoryDraftsQuery = () => supabase.from('categories').select(CATEGORY_DRAFT_SELECT)
 
   // Row types are derived from the queries themselves rather than hand-written, so removing
   // a column from a select breaks the mapper at compile time instead of handing the view an
   // `undefined` that happens to be unread today.
   type ProductRow = Exclude<Awaited<ReturnType<typeof productsQuery>>['data'], null>[number]
   type CategoryRow = Exclude<Awaited<ReturnType<typeof categoriesQuery>>['data'], null>[number]
+  type CategoryDraftRow = Exclude<Awaited<ReturnType<typeof categoryDraftsQuery>>['data'], null>[number]
 
   const publicImageUrl = (storagePath: string) => {
     if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath
@@ -95,6 +101,15 @@ export const useCatalog = () => {
     slug: category.slug
   })
 
+  /** Admin-facing: every row the shop can edit, with each locale's name kept separate. */
+  const mapCategoryDraft = (category: CategoryDraftRow): CatalogCategoryDraft => ({
+    id: category.id,
+    slug: category.slug,
+    sortOrder: category.sort_order,
+    isActive: category.is_active,
+    names: Object.fromEntries((category.category_translations || []).map((translation) => [translation.locale, translation.name]))
+  })
+
   /** Editor-facing: JSON, or one `label: value` pair per line, into the stored jsonb shape. */
   function parseSpecifications(value: string): SpecificationsColumn {
     if (!value.trim()) return []
@@ -149,11 +164,22 @@ export const useCatalog = () => {
     return (data || []).map(mapCategory)
   }
 
+  /**
+   * Admin-facing categories: unfiltered by `is_active`, ordered by the shop's own `sort_order`, and
+   * with every locale's name intact. This stays the only place a `categories` row is read besides
+   * `fetchCategories`, which is the same table's public view.
+   */
+  const fetchCategoryDrafts = async (): Promise<CatalogCategoryDraft[]> => {
+    const { data, error } = await categoryDraftsQuery().order('sort_order')
+    if (error) throw error
+    return (data || []).map(mapCategoryDraft)
+  }
+
   /** Everything the catalog landing page needs, in one round-trip pair. */
   const fetchCatalog = async () => {
     const [products, categories] = await Promise.all([fetchProducts(), fetchCategories()])
     return { products, categories }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, parseSpecifications, parseSpecificationPairs, pickTranslation }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation }
 }
