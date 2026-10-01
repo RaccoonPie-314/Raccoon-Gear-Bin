@@ -410,7 +410,7 @@ Keep the split where it reflects a genuinely different input model:
 | Duplicated on purpose, or since shared | State |
 |---|---|
 | Category item model + active matching | shared since Phase 2 — `useCategoryItems.ts`. The list is the shop's own `categories` rows in `sort_order` plus the virtual `all`; it used to be a hardcoded six, which left any category the admin added unreachable from the storefront. Both docks iterate it and measure whatever arrives, which is why the list can change length without touching either input model |
-| The category glyphs | shared since Phase 2 — `CategoryIcon.vue`. Six bespoke marks plus the crate fallback every unrecognised slug falls through to; a category is not required to have bespoke art to be navigable |
+| The category glyphs | shared since Phase 2 — `CategoryIcon.vue`. Twenty bespoke marks drawn on one 24-unit grid at one stroke weight (peripherals, whole machines, the parts inside them, plug-ins) plus the crate fallback every unrecognised slug falls through to; a category is not required to have bespoke art to be navigable. `useCategoryItems`' `ICON_BY_SLUG` is the only matcher and `categoryIconOf` is its only reader, so the admin's icon picker and the two docks cannot disagree |
 | Scroll-direction hide/show rule (`60` / `6`) | rule shared since Phase 3 — `useScrollReveal.ts`, used by `CategoryMobile`. `SearchDock` still carries its own copy: its scroll pass is interleaved with the morph/collapse logic and the component is hands-off (see Known gaps) |
 | Indicator geometry scaffolding (observers, `fonts.ready`, watches) | deliberately **not** extracted. The two components observe different elements and write different geometry; only the shape of the code looks alike |
 
@@ -678,8 +678,12 @@ surface should match the logo.
 - A new category → data only: a row in the Categories admin page (`/admin/categories`). Its name is
   stored per locale, the storefront dock picks it up from the rows, and a slug the shop already knows
   keeps its own glyph while anything else takes the crate mark. No migration, no component edit.
-  A new *glyph* is one entry in `useCategoryItems`' `ICON_BY_SLUG` plus one `<template>` in
-  `CategoryIcon.vue`; there is deliberately no per-category icon column.
+  The row's **Icon select is the slug field's other end** — it writes the slug, because the slug is what
+  the glyph is matched on and there is deliberately no per-category icon column. Its leading glyph is
+  live, so typing a slug in the Slug box repaints the preview without picking anything.
+  A new *glyph* is one entry in `useCategoryItems`' `ICON_BY_SLUG` (the key becomes the offered slug) and
+  one `<template>` in `CategoryIcon.vue`; no icon dependency is installed for it — the marks are inline
+  paths, the same as `SocialBrandIcon.vue`'s platform marks.
 - A new social platform → data only: a row in the Site Info editor. The header and the contact rows
   render a known mark or a globe fallback for anything else; making the fallback a real mark is one
   entry in `SocialBrandIcon.vue`'s `BRAND_ICONS`, never a schema or composable change. Deciding
@@ -857,7 +861,11 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   tall against a 900px viewport, which a `top`-only sticky rail cannot recover. The save is one write
   per row plus one per locale set (≈ 2N+1 round-trips, validated for duplicates *before* the first
   write, so a rejected save writes nothing); batch it when a save is visibly slow, and note that the
-  loop is still not a transaction across those statements.
+  loop is still not a transaction across those statements. The icon picker is the same trade the column
+  would have cost, kept in the data instead of the schema: one glyph per slug means **two categories
+cannot wear the same bespoke mark** (only one row can hold `gpu`), and a slug renamed away from a key
+  loses its art — which is why the row shows the mark while it is edited. Give it its own column when
+  two categories genuinely need the same glyph, and accept the migration that comes with it.
 - **Hiding a category is not the same as emptying it.** `is_active = false` also removes the row from
   every product's embedded `categories` object, because the public RLS policy filters the embed — so
   those cards fall back to "Uncategorized" while still filtering correctly by id. The harness cannot

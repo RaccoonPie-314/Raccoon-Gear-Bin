@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { CATEGORY_ICON_ITEMS, categoryIconOf } from '~/composables/useCategoryItems'
+
 const user = useSupabaseUser()
 const { isAdmin } = useAdminAuth()
 const { locale, t } = useI18n()
@@ -111,6 +113,23 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                        what the shop means when it says "monitors". Left empty, the save derives it from the
                        English name. -->
                   <UInput v-model="row.slug" :placeholder="t('slug')" class="w-full min-w-0 sm:w-36" :data-category-slug="index" />
+                  <!-- The dock matches a category's mark on its slug, so the icon picker is the slug
+                       field's other end: choosing a mark writes the slug, and the glyph in the trigger
+                       is what the storefront will draw. The options are the slugs that have art, shown
+                       as themselves — a technical name the Khmer UI keeps in Latin like `Slug` and `SKU`.
+                       A slug with no art reads as unselected and wears the crate. -->
+                  <USelect
+                    :model-value="row.slug"
+                    :items="CATEGORY_ICON_ITEMS"
+                    :placeholder="t('categoryIconLabel')"
+                    class="w-full min-w-0 sm:w-36"
+                    :data-category-icon="index"
+                    @update:model-value="row.slug = String($event ?? '')"
+                  >
+                    <template #leading>
+                      <CategoryIcon :name="categoryIconOf(row.slug)" class="h-4.5 w-4.5 text-zinc-500 dark:text-zinc-400" />
+                    </template>
+                  </USelect>
                   <span class="flex shrink-0 items-center gap-2">
                     <USwitch v-model="row.isActive" color="neutral" :aria-label="t('categoryVisibleLabel')" :title="t('categoryVisibleLabel')" class="shrink-0" :data-category-active="index" />
                     <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('categoryVisibleLabel') }}</span>

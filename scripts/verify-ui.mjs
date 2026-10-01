@@ -2502,6 +2502,23 @@ const run = async () => {
     const dupW = await writes()
     check('a duplicate slug is refused before anything is written', dupW.length === 0 && await ev('document.body.textContent.includes("Two categories ended up with the same slug")'), { seq: seqOf(dupW) })
 
+    // --- the icon picker ---
+    // The dock matches a category's mark on its slug, so the picker is the slug field's other end and
+    // both halves are asserted: the slug the storefront will read, and the glyph the trigger paints.
+    // The mark is measured, not looked for, because the crate fallback is painted before anything is
+    // chosen too — only its geometry changing proves the preview follows the choice. Row 6 is one of
+    // the two unsaved duplicate rows, so this touches no stored category and writes nothing.
+    const ICON_TRIGGER = CAT_FORM + ' [data-category-icon="6"]'
+    const ICON_SLUG_INPUT = CAT_FORM + ' [data-category-slug="6"]'
+    const markExpr = '(() => { const s = document.querySelector(' + JSON.stringify(ICON_TRIGGER + ' svg') + '); if (!s) return null; const b = s.getBBox(); return [Math.round(b.width), Math.round(b.height)] })()'
+    const slugValExpr = '(() => { const i = document.querySelector(' + JSON.stringify(ICON_SLUG_INPUT) + '); return i ? i.value : null })()'
+    const markBefore = await ev(markExpr)
+    await clickSelector(ICON_TRIGGER, '!!document.querySelector(\'[role="option"]\')')
+    await clickByText('[role="option"]', 'gpu', '(() => { const i = document.querySelector(' + JSON.stringify(ICON_SLUG_INPUT) + '); return !!i && i.value === "gpu" })()')
+    const iconSlug = await ev(slugValExpr)
+    const markAfter = await ev(markExpr)
+    check('choosing an icon writes the slug the dock matches on, and its mark replaces the crate', iconSlug === 'gpu' && !!markBefore && !!markAfter && markBefore.join() !== markAfter.join(), { slug: iconSlug, before: markBefore, after: markAfter })
+
     // The rail must be a sidebar beside the tool — an eyebrow over a vertical column, to the left of
     // the form — because that is the shape the storefront's category sidebar taught the owner.
     const railShape = contentSel => ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")].map(t => t.getBoundingClientRect()); const content = document.querySelector(' + JSON.stringify(contentSel) + '); if (tabs.length !== 2 || !content) return null; const c = content.getBoundingClientRect(); return { stacked: tabs[1].top >= tabs[0].bottom - 0.5, leftOfContent: tabs[0].right <= c.left + 0.5 } })()')
