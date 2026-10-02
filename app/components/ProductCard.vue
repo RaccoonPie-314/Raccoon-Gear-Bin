@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { CatalogProduct } from '~/types/catalog'
+import { hasKhmerText } from '~/utils/locale-script'
 
 defineProps<{ product: CatalogProduct; isAdmin?: boolean }>()
 const emit = defineEmits<{ edit: [product: CatalogProduct] }>()
-// `locale` gates the wide Latin tracking: letter-spacing at this scale pulls Khmer clusters apart.
+// `locale` gates the wide Latin tracking on the card's own words: letter-spacing at this scale pulls
+// Khmer clusters apart. The category name is not the card's own word — it is a resolved translation
+// row — so that one asks `hasKhmerText` instead (see `~/utils/locale-script`).
 // `localePath` is why the card's links are built rather than written: a hardcoded `/products/<id>`
 // is the *English* route under `prefix_except_default`, so clicking a card from the Khmer storefront
 // silently dropped the visitor back to English (and remounted the page, which reads as a reload).
@@ -18,12 +21,12 @@ const localePath = useLocalePath()
         <NuxtLink :to="localePath(`/products/${product.id}`)" class="block h-full w-full">
           <img
             v-if="product.images[0]"
-            :src="product.images[0].url"
+            :src="product.images[0].thumbUrl"
             :alt="product.images[0].altText || product.name"
             loading="lazy"
             class="h-full w-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.03]"
           />
-          <div v-else class="flex h-full items-center justify-center text-xs uppercase text-zinc-400" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.2em]'">
+          <div v-else class="flex h-full items-center justify-center text-xs uppercase text-zinc-400" :class="locale === 'km' ? '' : 'tracking-[0.2em]'">
             {{ t('noImage') }}
           </div>
         </NuxtLink>
@@ -49,10 +52,10 @@ const localePath = useLocalePath()
 
       <div class="flex items-start justify-between gap-4 pt-4">
         <div class="min-w-0 flex-1">
-          <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.2em]'">
+          <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="hasKhmerText(product.categoryName ?? t('uncategorized')) ? '' : 'tracking-[0.2em]'">
             {{ product.categoryName ?? t('uncategorized') }}
           </p>
-          <h2 class="mt-1 text-sm sm:text-base font-bold tracking-tight text-zinc-950 dark:text-white truncate">
+          <h2 class="mt-1 text-sm sm:text-base font-bold text-zinc-950 dark:text-white truncate" :class="hasKhmerText(product.name) ? '' : 'tracking-tight'">
             <NuxtLink :to="localePath(`/products/${product.id}`)" class="hover:underline">
               {{ product.name }}
             </NuxtLink>

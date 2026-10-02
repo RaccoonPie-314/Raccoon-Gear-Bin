@@ -2,7 +2,10 @@ export interface CatalogImage {
   id: string
   storagePath: string
   altText: string | null
+  /** The photo at the size a buyer looks at it: the detail page's main frame, the lightbox, `og:image`. */
   url: string
+  /** The same file at grid size: product cards, search results, the filmstrip — everything under ~400px. */
+  thumbUrl: string
 }
 
 // A type alias, not an interface: this shape is returned where the `specifications` jsonb

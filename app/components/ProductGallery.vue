@@ -576,7 +576,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
           />
         </AnimatePresence>
       </button>
-      <div v-else class="flex h-full items-center justify-center text-xs uppercase text-zinc-400" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.2em]'">
+      <div v-else class="flex h-full items-center justify-center text-xs uppercase text-zinc-400" :class="locale === 'km' ? '' : 'tracking-[0.2em]'">
         {{ t('noImage') }}
       </div>
 
@@ -629,7 +629,7 @@ const onDialogKeydown = (event: KeyboardEvent) => {
           @click="select(windowStart + offset)"
         >
           <img
-            :src="image.url"
+            :src="image.thumbUrl"
             :alt="image.altText || name"
             loading="lazy"
             class="h-full w-full rounded-lg object-cover"

@@ -31,6 +31,17 @@ const specLinesToPairs = (value: string): CatalogSpecification[] => value.split(
 const numberOrNull = (value: number | string | null | undefined): number | null =>
   value === null || value === undefined ? null : Number(value)
 
+// The two widths a photo is ever served at. A card grid loads one image per product and the
+// originals are phone photographs and exported diagrams, so the byte ceiling that matters here is
+// width: Supabase's render endpoint answers a browser `Accept` with WebP, and that pair of facts is
+// the whole saving. Measured on the live bucket (8 published products): 6.4 MB of card images
+// becomes 958 kB at 800 and 1.5 MB at 1600 — the 3.3 MB screenshot PNG alone comes back at 175 kB.
+// 1600 is the lightbox's own budget: `h-[82dvh] w-[92vw] max-w-5xl` shown on a 3x phone, so a 2.5x
+// zoom upscales the visible crop by under 2x. Raise DISPLAY_WIDTH if a buyer ever complains the
+// zoomed stitch detail is soft; nothing else in the app needs the untouched original.
+const DISPLAY_WIDTH = 1600
+const THUMB_WIDTH = 800
+
 export const useCatalog = () => {
   const supabase = useSupabaseClient<Database>()
   const { locale } = useI18n()
@@ -46,9 +57,11 @@ export const useCatalog = () => {
   type CategoryRow = Exclude<Awaited<ReturnType<typeof categoriesQuery>>['data'], null>[number]
   type CategoryDraftRow = Exclude<Awaited<ReturnType<typeof categoryDraftsQuery>>['data'], null>[number]
 
-  const publicImageUrl = (storagePath: string) => {
+  // One owner for every product-photo URL (boundary rule 1), asked for by width. An absolute
+  // path is not in our bucket, so there is nothing to transform: it is returned for both widths.
+  const publicImageUrl = (storagePath: string, width: number) => {
     if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath
-    return supabase.storage.from('product-images').getPublicUrl(storagePath).data.publicUrl
+    return supabase.storage.from('product-images').getPublicUrl(storagePath, { transform: { width } }).data.publicUrl
   }
 
   // Current locale → English → first available. Shared by product and category translations
@@ -91,7 +104,7 @@ export const useCatalog = () => {
       specifications: formatSpecifications(translation?.specifications),
       images: [...(product.product_images || [])]
         .sort((first, second) => first.sort_order - second.sort_order)
-        .map((image) => ({ id: image.id, storagePath: image.storage_path, altText: image.alt_text, url: publicImageUrl(image.storage_path) }))
+        .map((image) => ({ id: image.id, storagePath: image.storage_path, altText: image.alt_text, url: publicImageUrl(image.storage_path, DISPLAY_WIDTH), thumbUrl: publicImageUrl(image.storage_path, THUMB_WIDTH) }))
     }
   }
 

@@ -111,7 +111,7 @@ const onKeydown = (event: KeyboardEvent) => {
           >
             <img
               v-if="product.images[0]"
-              :src="product.images[0].url"
+              :src="product.images[0].thumbUrl"
               :alt="product.images[0].altText || product.name"
               class="h-9 w-9 shrink-0 rounded-lg bg-zinc-50 object-cover dark:bg-zinc-950"
             />
