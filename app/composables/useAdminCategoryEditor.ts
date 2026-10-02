@@ -10,6 +10,11 @@ import type { CatalogCategoryDraft } from '~/types/catalog'
  * time a row moves.
  */
 export type AdminCategoryRow = {
+  /** Client-only identity, for the same reason the site-info social rows carry one: a row list can
+   * only animate a reorder when its rows are keyed on identity rather than on slot, and an unsaved
+   * row has no `id` to key on. It is never written — `saveCategories` builds its `values` and its
+   * translation rows field by field. */
+  uid: string
   id?: string
   slug: string
   nameEn: string
@@ -19,6 +24,11 @@ export type AdminCategoryRow = {
    * locale never had a name" — the first needs its row deleted, the second needs nothing. */
   namesBefore: Record<string, string>
 }
+
+// A monotonic local id, not a crypto uuid: the only thing it has to guarantee is that two rows in this
+// one page session are never the same row.
+let categoryUidSeq = 0
+const nextCategoryUid = () => `category-${++categoryUidSeq}`
 
 /** The two locales the storefront renders. A blank Khmer name writes no row, so the public view's
  * English fallback is what a Khmer visitor gets — absent, never invented. */
@@ -40,6 +50,7 @@ const slugOf = (row: AdminCategoryRow) => row.slug.trim() || slugify(row.nameEn.
 const nameOf = (row: AdminCategoryRow, locale: string) => (locale === 'en' ? row.nameEn : row.nameKm).trim()
 
 const toRow = (draft: CatalogCategoryDraft): AdminCategoryRow => ({
+  uid: nextCategoryUid(),
   id: draft.id,
   slug: draft.slug,
   nameEn: draft.names.en || '',
@@ -89,7 +100,7 @@ export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) =>
 
   // A new row starts visible: the owner hiding it is an edit they can see, and a row that appears
   // switched off would look like the save had failed.
-  const addCategoryRow = () => { categoryRows.value.push({ slug: '', nameEn: '', nameKm: '', isActive: true, namesBefore: {} }) }
+  const addCategoryRow = () => { categoryRows.value.push({ uid: nextCategoryUid(), slug: '', nameEn: '', nameKm: '', isActive: true, namesBefore: {} }) }
 
   const moveCategoryRow = (index: number, delta: number) => {
     const target = index + delta
@@ -98,6 +109,18 @@ export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) =>
     if (!moved || !other) return
     categoryRows.value[index] = other
     categoryRows.value[target] = moved
+  }
+
+  // The drag's reorder — the same shape `reorderSocialLink` has, including the uid: the row is moved
+  // rather than swapped, so dropping a row three slots down shifts the three past it instead of
+  // exchanging two of them. Keyed on the uid because the list re-indexes the moment it moves.
+  const reorderCategoryRow = (uid: string, toIndex: number) => {
+    const rows = categoryRows.value
+    const from = rows.findIndex((row) => row.uid === uid)
+    const moved = from < 0 ? undefined : rows[from]
+    if (!moved || from === toIndex) return
+    rows.splice(from, 1)
+    rows.splice(toIndex, 0, moved)
   }
 
   /**
@@ -195,6 +218,7 @@ export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) =>
     saveCategories,
     addCategoryRow,
     moveCategoryRow,
+    reorderCategoryRow,
     removeCategoryRow
   }
 }

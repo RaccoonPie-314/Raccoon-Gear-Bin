@@ -21,8 +21,32 @@ const {
   saveCategories,
   addCategoryRow,
   moveCategoryRow,
+  reorderCategoryRow,
   removeCategoryRow
 } = useAdminCategoryEditor({ canMutate: () => isAdminMode.value })
+
+// Drag-to-reorder, the same shape as the site-info social links: the dragged row's uid is the only
+// state, `dragover` is inert (it only permits the drop) and the list moves once, on `drop`. Reordering
+// per dragover is what made the social row flicker — see the comment in `admin/site-info.vue`.
+const dragUid = ref('')
+const onCategoryDragStart = (event: DragEvent, uid: string) => {
+  dragUid.value = uid
+  const transfer = event.dataTransfer
+  if (!transfer) return
+  transfer.setData('text/plain', uid)
+  transfer.effectAllowed = 'move'
+  const row = (event.currentTarget as HTMLElement | null)?.closest('[data-category-row]')
+  if (row) {
+    const rect = row.getBoundingClientRect()
+    transfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top)
+  }
+}
+const onCategoryDragOver = (event: DragEvent) => { event.preventDefault() }
+const onCategoryDrop = (index: number) => {
+  if (dragUid.value) reorderCategoryRow(dragUid.value, index)
+  dragUid.value = ''
+}
+const onCategoryDragEnd = () => { dragUid.value = '' }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
 watch(user, () => { void refreshAdminMode() }, { immediate: true })
@@ -52,10 +76,10 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
       </header>
 
       <section class="pt-10 sm:pt-14">
-        <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+        <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.25em]'">
           {{ t('adminAccess') }}
         </p>
-        <h1 class="mt-3 text-2xl font-bold text-balance tracking-tight text-zinc-950 sm:text-3xl dark:text-white">
+        <h1 class="mt-3 text-2xl font-bold text-balance text-zinc-950 sm:text-3xl dark:text-white" :class="locale === 'km' ? '' : 'tracking-tight'">
           {{ t('categories') }}
         </h1>
         <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
@@ -95,18 +119,33 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                    whole subject, so a row that jumps past its neighbours to a new position hides the
                    thing the owner just did. `relative` is load-bearing — the leaving row goes absolute
                    so it stops taking up space while it fades, and that needs a containing block.
-                   ponytail: a row added but not yet saved is keyed `new-<index>`, so deleting one
-                   re-keys the rows after it and can read as a content swap rather than a leave. Stored
-                   rows are keyed by id and animate correctly, reorder included; fixing the ceiling
-                   starts in the row model, not here. -->
+                   Rows are keyed on the row model's `uid`, not on `id || new-<index>`: an unsaved row's
+                   index key made deleting it re-key every row after it, which read as a content swap
+                   instead of a leave — and a drag needs an identity that survives the move anyway. -->
               <TransitionGroup v-else tag="ul" name="row" class="relative mt-6 space-y-3">
                 <li
                   v-for="(row, index) in categoryRows"
-                  :key="row.id || `new-${index}`"
+                  :key="row.uid"
                   class="flex flex-wrap items-center gap-2.5 rounded-xl border border-zinc-200/80 bg-white p-3 sm:flex-nowrap dark:border-zinc-800/80 dark:bg-zinc-900"
-                  :class="row.isActive ? '' : 'opacity-60'"
+                  :class="[row.isActive ? '' : 'opacity-60', dragUid === row.uid ? 'ring-2 ring-zinc-900/15 dark:ring-white/25' : '']"
                   data-category-row
+                  @dragover="onCategoryDragOver"
+                  @drop.prevent="onCategoryDrop(index)"
                 >
+                  <!-- The grip is the only draggable thing in the row, so selecting text in a field
+                       cannot drag the row. The arrows beside it stay: they are the keyboard and touch
+                       path, and this drag is mouse and trackpad only. -->
+                  <button
+                    type="button"
+                    draggable="true"
+                    class="flex h-8 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-950 active:cursor-grabbing dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    :aria-label="t('dragToReorder')"
+                    :title="t('dragToReorder')"
+                    @dragstart="onCategoryDragStart($event, row.uid)"
+                    @dragend="onCategoryDragEnd"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-4 w-4" aria-hidden="true"><circle cx="9" cy="5" r="1.6"/><circle cx="15" cy="5" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="19" r="1.6"/><circle cx="15" cy="19" r="1.6"/></svg>
+                  </button>
                   <UInput v-model="row.nameEn" :placeholder="t('categoryNameEnglish')" class="w-full min-w-0 flex-1" :data-category-en="index" />
                   <UInput v-model="row.nameKm" :placeholder="t('categoryNameKhmer')" class="w-full min-w-0 flex-1" :data-category-km="index" />
                   <!-- The slug is the row's stable identity: it is what keeps a category's glyph matched and
@@ -132,7 +171,7 @@ useHead(() => ({ title: `${t('categories')} | ${t('appName')}` }))
                   </USelect>
                   <span class="flex shrink-0 items-center gap-2">
                     <USwitch v-model="row.isActive" color="neutral" :aria-label="t('categoryVisibleLabel')" :title="t('categoryVisibleLabel')" class="shrink-0" :data-category-active="index" />
-                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('categoryVisibleLabel') }}</span>
+                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400" data-switch-caption>{{ t('categoryVisibleLabel') }}</span>
                   </span>
                   <span class="flex shrink-0 items-center gap-1">
                     <button

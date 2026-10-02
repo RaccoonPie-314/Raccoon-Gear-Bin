@@ -23,8 +23,15 @@ const {
 } = useAdminSiteInfoEditor({ canMutate: () => isAdminMode.value })
 
 // Drag-to-reorder, on the browser's own drag and drop. The uid of the row being dragged is the only
-// state it needs: the list itself is the order, and every dragover just asks the editor to move that
-// uid to the slot under the pointer (see `reorderSocialLink`).
+// state it needs: the list itself is the order.
+//
+// `dragover` is deliberately inert — it says "a drop is allowed here" and nothing else. Reordering on
+// every dragover looked ideal and was not: each move starts a 200ms `.row-move` transform, and
+// hit-testing follows the *painted* boxes, so while the rows are still travelling the pointer lands on
+// a different row than the one that will be there when they settle. That row then gets the reorder, the
+// list swaps back, and a motionless cursor sets off the loop at drag-event frequency — measured as the
+// list changing order three times under a pointer that never moved, which is the flicker. Moving once,
+// on drop, leaves the animation nothing to chase.
 const dragUid = ref('')
 const onSocialDragStart = (event: DragEvent, uid: string) => {
   dragUid.value = uid
@@ -40,7 +47,11 @@ const onSocialDragStart = (event: DragEvent, uid: string) => {
     transfer.setDragImage(row, event.clientX - rect.left, event.clientY - rect.top)
   }
 }
-const onSocialDragOver = (index: number) => { if (dragUid.value) reorderSocialLink(dragUid.value, index) }
+const onSocialDragOver = (event: DragEvent) => { event.preventDefault() }
+const onSocialDrop = (index: number) => {
+  if (dragUid.value) reorderSocialLink(dragUid.value, index)
+  dragUid.value = ''
+}
 const onSocialDragEnd = () => { dragUid.value = '' }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
@@ -72,10 +83,10 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
       </header>
 
       <section class="pt-10 sm:pt-14">
-        <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+        <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.25em]'">
           {{ t('adminAccess') }}
         </p>
-        <h1 class="mt-3 text-2xl font-bold tracking-tight text-balance text-zinc-950 sm:text-3xl dark:text-white">
+        <h1 class="mt-3 text-2xl font-bold text-balance text-zinc-950 sm:text-3xl dark:text-white" :class="locale === 'km' ? '' : 'tracking-tight'">
           {{ t('siteInfo') }}
         </h1>
         <p class="mt-2 max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
@@ -145,8 +156,8 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                   class="flex flex-wrap items-center gap-2.5 rounded-xl border border-zinc-200/80 bg-white p-3 sm:flex-nowrap dark:border-zinc-800/80 dark:bg-zinc-900"
                   :class="[link.enabled ? '' : 'opacity-60', dragUid === link.uid ? 'ring-2 ring-zinc-900/15 dark:ring-white/25' : '']"
                   data-social-row
-                  @dragover.prevent="onSocialDragOver(index)"
-                  @drop.prevent="onSocialDragEnd"
+                  @dragover="onSocialDragOver"
+                  @drop.prevent="onSocialDrop(index)"
                 >
                   <!-- The grip is the only draggable thing in the row on purpose: with `draggable` on
                        the row itself, selecting text inside a field would start a row drag. -->
@@ -170,11 +181,11 @@ useHead(() => ({ title: `${t('siteInfo')} | ${t('appName')}` }))
                        dimming still tracks masthead visibility, which is the thing a hidden row is. -->
                   <span class="flex shrink-0 items-center gap-2">
                     <USwitch v-model="link.enabled" color="neutral" :aria-label="t('socialVisibleLabel')" :title="t('socialVisibleLabel')" class="shrink-0" :data-social-enabled="index" />
-                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('socialVisibleLabel') }}</span>
+                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400" data-switch-caption>{{ t('socialVisibleLabel') }}</span>
                   </span>
                   <span class="flex shrink-0 items-center gap-2">
                     <USwitch v-model="link.contactEnabled" color="neutral" :aria-label="t('socialContactLabel')" :title="t('socialContactLabel')" class="shrink-0" :data-social-contact="index" />
-                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400">{{ t('socialContactLabel') }}</span>
+                    <span class="hidden max-w-[6.5rem] text-[10px] font-semibold uppercase leading-tight text-zinc-500 xl:block dark:text-zinc-400" data-switch-caption>{{ t('socialContactLabel') }}</span>
                   </span>
                   <span class="flex shrink-0 items-center gap-1">
                     <button
