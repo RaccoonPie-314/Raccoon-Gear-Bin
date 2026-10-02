@@ -5,7 +5,7 @@ import type { SiteInfo } from '~/types/site-info'
 import { copyToClipboard } from '~/utils/clipboard'
 import { getProductPricing } from '~/utils/product-pricing'
 import { getProductStockState } from '~/utils/product-stock'
-import { socialPrefillLink } from '~/utils/social-prefill'
+import { getSiteContactChannels } from '~/utils/site-contact'
 
 /**
  * The contact half of the product detail page's conversion: which channels the shop has actually
@@ -36,12 +36,6 @@ export const useProductContact = (
   // Asked of the shared rule, never recalculated here: the badge and the CTA now disagree only if
   // the rule itself changes, which is the intended behaviour.
   const stock = computed(() => getProductStockState(toValue(source)?.stockQuantity ?? 0))
-
-  // The phone digits rule the masthead applies to the stored number: keep the digits and a leading
-  // plus. Deliberately a second copy rather than an extraction from `SiteInfoContact.vue` — that
-  // component sits under the harness's masthead invariants and this change must not touch it. The
-  // duplication is recorded in ARCHITECTURE.md so a later site-info change can give it one owner.
-  const phoneHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`
 
   const url = computed(() => {
     const product = toValue(source)
@@ -82,28 +76,18 @@ export const useProductContact = (
   const copyMessage = async () => copyToClipboard(message.value)
 
   /**
-   * Where a channel actually goes, given the message it may be allowed to carry. The identity
-   * half is `useSiteInfo`'s `contactLinks` — the links the shop marked contactable, which are not
-   * the links the shop marked visible — and the destination half is the documented-prefill rule in
-   * `app/utils/social-prefill.ts`, which the Share Sheet asks the same question of. Declared
-   * after `message`/`url` because it composes them.
+   * Where a channel actually goes, given the message it may be allowed to carry. Both halves are
+   * owned elsewhere: `useSiteInfo`'s `contactLinks` decides *which* rows are contactable (the links
+   * the shop marked contactable, which are not the links the shop marked visible), and
+   * `app/utils/site-contact.ts` builds the list — the same function the storefront's desktop contact
+   * dock reads, so the two surfaces cannot offer a shopper different channels from one stored row.
+   * Declared after `message`/`url` because it composes them.
    */
-  const channels = computed<ProductContactChannel[]>(() => {
-    const siteInfo = toValue(siteInfoSource)
-    const resolved: ProductContactChannel[] = []
-    const phone = siteInfo?.phone?.trim()
-    if (phone) resolved.push({ key: 'phone', platform: 'phone', label: t('phone'), href: phoneHref(phone), value: phone, external: false, prefilled: false })
-    const prepared = message.value
-    const page = url.value
-    for (const link of siteInfo?.contactLinks ?? []) {
-      const stored = link.url.trim()
-      // An unset channel is not a channel: nothing is offered in its place.
-      if (!stored) continue
-      const target = socialPrefillLink(link, { phone: phone ?? '', message: prepared, productUrl: page })
-      resolved.push({ key: `${link.platform}-${stored}`, platform: link.platform, label: link.platform, href: target.href, value: '', external: true, prefilled: target.prefilled })
-    }
-    return resolved
-  })
+  const channels = computed<ProductContactChannel[]>(() => getSiteContactChannels(toValue(siteInfoSource), {
+    message: message.value,
+    pageUrl: url.value,
+    phoneLabel: t('phone')
+  }))
 
   return { stock, url, channels, message, copyMessage }
 }

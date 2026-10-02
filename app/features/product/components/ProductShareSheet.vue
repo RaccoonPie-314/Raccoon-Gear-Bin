@@ -3,7 +3,7 @@ import type { ProductShareDestination, ProductSharePayload } from '../composable
 import { platformLabel } from '~/utils/social-prefill'
 import { selectOnFocus } from '~/utils/clipboard'
 import { AnimatePresence, animate, motion, useDragControls, useReducedMotion } from 'motion-v'
-import { applePop, copyPop, press, sheet } from '~/utils/motion'
+import { applePop, collapseTransform, copyPop, press, sheet } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 /**
@@ -114,7 +114,10 @@ const panelStyle = computed(() => {
   return {
     left: `${box?.left ?? 12}px`,
     top: `${box?.top ?? 12}px`,
-    'transform-origin': box?.side === 'above' ? 'center bottom' : 'center top',
+    // `place()` pins the popover's left edge to the anchor's own left edge, so the control sits at this
+    // panel's top-left (hanging below it) or bottom-left (flipped above) — the corner it blooms from and
+    // collapses back into.
+    'transform-origin': box?.side === 'above' ? 'bottom left' : 'top left',
     visibility: box ? 'visible' : 'hidden'
   }
 })
@@ -177,7 +180,10 @@ const panelExit = computed(() => isDesktop.value
       ? { opacity: 0, transform: popShrink }
       // motion-v honours a `transition` key inside a variant target (it destructures it off the
       // resolved variant), which is what lets the exit be a 160ms ease-in while the enter stays a spring.
-      : { opacity: 0, transform: applePop[popSide.value].to, transition: { ...applePop.exit, opacity: applePop.opacity.out } })
+      // Desktop dismisses into its control — the genie, measured against the anchor so it lands on the
+      // button — while the enter stays the uniform bloom. The phone sheet never comes here: its
+      // transform belongs to the drag, which has to hand release velocity to the exit.
+      : { opacity: 0, transform: collapseTransform(panelNode.value, props.anchor), transition: { ...applePop.exit, opacity: applePop.opacity.out } })
   : (reduced.value ? { opacity: 0 } : { opacity: 0, y: '100%' }))
 const panelTransition = computed(() => reduced.value
   ? { duration: 0.18 }

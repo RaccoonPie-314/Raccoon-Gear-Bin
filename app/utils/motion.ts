@@ -179,7 +179,46 @@ export const applePop = {
    * and the two desktop surfaces still share one preset.
    */
   slide: { from: 'scale(1) translateY(10px)', to: 'scale(1) translateY(6px)' },
+  /**
+   * The genie collapse — where a *dismissed* menu goes when it is put back into its control.
+   *
+   * Deliberately non-uniform (`0.16` across, `0.34` down): the surface flattens into whichever corner
+   * its trigger occupies, which is what makes it read as "it went back there" rather than "it vanished".
+   * No translate: the anchor corner does the directional work, so one value serves a panel above its
+   * control, below it, or beside it. This is the **fallback** — `collapseTransform` below computes the
+   * real target from the two boxes, and a fixed fraction only ever fits the surface it was picked for.
+   * Three desktop surfaces collapse on leave (`ContactDock`, the Contact-to-Order panel, the Share
+   * popover); the two phone surfaces deliberately do not, because a scale there is the exact shape
+   * measured expensive inside the frosted sticky bar, and the bottom sheet's transform is owned by the
+   * drag.
+   *
+   * Enter is never this. Phase H removed a scale-onto-the-button from the *arrival* because a panel you
+   * are about to read must not be distorted; a leaving panel is unreadable by definition, and
+   * `opacity.out` (180ms) clears before the 240ms squash gets extreme — measured: opacity reaches 0 at
+   * ~185ms while `scaleX` is still 0.65, so the most sheared frames are already transparent.
+   */
+  collapse: 'scale(0.16, 0.34)',
   transition: { type: 'spring', stiffness: 220, damping: 19, mass: 1 },
   exit: { duration: 0.24, ease: [0.32, 0, 0.67, 0] },
   opacity: { in: { duration: 0.2, ease: 'easeOut' }, out: { duration: 0.18, ease: 'easeIn' } }
 } as const
+
+/**
+ * The genie's actual target: the dismissed surface collapses onto **its own trigger's size**, not a
+ * fixed fraction. A constant cannot work across surfaces — the contact dock is 320×196 over a 48×48
+ * button (`0.15 × 0.25`), while the inline Contact panel is 518×517 over a 199×44 CTA (`0.38 × 0.09`).
+ * Both read as "sucked into the corner"; only the second one lands on the button.
+ *
+ * `offsetWidth`/`offsetHeight` are the layout box, so they are unaffected by the transform about to be
+ * written — no settle-before-measure is needed here. Falls back to `applePop.collapse` when either box
+ * is missing (a detached node, a shop with no configured channel), because a dismissal that refuses to
+ * play is worse than one that lands slightly off.
+ */
+export const collapseTransform = (panel: HTMLElement | null | undefined, trigger: HTMLElement | null | undefined): string => {
+  const pw = panel?.offsetWidth
+  const ph = panel?.offsetHeight
+  const tw = trigger?.offsetWidth
+  const th = trigger?.offsetHeight
+  if (!pw || !ph || !tw || !th) return applePop.collapse
+  return `scale(${(tw / pw).toFixed(3)}, ${(th / ph).toFixed(3)})`
+}

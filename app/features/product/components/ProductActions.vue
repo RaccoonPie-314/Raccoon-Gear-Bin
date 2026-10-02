@@ -5,7 +5,7 @@ import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
 import { animate, motion, useReducedMotion } from 'motion-v'
-import { applePop, copyPop, press } from '~/utils/motion'
+import { applePop, collapseTransform, copyPop, press } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
@@ -79,9 +79,16 @@ const ctaLabel = computed(() => props.state === 'out' ? t('askAboutAvailability'
 // top edge. The compact (sticky-bar) mount is deliberately excluded — its panel already floats
 // above the bar at the viewport edge, so there is nothing to reveal.
 const REVEAL_GAP = 12
-// Exactly one of this mount's two surfaces is open at a time: opening the panel closes the sheet
-// and vice-versa. They are separate affordances but stacking a dropdown under a modal popover (or
-// the reverse) reads as a bug, and Escape already assumes a topmost surface.
+// Where the page stood before the reveal, so closing can put it back there instead of letting the
+// browser clamp the scroll when the column shrinks. `revealTo` is kept too because the return is only
+// ours to make while the viewport is still where we left it — if the visitor scrolled away in the
+// meantime, yanking them back would be a worse offence than the jump.
+let revealFrom = 0
+let revealTo = 0
+const RETURN_OWNERSHIP_PX = 160
+// Exactly one of this mount's two surfaces is open at a time on a phone; on desktop the popover floats
+// above the panel instead of replacing it (see `openSheet`). They are separate affordances, but stacking
+// a dropdown under a modal popover reads as a bug, and Escape already assumes a topmost surface.
 const toggle = () => {
   const opening = !isOpen.value
   if (opening) isSheetOpen.value = false
@@ -113,7 +120,17 @@ const pinColumnStatic = (panel: HTMLElement) => {
 // enter hook, before the FLIP measures anything (see below).
 watch(isOpen, (open) => {
   if (props.compact) return
-  if (!open) { unpinColumn(); return }
+  if (!open) {
+    // Put the viewport back the way we found it, smoothly, while the panel is still in the DOM (its
+    // leave runs 240ms, so the document is still tall enough to be scrolled to). Unpinning first — which
+    // is what this used to do — shrinks the column by the panel's height under a scrolled viewport, the
+    // browser clamps `scrollY`, and the page snaps up in one frame. That clamp is the "forceful" return,
+    // and it is also what left the Share button near the viewport bottom so its popover flipped upward.
+    if (Math.abs(window.scrollY - revealTo) < RETURN_OWNERSHIP_PX) {
+      window.scrollTo({ top: revealFrom, behavior: reduced.value ? 'auto' : 'smooth' })
+    }
+    return
+  }
   void nextTick(() => {
     const panel = panelEl.value
     if (!panel) return
@@ -124,11 +141,17 @@ watch(isOpen, (open) => {
     if (!host) return
     const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
     const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
+    revealFrom = window.scrollY
+    revealTo = target
     // Let the first bloom frame paint before the viewport moves, so the pop and the reveal-scroll do
     // not collide on the same frame (the jarring stretch this replaces).
     requestAnimationFrame(() => window.scrollTo({ top: target, behavior: reduced.value ? 'auto' : 'smooth' }))
   })
 })
+
+// The column goes back to being sticky only once the panel has actually left — see the close branch
+// above. `onBeforeUnmount` stays as the net for a product swap or a navigation mid-flight.
+const onPanelAfterLeave = () => { unpinColumn() }
 
 onBeforeUnmount(unpinColumn)
 
@@ -166,12 +189,19 @@ const settleForMeasurement = (p: HTMLElement) => {
 // `applePop.slide`: same travel, same spring, no scale, because it blooms inside the frosted bar.
 const popPair = () => props.compact ? applePop.slide : applePop.below
 
+// The corner a mount's trigger occupies, so both its enter and its leave travel the same path: the
+// sticky bar's panel rises out of the bar's bottom edge (`center bottom`, and it never scales), while
+// the inline desktop panel hangs under its CTA row, whose primary button sits at the row's left — so
+// `top left`, not the `center top` it used to bloom from. A popover scales from its control; only
+// modals keep `center`.
+const panelOrigin = () => (props.compact ? 'center bottom' : 'top left')
+
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
   // Pin before the first measurement so the reveal scroll aims at a stable destination.
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
-  p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
+  p.style.transformOrigin = panelOrigin()
   // Promote for the length of the pop only: without this the panel is rasterised on the first
   // animated frame, which is the hitch at the start of the bloom. Cleared in `onPanelAfterEnter`.
   p.style.willChange = 'transform, opacity'
@@ -196,21 +226,32 @@ const onPanelLeave = (el: Element, done: () => void) => {
   // Settle first, then shrink: the exit starts from the same rest box the entry landed on, so a close
   // that interrupts an open retargets cleanly instead of compounding transforms.
   settleForMeasurement(p)
-  p.style.transformOrigin = props.compact ? 'center bottom' : 'center top'
+  p.style.transformOrigin = panelOrigin()
   p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
   animate(p, { opacity: [1, 0] }, red ? { duration: 0.12, ease: 'easeIn' } : applePop.opacity.out)
-  const a = animate(p, { transform: [applePop.rest, popPair().to] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
+  // Desktop dismisses into its trigger (the genie — `collapseTransform` measures this panel against
+  // the CTA that opened it, so it lands on the button rather than on a guessed fraction); the phone
+  // mount keeps `applePop.slide`'s travel-only exit, because a scale inside the frosted sticky bar is
+  // the shape that was measured expensive. Reduced motion drops the collapse everywhere.
+  const leaveTo = props.compact || red ? popPair().to : collapseTransform(p, ctaEl.value)
+  const a = animate(p, { transform: [applePop.rest, leaveTo] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }
 
 // The sheet is opened by this mount's own Share button, which stays its anchor: a desktop popover is
 // placed beside the control the visitor just pressed, and a phone's bottom sheet is anchored to the
-// viewport instead and needs no measurement at all. Opening it closes the contact panel (one surface
-// at a time).
+// viewport instead and needs no measurement at all.
 const openSheet = () => {
-  isOpen.value = false
+  // On a phone the sheet is a modal bottom sheet that covers the whole surface anyway, so the panel
+  // closes under it. On desktop it is a popover, and closing the panel there is what lurches the page:
+  // the reveal parks the viewport *inside the panel's own height*, so removing the panel makes the
+  // document shorter than the current offset and the browser clamps `scrollY` back to the top in a
+  // single frame (measured: y 358 → 0 and scrollHeight 1258 → 900 on the same frame). Leaving the panel
+  // standing keeps that space, so the page stays put and the popover floats above the surface it came
+  // from — and Escape already answers the topmost thing first.
+  if (props.compact) isOpen.value = false
   isSheetOpen.value = true
 }
 
@@ -333,6 +374,7 @@ const channelName = platformLabel
       @enter="onPanelEnter"
       @after-enter="onPanelAfterEnter"
       @leave="onPanelLeave"
+      @after-leave="onPanelAfterLeave"
     >
       <div
         v-if="isOpen && channels.length"

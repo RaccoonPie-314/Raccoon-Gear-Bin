@@ -289,6 +289,21 @@ const run = async () => {
       cwd: ROOT, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', NODE_ENV: 'production' }, stdio: 'ignore'
     })
     if (!await waitForHttp(appUrl)) throw new Error('preview server never answered on ' + appUrl)
+    // Prove the artifact is whole before aiming 300 checks at it. A `.output` written by two builds (or
+    // read while one is still running) serves a shell whose entry chunk is no longer on disk: the browser
+    // then gets a 500 for `/_nuxt/<hash>.js`, Nuxt paints its error page, and every data-dependent check
+    // fails on an empty page while the first `boxesExpr(...)[0]` throws a bare TypeError. That reads like
+    // a hundred app regressions and is one missing file, so name it here, once, with the fix.
+    const shell = await (await fetch(appUrl)).text()
+    const entry = /#entry":"(\/_nuxt\/[^"]+\.js)/.exec(shell)?.[1]
+    if (!entry) throw new Error(`The page served at ${appUrl} carries no #entry import — it is not the app. Run \`bun run build\` and let it finish.`)
+    const asset = await fetch(new URL(entry, appUrl))
+    // Status alone is blind here: an unmatched path answers 200 with the SPA shell, so a missing chunk
+    // looks healthy. The content type is the thing that actually distinguishes "the entry" from "a page".
+    const type = asset.headers.get('content-type') || ''
+    if (!asset.ok || !/javascript|ecmascript/i.test(type)) {
+      throw new Error(`.output is torn: the page asks for ${entry} and it answers ${asset.status} ${type || '(no content-type)'}. Re-run \`bun run build\` with no other build or deploy writing to .output, then verify again.`)
+    }
   }
 
   // 2. launch headless Chrome with a private profile on a debug port.
@@ -1765,11 +1780,19 @@ const run = async () => {
     // A fade-only regression — the transform never applied — keeps every frame at scale 1.
     const START_RECTS = '(() => { window.__R = []; window.__Rdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-panel]"); if (p) { const c = document.querySelector("[data-product-actions] [data-contact-cta]"); if (c) { const pr = p.getBoundingClientRect(); const br = c.getBoundingClientRect(); window.__R.push({ pt: pr.top, pl: pr.left, pw: pr.width, ph: pr.height, bt: br.top, bl: br.left, bw: br.width, bh: br.height, ct: getComputedStyle(p).transform }); } } if (performance.now() - t0 < 720) requestAnimationFrame(tick); else window.__Rdone = true; }; requestAnimationFrame(tick); return true })()'
     const bloomed = f => f.some(s => { const m = /^matrix\(([\d.-]+)/.exec(s.ct || ''); return !!m && Number(m[1]) > 0 && Number(m[1]) < 0.98 })
+    // The genie: on the way out the desktop panel flattens onto its own CTA's box, so some frame must
+    // be scaled by a different amount on each axis. Read from the matrix's two scale terms and compare
+    // them absolutely — this panel is 518×517 over a 199×44 button, so it goes flat (scaleY < scaleX),
+    // and a signed comparison would encode whichever surface was written first. `bloomed` looks at m11
+    // only and stays green for a uniform shrink, which is the point of the enter and the defect on a
+    // leave.
+    const scalePair = s => { const m = /^matrix\(([-\d.]+), [-\d.]+, [-\d.]+, ([-\d.]+)/.exec(s.ct || ''); return m ? [Number(m[1]), Number(m[2])] : null }
+    const collapsedIntoTrigger = f => f.some(s => { const [a, d] = scalePair(s) || []; return a != null && a < 0.75 && Math.abs(d - a) > 0.05 })
     const rectsFlight = async () => { const box = await settleOnCta(); await ev(START_RECTS); await clickAt(box.x, box.y); await waitFor('!!window.__Rdone', 4000); return await ev('window.__R || []') }
     const enterR = await rectsFlight()
     check('the panel pops open from a real sub-full-size bloom (not a fade)', enterR.length > 3 && bloomed(enterR), { first: enterR[0], scales: enterR.slice(0, 4).map(s => s.ct) })
     const leaveR = await rectsFlight()
-    check('the panel pops closed through the same bloom', leaveR.length > 3 && bloomed(leaveR), { last: leaveR[leaveR.length - 1] })
+    check('the panel pops closed through the same bloom, collapsing into its trigger corner', leaveR.length > 3 && bloomed(leaveR) && collapsedIntoTrigger(leaveR), { frames: leaveR.length, last: leaveR[leaveR.length - 1], collapsed: collapsedIntoTrigger(leaveR) })
     await waitFor(panelGone)
     // Interrupting the enter is the regression this path was built for: closing mid-flight used
     // to measure through the half-finished transform, compounding two inverses and landing the
@@ -1793,6 +1816,55 @@ const run = async () => {
       await press('Escape', 'Escape', 27)
       await waitFor(panelGone)
     }
+    // ---- the return trip, and the side Share takes when the panel was open ----------------------
+    // Opening reveals the panel by scrolling down; closing has to put the viewport back. The bug this
+    // locks is the old order of operations — unpin, then let the browser clamp `scrollY` when the column
+    // shrinks by the panel's height — which moved the page in one frame and left the Share button near
+    // the viewport bottom, so its popover flipped upward. Both halves are asserted: that it moved at all,
+    // and that it landed where it started. The side is read from the popover's resolved transform-origin
+    // (`top left` computes to "0px 0px"), because `placed.side` is not in the DOM and the geometry itself
+    // is what the clamp is allowed to move.
+    const returnBox = await settleOnCta()
+    const returnFrom = await ev('window.scrollY')
+    await clickAt(returnBox.x, returnBox.y)
+    await waitFor('!!document.querySelector(\'[data-contact-panel]\')')
+    await sleep(900)
+    const revealedTo = await ev('window.scrollY')
+    await press('Escape', 'Escape', 27)
+    await waitFor(panelGone)
+    await sleep(900)
+    const returnedTo = await ev('window.scrollY')
+    check('closing the panel returns the page to where it stood, and the reveal really moved it', revealedTo > returnFrom + 40 && Math.abs(returnedTo - returnFrom) <= 8, { returnFrom, revealedTo, returnedTo })
+
+    const pairBox = await settleOnCta()
+    await clickAt(pairBox.x, pairBox.y)
+    await waitFor('!!document.querySelector(\'[data-contact-panel]\')')
+    await sleep(900)
+    const sharePairBox = await ev('(() => { const r = [...document.querySelectorAll("[data-share-cta]")].find(e => e.getClientRects().length).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()')
+    const yBeforeShare = await ev('Math.round(window.scrollY)')
+    await clickAt(sharePairBox.x, sharePairBox.y)
+    await waitFor('!!document.querySelector(\'[data-share-sheet]\')')
+    await sleep(700)
+    const pairOrigin = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); return s ? getComputedStyle(s).transformOrigin : null })()')
+    // The page must not move. It cannot, now, because the panel is still standing: the reveal parks the
+    // viewport inside the panel's own height, so if Share removed the panel the document would get shorter
+    // than the current offset and the browser would clamp `scrollY` back to the top in one frame (the real
+    // regression measured 358 → 0, and the same trip on a page whose reveal parked it at 538 → 8).
+    // The tolerance is not slack for the bug — measured against a live page the drift is 0px — it is for
+    // this rig's own fixture photos, which size themselves asynchronously and can shorten the document by
+    // a few dozen px while the popover opens. An exact-equality assert here would fail on an image.
+    const afterShare = await ev('({ y: Math.round(window.scrollY), panel: !!document.querySelector("[data-contact-panel]") })')
+    check('a Share opened out of an open contact panel hangs below its button and leaves the page where it was',
+      pairOrigin === '0px 0px' && afterShare.panel && yBeforeShare - afterShare.y <= 60,
+      { pairOrigin, yBeforeShare, afterShare })
+    await press('Escape', 'Escape', 27)
+    await waitFor('!document.querySelector(\'[data-share-sheet]\')')
+    // Escape answers the topmost surface only, so the panel is still open here — that is the whole point
+    // of leaving it standing. The second Escape is what dismisses it and lets the page return.
+    check('the first Escape dismisses the popover and leaves the panel standing', await ev('!!document.querySelector("[data-contact-panel]")'))
+    await press('Escape', 'Escape', 27)
+    await waitFor(panelGone)
+
     // Reduced motion keeps the FLIP — it is a short, contained morph of one panel back into its own
     // button, not the large-area travel the preference targets — and only trims the duration. So the
     // panel must still grow from and retract into the button here, just faster, and still settle.
@@ -2412,6 +2484,71 @@ const run = async () => {
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'no-preference' }] })
     await metrics(1440, 900, false)
 
+    // ---- the catalog page's contact dock (desktop corner) ---------------------------------------
+    // `ContactDock.vue` resolves its rows through the same `getSiteContactChannels` the product page's
+    // Contact to Order rows use, so the interesting failures are all invisible to a compiler: a row that
+    // says it carried a message but carries `?text=` empty, a panel that opens over the viewport edge, a
+    // control that leaks into the phone corner where the search launcher already lives, and a preset that
+    // gets quietly replaced by a local spring. The dock reads the site info the catalog page already
+    // loads, so this runs on that page at desktop and hands the viewport back afterwards.
+    await metrics(1280, 900, false)
+    await nav(new URL('/', appUrl).href)
+    await waitFor('!!document.querySelector(\'[data-site-phone]\')')
+    await waitFor('!!document.querySelector(\'[data-contact-dock] [data-contact-dock-cta]\')')
+    const dockBox = await ev('(() => { const e = document.querySelector("[data-contact-dock-cta]"); const r = e.getBoundingClientRect(); const c = getComputedStyle(e.parentElement); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: Math.round(r.width), h: Math.round(r.height), right: Math.round(r.right), bottom: Math.round(r.bottom), vw: innerWidth, vh: innerHeight, display: c.display, expanded: e.getAttribute("aria-expanded"), label: e.getAttribute("aria-label") } })()')
+    check('the contact dock holds the desktop corner as a full-size control', dockBox.display !== 'none' && dockBox.w >= 44 && dockBox.h >= 44 && dockBox.right <= dockBox.vw && dockBox.bottom <= dockBox.vh && !!dockBox.label && dockBox.expanded === 'false', dockBox)
+
+    const START_DOCK_FRAMES = '(() => { window.__DF = []; window.__DFdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-dock-panel]"); const t = p && getComputedStyle(p).transform; if (t && t !== "none") { const m = new DOMMatrixReadOnly(t); window.__DF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +getComputedStyle(p).opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__DFdone = true }; requestAnimationFrame(tick); return true })()'
+    await ev(START_DOCK_FRAMES)
+    await clickAt(dockBox.x, dockBox.y)
+    await waitFor('!!window.__DFdone', 4000)
+    await waitFor('!!document.querySelector("[data-contact-dock-panel]")')
+    const dframes = await ev('window.__DF || []')
+    const dBloom = dframes.filter(f => f.a > 0.5 && f.a < 0.995)
+    const dTravel = dframes.filter(f => Math.abs(f.f) >= 2)
+    const dFade = dframes.some(f => f.o > 0.02 && f.o < 0.98)
+    check('the dock panel blooms on the shared preset: uniform scale, travel toward its trigger, its own fade', dframes.length > 3 && dBloom.length > 0 && dBloom.every(f => Math.abs(f.a - f.d) <= 0.01) && dTravel.length > 0 && dFade, { frames: dframes.slice(0, 6) })
+    const dockPanel = await ev('(() => { const p = document.querySelector("[data-contact-dock-panel]"); const r = p.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), vw: innerWidth, vh: innerHeight, ctaTop: Math.round(document.querySelector("[data-contact-dock-cta]").getBoundingClientRect().top) } })()')
+    check('the panel opens above its trigger and stays inside the viewport', dockPanel.bottom <= dockPanel.ctaTop && dockPanel.left >= 0 && dockPanel.right <= dockPanel.vw && dockPanel.top >= 0, dockPanel)
+
+    // The assert the whole channel rule turns on, and the one no type checker can see: `prefilled` is a
+    // promise that the link carries the text, so a `true` beside an empty `text=` is the row lying.
+    const dockRows = await ev('Array.from(document.querySelectorAll("[data-contact-dock-panel] a")).map(a => ({ href: a.getAttribute("href"), prefilled: a.dataset.contactPrefilled, target: a.target || null }))')
+    const lying = dockRows.filter(r => r.prefilled === 'true' && !/[?&]text=[^&]/.test(r.href))
+    check('no dock row claims it carried a message it did not carry', dockRows.length > 0 && lying.length === 0, { lying, rows: dockRows })
+    const clippedDock = await ev('(() => { const p = document.querySelector("[data-contact-dock-panel]"); const over = []; for (const el of p.querySelectorAll("span,p")) { const d = el.scrollWidth - el.clientWidth; if (d > 1) over.push({ t: (el.textContent || "").trim().slice(0, 30), over: d }) } const eb = p.querySelector("p"); const rg = document.createRange(); rg.selectNodeContents(eb); return { over, eyebrowLines: rg.getClientRects().length } })()')
+    check('nothing in the dock panel is clipped by its own box, and its eyebrow holds one line', clippedDock.over.length === 0 && clippedDock.eyebrowLines === 1, clippedDock)
+
+    // The exit is a different kind of motion from the enter, so it earns its own frame sample. A genie
+    // collapse is non-uniform by definition — the surface flattens into the corner the trigger occupies
+    // — which is exactly the shape Phase H removed from the *enter* and kept out of the other two popover
+    // surfaces. Someone "harmonising" this exit back to the shared bloom, or letting the enter start
+    // collapsing too, is what this catches. The anchor is read as the two numbers Chrome resolves
+    // `bottom right` into (the panel's own box), because the computed value never contains the keywords.
+    const START_DOCK_LEAVE = '(() => { window.__DG = []; window.__DGdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-contact-dock-panel]"); const t = p && getComputedStyle(p).transform; if (t && t !== "none") { const m = new DOMMatrixReadOnly(t); const o = getComputedStyle(p).transformOrigin.split(" ").map(parseFloat); window.__DG.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), o: +getComputedStyle(p).opacity, ox: o[0], oy: o[1], w: p.offsetWidth, h: p.offsetHeight }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__DGdone = true }; requestAnimationFrame(tick); return true })()'
+    await ev(START_DOCK_LEAVE)
+    await press('Escape', 'Escape', 27)
+    await waitFor('!!window.__DGdone', 4000)
+    const gframes = await ev('window.__DG || []')
+    const squash = gframes.filter(f => f.a < 0.75 && Math.abs(f.d - f.a) > 0.05)
+    const fadeLeads = gframes.some(f => f.o < 0.5 && f.a > 0.5)
+    const anchored = gframes.length > 3 && gframes.every(f => Math.abs(f.ox - f.w) <= 2 && Math.abs(f.oy - f.h) <= 2)
+    check('the panel collapses into its trigger corner on leave: non-uniform, anchored at its own bottom-right, faded before it is squashed', anchored && squash.length > 0 && fadeLeads, { frames: gframes.slice(0, 4), minScaleX: Math.min(...gframes.map(f => f.a)) })
+    await waitFor('!document.querySelector("[data-contact-dock-panel]")')
+    const dockFocus = await ev('document.activeElement === document.querySelector("[data-contact-dock-cta]")')
+    check('Escape closes the panel and hands focus back to the control that opened it', dockFocus === true, { dockFocus })
+
+    // Below `lg` the dock must be gone rather than merely hidden-behind something: `display: none` is
+    // what keeps it out of the corner, out of the tab order and out of the paint cost, and it is the
+    // only thing that makes "mobile is unchanged" a fact instead of an intention.
+    await metrics(390, 844, true)
+    await sleep(400)
+    const dockPhone = await ev('(() => { const d = document.querySelector("[data-contact-dock]"); const launcher = document.querySelector(".fixed.right-4"); return { display: d ? getComputedStyle(d).display : "absent", painted: !!d && d.getClientRects().length > 0, launcherPainted: !!launcher && launcher.getClientRects().length > 0, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    check('the dock is off below lg, so the phone corner keeps its one control and no overflow', dockPhone.display === 'none' && !dockPhone.painted && dockPhone.launcherPainted && dockPhone.overflow <= 1, dockPhone)
+    await metrics(1440, 900, false)
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-contact-cta]\')')
+
     // ---- frosted surfaces under `prefers-reduced-transparency` ---------------------------------
     // The storefront frosts nine surfaces, and the fallback lives in one `main.css` block rather than
     // in nine components — so the only thing that proves the flag is wired is measuring it painted:
@@ -2432,6 +2569,10 @@ const run = async () => {
   if (ONLY !== 'guest') {
     await metrics(1440, 900, false)
     await nav(appUrl + 'admin/login')
+    // Wait for the form rather than trusting `nav`'s settle guess: every other section does this, and
+    // without it a page that fails to render turns into `Cannot read properties of undefined (reading 'x')`
+    // instead of a named check that says which element never arrived.
+    await waitFor('!!document.querySelector(\'input[type="email"]\')')
     const email = (await ev(boxesExpr('input[type="email"]')))[0]
     const pass = (await ev(boxesExpr('input[type="password"]')))[0]
     await clickAt(email.x, email.y)

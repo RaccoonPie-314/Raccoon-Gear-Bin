@@ -256,5 +256,9 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
         </div>
       </div>
     </UContainer>
+
+    <!-- The standing contact entry, desktop-only and teleported by its own component. It reads the
+         site info this page already loaded — no second query, no new table. -->
+    <ContactDock :site-info="siteInfo" />
   </main>
 </template>

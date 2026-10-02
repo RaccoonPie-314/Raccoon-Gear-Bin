@@ -1,12 +1,13 @@
-// View models for the product-page conversion actions. Like catalog.ts and site-info.ts these
+// View models for the storefront's conversion actions. Like catalog.ts and site-info.ts these
 // are presentation shapes, not row shapes — but nothing here is read from a table: a channel is
-// *resolved* from the public SiteInfo model that `useSiteInfo` already produced, which is why
-// this feature adds no data layer and no schema. The stock band the CTA words itself around is
-// not repeated here: `ProductStockState` lives beside the rule that decides it, in
-// `app/utils/product-stock.ts`.
+// *resolved* from the public SiteInfo model that `useSiteInfo` already produced, by
+// `app/utils/site-contact.ts`, which is why conversion adds no data layer and no schema. Two surfaces
+// render this shape: the product page's Contact to Order rows and the desktop contact dock. The stock
+// band the CTA words itself around is not repeated here: `ProductStockState` lives beside the rule that
+// decides it, in `app/utils/product-stock.ts`.
 
 /**
- * One contact/order channel the shop has actually configured.
+ * One contact channel the shop has actually configured.
  *
  * `href` is the stored value — the phone number as a `tel:` link, or a social link's own URL —
  * **except** where the platform documents a way to carry the message with it (see
