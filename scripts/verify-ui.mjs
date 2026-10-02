@@ -604,7 +604,7 @@ const run = async () => {
     // is there" rather than "an icon node exists".
     check('every social glyph paints most of its frame', glyphs.every(g => g.ink[0] >= 12 && g.ink[1] >= 12), glyphs.map(g => g.ink))
     check('tagline is gone from the page', !(await ev('document.body.innerText.includes("Premium gaming gear")')))
-    check('the catalog label is the page heading', (await ev('(document.querySelector("main h1") || {}).textContent?.trim()')) === 'The collection')
+    check('the catalog label is the page heading', (await ev('(document.querySelector("main h1") || {}).textContent?.trim()')) === 'Collection Bin')
 
     const search = (await ev(boxesExpr('[data-search-anchor] input')))[0]
     await clickAt(search.x, search.y)
