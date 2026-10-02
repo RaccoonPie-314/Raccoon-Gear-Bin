@@ -186,16 +186,19 @@ const channelName = platformLabel
           role="group"
           :aria-label="t('contactUs')"
           tabindex="0"
-          class="absolute right-0 bottom-full mb-3 w-80 max-h-[60vh] space-y-2 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900 dark:focus-visible:ring-white"
+          class="absolute right-0 bottom-full mb-3 w-96 max-h-[60vh] space-y-2 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900 dark:focus-visible:ring-white"
         >
           <!-- Opaque on purpose. A panel that floats over the page has nothing of its own to frost, and
                a scale bloom inside a `backdrop-filter` ancestor is the one shape this storefront traced
                as expensive. `tabindex` is on the scroll box: a region that scrolls but cannot be focused
                hides its last rows from exactly the visitor least able to find the scrollbar.
-               `w-80` is measured, not a round number: at `w-72` the 22ch "Opens with your message" tail
-               clipped to "…" and the tracked eyebrow wrapped onto a second line, both of which read as a
-               defect rather than a narrow panel. The row keeps `truncate` as the guard for Khmer and for
-               whatever platform name a shop types. -->
+               `w-96` is a measured width, and the measurement is not the one that first went in: at
+               `w-72` the 22ch "Opens with your message" clipped to "…" and the tracked eyebrow wrapped, so
+               it went to `w-80`, which passed locally and then clipped by 8px on the CI runner and wrapped
+               the eyebrow there too. The storefront answers Latin with the *system* UI font, so glyph
+               advance is a property of the machine doing the measuring — a width that only clears its own
+               desktop is not a fix. The row keeps `truncate` as the guard for a platform name a shop types
+               longer than either. -->
           <p class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
             {{ t('chooseChannel') }}
           </p>
