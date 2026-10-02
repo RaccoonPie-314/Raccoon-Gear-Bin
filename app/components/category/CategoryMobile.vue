@@ -3,6 +3,7 @@ import type { CatalogCategory } from '~/types/catalog'
 import type { CategoryItem } from '~/composables/useCategoryItems'
 import { motion, animate, useReducedMotion } from 'motion-v'
 import { press, iconPop, dock } from '~/utils/motion'
+import { hasKhmerText } from '~/utils/locale-script'
 
 const props = withDefaults(
   defineProps<{
@@ -408,7 +409,8 @@ watch(computedItems, () => {
             </div>
 
             <span
-              class="text-[10px] font-bold leading-tight tracking-tight text-center truncate max-w-[4.5rem] transition-colors duration-200"
+              class="text-[10px] font-bold leading-tight text-center truncate max-w-[4.5rem] transition-colors duration-200"
+              :class="hasKhmerText(item.name) ? '' : 'tracking-tight'"
             >
               {{ item.name }}
             </span>

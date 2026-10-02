@@ -58,6 +58,21 @@ const check = (name, ok, detail) => {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// ---- static: a foreign script pasted into the Khmer block is invisible to every browser check ---
+// Thai consonants sat inside `contactAskLowStock` for a long time and rendered as Khmer-shaped
+// noise: `/[\u1780-\u17FF]/` still matched the string, the page still looked Khmer, and no computed
+// style changed. Only a source scan can catch that class, so it runs here instead of in a review.
+const KM_BLOCK = /km: \{([\s\S]*?)\n\s*\}/.exec(readFileSync(join(ROOT, 'i18n.config.ts'), 'utf8'))?.[1] || ''
+const KM_VALUES = [...KM_BLOCK.matchAll(/([A-Za-z]+): ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g)]
+// Khmer script and its own digits, plus the ASCII, Latin terms and typographic marks this file uses
+// on purpose (`SKU`, `slug`, `{count}`, `—`, `→`). Anything else is a paste from another script.
+const KM_ALLOWED = /[\u1780-\u17FF\u17D0\u17D1\u17D2-\u17E9a-zA-Z0-9{}@.,:;!?()'\-–—…→·= ]/u
+const KM_FOREIGN = KM_VALUES.map(([, key, quoted]) => {
+  const off = [...quoted.slice(1, -1)].filter(c => !KM_ALLOWED.test(c))
+  return off.length ? { key, chars: off.map(c => 'U+' + c.codePointAt(0).toString(16).toUpperCase()).join(' ') } : null
+}).filter(Boolean)
+check('the Khmer block holds Khmer (and its deliberate Latin) only', KM_VALUES.length > 100 && KM_FOREIGN.length === 0, { kmValues: KM_VALUES.length, KM_FOREIGN })
+
 // ---------------------------------------------------------------- utilities
 const freePort = () => new Promise((resolve, reject) => {
   const srv = createServer()
@@ -380,6 +395,26 @@ const run = async () => {
     await clickAt(box.x, box.y)
     return waitExpr ? waitFor(waitExpr) : true
   }
+  // ---- the two Khmer sweeps, shared by the storefront and the editors -------------------------
+  // Both read the *script* of what rendered rather than the route it rendered on, which is the only
+  // way to catch a Khmer product or category name printed on the English page (`pickTranslation`
+  // falls back current locale → `en` → first available row, so that run sits under the wide branch of
+  // every locale-keyed guard) and the Khmer chrome of the admin pages, which no storefront route
+  // renders at all. Both are computed-style / canvas reads, never text-width reads (see the font note
+  // at the top of this file), so they hold on a runner with a different UI face. Each reports how much
+  // Khmer it judged, because a bound that can only ever pass proves nothing. A Khmer cluster carries
+  // marks above and below the base, so the second sweep asks the font for its own ink box and compares
+  // it to the line box of whichever element clips.
+  // Khmer cluster apart (its marks sit above and below the base letter) and a *negative* one crowds them
+  // into each other, so the bound is two-sided and absolute: a Khmer run carries NO letter-spacing. Even
+  // the 0.08em hairline these eyebrows used to choose was a defect — at an 11px step it lands between
+  // every codepoint of a cluster, which is what made បណ្តុំផលិតផល render as
+  // "ប ណ្តុំ ផ លិ ត ផ ល". Only the Latin branch may be tracked.
+  const latinSpacedKhmer = () => ev('(() => { const bad = []; let seen = 0; for (const el of document.querySelectorAll("body *")) { const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim(); if (!/[\\u1780-\\u17FF]/.test(own)) continue; seen++; const c = getComputedStyle(el); const fs = parseFloat(c.fontSize); const ls = c.letterSpacing === "normal" ? 0 : parseFloat(c.letterSpacing); if (fs > 0 && Math.abs(ls / fs) > 0.005) bad.push({ text: own.slice(0, 18), em: +(ls / fs).toFixed(3) }); } return { bad, seen } })()')
+  const clippedInk = () => ev('(() => { const cv = document.createElement("canvas").getContext("2d"); const bad = []; let clipping = 0; for (const el of document.querySelectorAll("body *")) { const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim(); if (!/[\\u1780-\\u17FF]/.test(own)) continue; const c = getComputedStyle(el); if (c.overflowY !== "hidden" && c.overflowX !== "hidden") continue; clipping++; cv.font = c.fontWeight + " " + c.fontSize + " " + c.fontFamily; const m = cv.measureText(own); const ink = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent; const lh = parseFloat(c.lineHeight); if (Number.isFinite(lh) && ink > lh + 0.5) bad.push({ text: own.slice(0, 18), ink: +ink.toFixed(1), lh: +lh.toFixed(1) }); } return { bad, clipping } })()')
+  // A caption bounded by `max-w-*` with no `truncate` is not clipped — it overflows its own box, so
+  // `scrollWidth - clientWidth` is the read that answers "does this Khmer word fit here at all".
+  const captionOverflow = sel => ev('(() => { const out = []; for (const s of document.querySelectorAll(' + JSON.stringify(sel) + ')) { if (!s.getClientRects().length) continue; out.push({ text: (s.textContent || "").trim().slice(0, 18), over: s.scrollWidth - s.clientWidth, box: Math.round(s.clientWidth) }) } return out })()')
   // A `keydown` carrying no `text` produces no `keypress`, and it is the keypress that activates
   // a native button in Blink — without it Enter lands on the control and nothing happens.
   const press = async (code, key, vk, text) => { await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code, key, windowsVirtualKeyCode: vk, text: text }); await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code, key }) }
@@ -2118,11 +2153,11 @@ const run = async () => {
     // The locale pill answers on pointer-down, because a locale switch is a remount plus a refetch and
     // the control is the only thing that *can* respond in that gap. Read `scale`, not `transform` —
     // Tailwind v4's scale utility writes the standalone property, which a transform read never sees.
-    const pills = await ev(boxesExpr('div[aria-label="Language"] a'))
+    const pills = await ev(boxesExpr('div[data-language-switcher] a'))
     const kmPill = pills[1]
     await mouse('mousePressed', kmPill.x, kmPill.y, 1)
     await sleep(90)
-    const pillPress = await ev('(() => { const a = document.querySelectorAll(\'div[aria-label="Language"] a\')[1]; return getComputedStyle(a).scale })()')
+    const pillPress = await ev('(() => { const a = document.querySelectorAll(\'div[data-language-switcher] a\')[1]; return getComputedStyle(a).scale })()')
     // Released away from the pill on purpose: a press and release over the same link would navigate,
     // and the run wants to make that trip through the pill itself two lines later.
     await mouse('mouseReleased', kmPill.x, kmPill.y + 320, 0)
@@ -2137,14 +2172,24 @@ const run = async () => {
     check('the Khmer sheet carries no wide Latin tracking and does not widen the page', !!kmType && kmType.transform === 'none' && (kmType.tracking === 'normal' || parseFloat(kmType.tracking) <= 0.5) && !!kmSheet && kmSheet.overflow <= 1, { kmType, overflow: kmSheet && kmSheet.overflow })
     await press('Escape', 'Escape', 27)
     await waitFor('!document.querySelector(\'[data-share-sheet]\')')
-    // The same rule on the storefront itself. Every card eyebrow is a `p.uppercase`, and Khmer is the
-    // locale where wide Latin tracking tears clusters apart. English computes to 2px (0.2em at the
-    // 10px phone step), the guarded Khmer branch to 0.8px (0.08em) — so a 1.1px bound separates the
-    // two, and it is a computed-style read rather than a text-width one (see the font note above).
+    // The same rule on the storefront itself, using the shared sweeps defined above. Control first,
+    // while the page is still English: the card eyebrows must compute wide (0.2em at the 10px phone
+    // step = 2px), or a sweep that returns nothing would be green forever. Note what the sweeps
+    // deliberately do NOT fail — on a Khmer route a category with no Khmer row still prints Latin, and
+    // that Latin keeps its wide tracking on purpose.
     await nav(new URL('/km/', appUrl).href)
     await waitFor('!!document.querySelector(\'main article p.uppercase\')')
-    const kmEyebrows = await ev('Array.from(document.querySelectorAll("main article p.uppercase")).map(p => parseFloat(getComputedStyle(p).letterSpacing))')
-    check('no Khmer card eyebrow carries wide Latin tracking', kmEyebrows.length > 0 && kmEyebrows.every(px => px <= 1.1), { kmEyebrows })
+    const kmHomeWide = await latinSpacedKhmer()
+    check('no Khmer run on the Khmer home is letter-spaced like Latin', kmHomeWide.bad.length === 0 && kmHomeWide.seen > 5, { kmHomeWide })
+    // Positive control for the negative half of the bound. "Every Khmer run is unspaced" and "the sweep
+    // cannot see a squeeze" print the same green line, and this file has already been bitten by exactly
+    // that — so crowd one Khmer run, require the real sweep to name it, then hand the element back.
+    const kmSqueezeArmed = await ev('(() => { const el = [...document.querySelectorAll("body *")].find(n => [...n.childNodes].some(c => c.nodeType === 3 && /[\\u1780-\\u17FF]/.test(c.textContent || ""))); if (!el) return false; window.__KMEL = el; el.style.letterSpacing = "-0.5px"; return true })()')
+    const kmSqueezed = await latinSpacedKhmer()
+    await ev('(() => { if (window.__KMEL) window.__KMEL.style.letterSpacing = ""; return true })()')
+    check('the sweep reports a Khmer run squeezed by negative tracking', kmSqueezeArmed === true && kmSqueezed.bad.length === 1 && kmSqueezed.bad[0].em < 0, { bad: kmSqueezed.bad })
+    const kmHomeClipped = await clippedInk()
+    check('no Khmer run on the Khmer home is clipped by its own box', kmHomeClipped.bad.length === 0, { kmHomeClipped })
     // The locale a card links to is the bug this guards. A hardcoded `/products/<id>` is the *English*
     // route under `prefix_except_default`, so a Khmer visitor clicking a listing was handed English
     // until they found the storefront again. Assert the href carries the prefix, then follow it and
@@ -2154,6 +2199,45 @@ const run = async () => {
     await clickSelector('main article a[href]', 'location.pathname.startsWith("/km/products/")')
     await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
     check('following that card keeps the detail page in Khmer', await ev('(() => { const p = location.pathname; const khmer = /[\u1780-\u17FF]/.test(document.body.innerText); return p.startsWith("/km/products/") && khmer })()'), { href: kmHref })
+    const kmDetailWide = await latinSpacedKhmer()
+    check('no Khmer run on the Khmer detail page is letter-spaced like Latin', kmDetailWide.bad.length === 0 && kmDetailWide.seen > 5, { kmDetailWide })
+    const kmDetailClipped = await clippedInk()
+    check('no Khmer run on the Khmer detail page is clipped by its own box', kmDetailClipped.bad.length === 0, { kmDetailClipped })
+    // The primary action in Khmer, measured rather than read: the copy pass shortened `contactToOrder`
+    // (ទំនាក់ទំនង → ទាក់ទង), and the phone row is the one place a longer order label
+    // had to share width with Share inside a 44px control. Same three numbers the English sticky bar is
+    // held to — label unclipped, control height, no page widening.
+    await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-contact-cta]\')')
+    const kmSticky = await ev('(() => { const ctl = document.querySelector("[data-sticky-cta] [data-contact-cta]"); if (!ctl) return null; const label = ctl.querySelector("span") || ctl; const r = ctl.getBoundingClientRect(); return { text: (label.textContent || "").trim(), clip: label.scrollWidth - label.clientWidth, h: Math.round(r.height), overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth } })()')
+    check('the Khmer order action reads Khmer, stays whole and keeps the 44px control', !!kmSticky && /[\u1780-\u17FF]/.test(kmSticky.text) && kmSticky.clip <= 0 && kmSticky.h === C.sticky.controlHeight && kmSticky.overflow <= 1, { kmSticky })
+    // The Sale ribbon is the label that clips by construction: `truncate` sets overflow hidden on a
+    // `text-[10px] leading-[14px]` band. It paints only while a promotion runs, and the campaign has
+    // to be *unnamed*, because a Latin promo label would render Latin and prove nothing about Khmer.
+    const kmRibbonArm = await forNextDocument('var p = window.__PRODUCTS[0]; p.promo_price = "19.00"; p.promo_label = null; p.promo_quantity = null; p.promo_starts_at = "2000-01-01T00:00:00.000Z";')
+    await nav(new URL('/km/', appUrl).href)
+    await waitFor('!!document.querySelector(\'[data-sale-ribbon]\')')
+    const kmRibbon = await ev('(() => { const el = document.querySelector("[data-sale-ribbon] span"); if (!el) return null; const own = (el.textContent || "").trim(); const c = getComputedStyle(el); const cv = document.createElement("canvas").getContext("2d"); cv.font = c.fontWeight + " " + c.fontSize + " " + c.fontFamily; const m = cv.measureText(own); return { text: own, ink: +(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent).toFixed(1), lh: +parseFloat(c.lineHeight).toFixed(1), em: +(c.letterSpacing === "normal" ? 0 : parseFloat(c.letterSpacing) / parseFloat(c.fontSize)).toFixed(3) } })()')
+    check('the Khmer Sale ribbon fits the band it is cut from and carries no tracking at all', !!kmRibbon && /[\u1780-\u17FF]/.test(kmRibbon.text) && kmRibbon.ink <= kmRibbon.lh + 0.5 && kmRibbon.em <= 0.005, { kmRibbon })
+    await stopForNextDocument(kmRibbonArm)
+    // The hole a locale-keyed guard cannot see: this product now has *no* English row, so on the
+    // unprefixed (English) route its name and its category eyebrow both render Khmer — and the
+    // eyebrow they render through is the wide-tracking branch of the ternary.
+    const kmNameArm = await forNextDocument('var p = window.__PRODUCTS[0]; p.product_translations = [{ id: "dddddddd-0000-4000-8000-000000000101", locale: "km", name: "ក្តារចុច Verify Keyboard", short_description: "ក្តារចុចសម្រាប់សាកល្បង", description: "ផលិតផលសម្រាប់តេស្ត", specifications: null }]; p.categories.category_translations = [{ id: "ffffffff-0000-4000-8000-000000000301", locale: "km", name: "ក្តារចុច" }];')
+    await nav(detailUrl(G.manyId))
+    await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
+    const enRouteKhmer = await latinSpacedKhmer()
+    check('a Khmer name on the English route is not letter-spaced like Latin', enRouteKhmer.bad.length === 0 && enRouteKhmer.seen > 0, { enRouteKhmer })
+    const enRouteKhmerClipped = await clippedInk()
+    check('a Khmer name on the English route is not clipped by its own box', enRouteKhmerClipped.bad.length === 0, { enRouteKhmerClipped })
+    // The same product on the English *home*, where the card eyebrow is the other site that keys off
+    // the locale. The cookie has to be written for `/` to serve English at all — after the Khmer
+    // visit `redirectOn: 'root'` would send an unprefixed `/` straight back to `/km/`.
+    await ev('document.cookie = "raccoon-gear-bin-locale=en; path=/"; true')
+    await nav(new URL('/', appUrl).href)
+    await waitFor('!!document.querySelector(\'main article p.uppercase\')')
+    const enCardWide = await latinSpacedKhmer()
+    check('a Khmer category name on an English card eyebrow is not letter-spaced like Latin', enCardWide.bad.length === 0 && enCardWide.seen > 0, { enCardWide })
+    await stopForNextDocument(kmNameArm)
     await nav(new URL('/km/', appUrl).href)
     await waitFor('!!document.querySelector(\'main article p.uppercase\')')
     await nav(detailUrl(G.manyId))
@@ -2621,6 +2705,55 @@ const run = async () => {
     check('every enabled platform renders one filled mark, not the globe', Object.keys(marks).length > 1 && Object.values(marks).every(g => g.fill === 'currentColor' && g.children === 1 && g.paths === 1 && g.w === 16 && g.h === 16) && new Set(Object.values(marks).map(g => g.d)).size === Object.keys(marks).length, Object.keys(marks))
     check('every enabled platform paints its mark, none is a blank', Object.values(marks).every(g => g.ink[0] >= 12 && g.ink[1] >= 12), inkOf())
     check('youtube and tiktok are both on screen, as distinct marks', !!marks.youtube && !!marks.tiktok && marks.youtube.d !== marks.tiktok.d, inkOf())
+
+    // ---- the editors in Khmer -------------------------------------------------------------------
+    // No storefront route renders these pages, and the copy pass changed more text here than anywhere
+    // else: `socialContactLabel` went from អនុញ្ញាតឱ្យទំនាក់ទំនង… to ឱ្យទាក់ទង…
+    // precisely because it is a caption bounded at `max-w-[6.5rem]`. Those captions carry no
+    // `truncate`, so nothing clips and the ink-vs-line-box sweep has nothing to report — what a long
+    // Khmer word does to a box like this is overflow it, which `captionOverflow` reads as
+    // `scrollWidth - clientWidth` off the `data-switch-caption` hook. The run sits at 1440 here, which
+    // is what makes these `hidden xl:block` captions visible at all; below `xl` the list would be empty
+    // and the bound would be measuring nothing. Reached through the language pill, never through
+    // `AdminTabs`: those hrefs are plain by design (`/admin/*` is not a localized flow), so a tab click
+    // leaves Khmer rather than carrying it.
+    await clickByText('header button', 'Admin tools', `location.pathname === "/admin/site-info" && !!document.querySelector(${JSON.stringify(SITE_FORM)})`)
+    await clickSelector('div[data-language-switcher] a[href^="/km/"]', 'location.pathname === "/km/admin/site-info"')
+    await waitFor('!!document.querySelector(' + JSON.stringify(SITE_FORM) + ')')
+    const kmSiteWide = await latinSpacedKhmer()
+    check('no Khmer run in the site-info editor is letter-spaced like Latin', kmSiteWide.bad.length === 0 && kmSiteWide.seen > 5, { kmSiteWide })
+    const kmSiteClipped = await clippedInk()
+    check('no Khmer run in the site-info editor is clipped by its own box', kmSiteClipped.bad.length === 0, { kmSiteClipped })
+    const SWITCH_CAPTIONS = '[data-switch-caption]'
+    const kmSiteCaptions = await captionOverflow(SWITCH_CAPTIONS)
+    check('every Khmer site-info caption fits the box it is bounded to', kmSiteCaptions.length === 6 && kmSiteCaptions.every(c => c.over <= 1), { kmSiteCaptions })
+    // Control, because "nothing overflows" and "the probe never fired" are the same green line.
+    // Squeeze one caption on purpose, read the overflow back, restore it in the same expression.
+    const kmCaptionProbe = await ev('(() => { const s = document.querySelector(' + JSON.stringify(SWITCH_CAPTIONS) + '); if (!s) return null; s.style.maxWidth = "2rem"; const o = s.scrollWidth - s.clientWidth; s.style.maxWidth = ""; return o })()')
+    check('the caption-overflow measurement can report an overflow', typeof kmCaptionProbe === 'number' && kmCaptionProbe > 1, { kmCaptionProbe })
+
+    await clickSelector('[data-admin-tab="categories"]', 'location.pathname === "/admin/categories"')
+    await clickSelector('div[data-language-switcher] a[href^="/km/"]', 'location.pathname === "/km/admin/categories"')
+    await waitFor('!!document.querySelector(' + JSON.stringify(CAT_FORM) + ')')
+    const kmCatWide = await latinSpacedKhmer()
+    check('no Khmer run in the category editor is letter-spaced like Latin', kmCatWide.bad.length === 0 && kmCatWide.seen > 5, { kmCatWide })
+    const kmCatClipped = await clippedInk()
+    check('no Khmer run in the category editor is clipped by its own box', kmCatClipped.bad.length === 0, { kmCatClipped })
+    const kmCatCaptions = await captionOverflow(SWITCH_CAPTIONS)
+    check('every Khmer category caption fits the box it is bounded to', kmCatCaptions.length > 0 && kmCatCaptions.every(c => c.over <= 1), { kmCatCaptions })
+    // Back to English before anything else runs — the channel list and the prepared message below are
+    // built through `t()`, so a Khmer page left behind would hand the fixtures copy they never expect —
+    // then onto the catalog the same way the flow above returns, leaving the page state the checks that
+    // follow were written against. The first pill is `EN` (this is `prefix_except_default`).
+    // Asserted, not fire-and-forget: `clickSelector` returns false when its wait expires, and a locale
+    // switch that silently does nothing would leave every check below this one reading Khmer copy. The
+    // switcher is aimed at through `data-language-switcher` rather than its aria-label because that
+    // label is itself translated — on a Khmer page it reads ភាសា, so the English string matches nothing.
+    check('the English pill hands the editors back to English', await clickSelector('div[data-language-switcher] a:first-child', 'location.pathname === "/admin/categories"'), { path: await ev('location.pathname') })
+    await clickSelector('[data-admin-tab="site-info"]', `!!document.querySelector(${JSON.stringify(SITE_FORM)})`)
+    check('the editors are back in English for the checks that follow', await ev('(() => { const h = document.querySelector("main h1"); return !!h && h.textContent.trim() === "Site info" })()'), { path: await ev('location.pathname') })
+    await ev('(() => { const a = document.querySelector("main header a"); if (a) a.click(); return true })()')
+    await waitFor('location.pathname === "/" && !!document.querySelector(\'main article h2 a\')', 10000)
 
     // The site-info save has to reach the product page's contact channels. Reached by an in-app
     // navigation, not a reload: the stub's site row lives inside the document, so a fresh load

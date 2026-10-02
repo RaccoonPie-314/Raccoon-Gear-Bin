@@ -27,9 +27,10 @@ const status = computed(() => {
 <template>
   <!-- `data-stock-status` / `data-stock-state` are measurement hooks, not style hooks: nothing in
        this file reads them, and the labels and colours are byte-identical to the ones from before
-       the band rule was shared out of this component. -->
+       the band rule was shared out of this component. The label carries no letter-spacing: 0.025em
+       was never a look, and any tracking here would need the same script guard the eyebrows carry. -->
   <span
-    class="inline-flex items-center gap-1.5 text-[11px] font-medium tracking-wide"
+    class="inline-flex items-center gap-1.5 text-[11px] font-medium"
     :class="status.className"
     data-stock-status
     :data-stock-state="status.state"

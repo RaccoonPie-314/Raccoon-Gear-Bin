@@ -17,7 +17,7 @@ import { getProductPricing } from '~/utils/product-pricing'
  * off bounds because the zoom maths measures that frame. A `size-28` box at the corner needs neither.
  */
 const props = defineProps<{ product: CatalogProduct }>()
-const { t } = useI18n()
+const { locale, t } = useI18n()
 const pricing = computed(() => getProductPricing(props.product))
 </script>
 
@@ -32,7 +32,7 @@ const pricing = computed(() => getProductPricing(props.product))
     data-sale-ribbon
     class="pointer-events-none absolute left-0 top-0 z-10 size-28 overflow-hidden"
   >
-    <span class="absolute -left-[30px] top-[23px] w-32 -rotate-45 truncate bg-red-700 py-1 text-center text-[10px] font-bold uppercase leading-[14px] tracking-wide text-white">
+    <span class="absolute -left-[30px] top-[23px] w-32 -rotate-45 truncate bg-red-700 py-1 text-center text-[10px] font-bold uppercase leading-[14px] text-white" :class="locale === 'km' ? '' : 'tracking-wide'">
       {{ pricing.label || t('sale') }}
     </span>
   </span>

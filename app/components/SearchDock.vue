@@ -1089,7 +1089,7 @@ onUnmounted(() => {
 
         <p
           class="mt-4 text-[10px] font-bold text-zinc-400 uppercase tabular-nums dark:text-zinc-500"
-          :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'"
+          :class="locale === 'km' ? '' : 'tracking-[0.22em]'"
           :style="{ opacity: contentOpacity, transition: contentTransition }"
         >
           {{ t('itemCount', { count: resultCount }) }}

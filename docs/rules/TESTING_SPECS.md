@@ -67,10 +67,24 @@ Covered (this list is the shape of the run, not its check count — the run prin
   transitions, frame-sampled with and without reduced motion; the sticky bar's geometry, safe area,
   breakpoint, surface and stacking under the lightbox; Escape handing focus back; no horizontal
   overflow at seven widths in both colour schemes; canonical and Open Graph metadata.
-- **Accessibility floors**: the Khmer card eyebrow computes under 1.1px of tracking, with a control on
-  the same elements in English that must read wide (2px) — so the bound is known to be measuring the
-  guard and not an empty node list; and `prefers-reduced-transparency` leaves the sticky bar and detail
-  header with `backdropFilter: 'none'` and a fully opaque `backgroundColor`.
+- **Accessibility floors**: every element whose own text contains a Khmer codepoint must compute **no
+  letter-spacing at all** (`|letterSpacing / font-size| <= 0.005`). Wide Latin tracking pulls a cluster
+  apart, `tracking-tight` crowds it together, and even the 0.08em hairline these labels once carried
+  lands between the codepoints of a cluster — which is what painted បណ្តុំផលិតផល as
+  "ប ណ្តុំ ផ លិ ត ផ ល". Swept across the Khmer home and detail page *and* across the English
+  routes with a Khmer-only product (the case a `locale === 'km'` guard cannot see, because
+  `pickTranslation` falls back to whichever translation row exists), and across both admin editors.
+  Each sweep reports how many Khmer runs it judged, an English control on the same card elements must
+  read wide (2px), and the home check additionally crowds one Khmer run inline to prove the bound can
+  fire — "nothing is spaced" and "the sweep cannot see spacing" are the same green line otherwise. A second sweep asks the font for its
+  own ink box (`measureText().fontBoundingBox*`) wherever a Khmer run sits inside an `overflow: hidden`
+  element, which is how the Sale ribbon's 14px band is known to hold 12px of Khmer ink rather than
+  assumed to; and `prefers-reduced-transparency` leaves the sticky bar and detail header with
+  `backdropFilter: 'none'` and a fully opaque `backgroundColor`.
+- **A static scan before the browser starts**: the `km` block of `i18n.config.ts` is read from disk and
+  must contain nothing outside Khmer script, its own digits, ASCII and the few typographic marks the
+  file uses deliberately. Thai consonants once sat inside a Khmer sentence and every browser check
+  stayed green — the run still read as Khmer, so only a source scan can catch that class.
 - **Promotions** (`app/utils/product-pricing.ts`, one rule with five call sites): a live window
   paints the discounted price with the original crossed out on the detail page, the same pair on the
   card, and the discounted number inside the prepared contact message; a closed window and a spent

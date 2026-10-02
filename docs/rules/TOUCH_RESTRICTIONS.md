@@ -62,6 +62,16 @@ Phase F added tactile motion without touching either engine: buttons are `<motio
   `Admin tools` button (its English text is what `verify` clicks), and `[data-admin-tabs]` /
   `[data-admin-tab="site-info"|"categories"]` are what the tab checks aim at. Renaming the button text or
   a `data-admin-tab` id, or moving a page's route, breaks those checks in the same commit.
+- **`[data-switch-caption]`** and **`[data-language-switcher]`** — measurement hooks, not style hooks.
+  `[data-switch-caption]` sits on each `max-w-[6.5rem]` switch caption in the two admin editors, because
+  the caption is not the switch's CSS next sibling: a fall-through `data-*` on `<USwitch>` lands on the
+  inner `data-slot="base"` button, and `Switch.vue` wraps that button in its own `data-slot="container"`
+  `div`, so `[data-social-enabled] + span` matches nothing and a Khmer caption too wide for its box would
+  be measured as "no captions at all". `verify` reads the captions for `scrollWidth - clientWidth` on the
+  Khmer editors, and squeezes one on purpose to prove the read works. `[data-language-switcher]` exists
+  because the switcher's own `aria-label` is translated (`Language` → ភាសា), so a test that aims at
+  `div[aria-label="Language"]` silently matches nothing once the page is Khmer — which is exactly how a
+  locale switch stops happening and a run keeps passing.
 - **The editor's two entry points** — `index.vue` types its `adminEditor` ref against
   `openAddEditor()` / `openEditEditor(product)` from the feature's `defineExpose`. Nothing in CI
   proves the names still match; the IDE language server and the harness do.

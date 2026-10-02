@@ -80,7 +80,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
               <span
                 v-if="isAdminMode"
                 class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
-                :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.16em]'"
+                :class="locale === 'km' ? '' : 'tracking-[0.16em]'"
               >
                 <span class="h-1.5 w-1.5 rounded-full bg-zinc-950 dark:bg-white" />
                 {{ t('adminMode') }}
@@ -116,15 +116,17 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
       <!-- Catalog label: the masthead carries the brand weight now, so the section under it is
            one line of eyebrow plus the admin action, not a second heading block. -->
       <section class="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 pt-7 sm:pt-9">
-        <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks below
-             the baseline, so the labels drop to a hairline of tracking in that locale. -->
-        <h1 class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+        <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks above and
+             below the base letter — letter-spacing lands between those codepoints and tears a cluster in
+             two — so in that locale these labels carry no tracking at all. -->
+        <h1 class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.25em]'">
           {{ t('collection') }}
         </h1>
         <UButton
           v-if="isAdminMode"
           color="neutral"
-          class="shrink-0 rounded-full px-5 py-2.5 font-semibold text-xs tracking-wider uppercase shadow-xs"
+          class="shrink-0 rounded-full px-5 py-2.5 font-semibold text-xs uppercase shadow-xs"
+          :class="locale === 'km' ? '' : 'tracking-wider'"
           @click="openAddEditor"
         >
           <span aria-hidden="true">+</span> {{ t('addProduct') }}
@@ -135,7 +137,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
       <div class="mt-8 flex flex-col gap-0 sm:mt-10 lg:flex-row lg:items-start lg:gap-10">
         <!-- Left Side: Category Navigation Panel (desktop only in layout flow) -->
         <aside class="relative w-full shrink-0 lg:sticky lg:top-10 lg:w-44 xl:w-48">
-          <p class="hidden lg:block mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
+          <p class="hidden lg:block mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
             {{ t('shopByCategory') }}
           </p>
           <!-- The dock's length is now the shop's to decide, so the box it lives in has to bound it.

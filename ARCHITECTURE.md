@@ -464,7 +464,7 @@ and none of them are visible to the compiler or to `build`.
 | Route (locale-switch) transition | `main.css` `.page-*`, driven by Nuxt's `pageTransition: { name: 'page', mode: 'out-in' }`. **Asymmetric and mirrored**: leave `100ms ease-in`, enter `220ms ease-out` on `cubic-bezier(0.33, 1, 0.68, 1)`, both over the same `translateY(4px)` in the same direction — the page gets out of the way fast and the new one arrives, rather than two symmetric fades that read as a blink. `out-in` means the durations add (~320ms) and the two pages never overlap, so no double-height frame. This is the whole visual experience of switching EN ⇄ ខ្មែរ, because that switch *is* a route change (Boundary rule 4). Under `prefers-reduced-motion` the translate is dropped and both collapse to 120ms opacity. | `main.css`, `nuxt.config.ts` |
 | Data-arrival reveal | `<Transition name="reveal">` on the catalog grid, the loaded product section, the masthead's two deferred blocks (`SiteInfoContact`, `SiteInfoSocials`) and the login error alert: content that arrives late **fades in over 200ms `ease-out`** instead of cutting in. Opacity only, and on the incoming layer alone — it is in the DOM from its first enter frame, so it already carries its own height and the page cannot collapse under it. Both catalog blocks carry their own `v-if` (not `v-else`) because a `Transition` child must own its condition; the three conditions stay mutually exclusive, and the harness's card-count and empty-state checks are the guard on that. The two masthead wrappers live **inside** their components rather than around them in `index.vue`: the components mount with `siteInfo` still `null`, so a `Transition` in the page would fire on the placeholder and never on the data arriving. The masthead's measured geometry is unaffected because nothing moves | `main.css`, `index.vue`, `products/[id].vue`, `site-info/SiteInfoContact.vue`, `site-info/SiteInfoSocials.vue`, `admin/login.vue` |
 | Admin modal enter / leave | The product editor's form modal and the delete confirmation were hard cuts; both overlays now run one `<Transition name="modal">` whose rules are in `main.css`. Scrim `opacity` 200ms in on `cubic-bezier(0.33, 1, 0.68, 1)` / 180ms out on `cubic-bezier(0.42, 0, 1, 1)`, the card `scale(0.95) → 1` over the same 200ms (not 220: Vue sizes the transition off the overlay element's own duration, so a longer child transition loses its `enter-active` class two frames early and snaps the last couple of percent) — the storefront's existing numbers, no new token, exit shorter than enter. Plain CSS rather than a Motion spring because neither modal is a gesture surface and neither is reactive state, which keeps `app/utils/motion.ts` to interruptible physics. The card is targeted as `.modal-* > section` (the overlay's only direct child in both modals) so no new `data-*` contract exists and no rule can reach a `<motion>` surface whose transform has one owner. Modals are the trigger-origin exemption: `transform-origin` stays centred. `deleteEditedProduct()` closes one overlay and opens the other, so the two scrims overlap for ~180ms — one fading out as one fades in, which reads as a single continuous scrim | `main.css`, `AdminProductEditor.vue` |
-| Admin row lists: enter / leave / move, and the social drag | Both editor lists are `<TransitionGroup tag="ul" name="row">` sharing one set of classes: enter 200ms `opacity + scale(0.97)`, leave 160ms on the accelerating curve with the leaving row `position: absolute` inside the list's `relative` box (so the rows below slide up *while* it fades, not after), `.row-move` 200ms — which is the point, because the order *is* what both editors exist to change. Three guards are load-bearing, not stylistic: the rules are **unlayered** so they outrank a row's own Tailwind `opacity-60` (the same mechanism as the reduced-transparency floor above); the leaving row carries `pointer-events: none` because `verify` clicks `[data-category-remove="N"]` by index and `querySelector` answers the first node in DOM order; and **`.row-move` must be declared before `.row-enter-active` and `.row-leave-active`**, because TransitionGroup also puts `row-move` on the *leaving* row (going absolute changes its measured position) and `transition` is a shorthand — with `row-move` last it replaced the leave's `opacity 160ms` track, measured as the row jumping from opacity 1 straight to 0 while carrying `row-leave-to` and `transition-duration: 0.2s`. Move → enter → leave is the order that lets a node be relocating and leaving at once. **A row list can only animate a reorder if its rows are keyed on identity, not on slot**: `site-info.vue` used `:key="index"`, so a move patched one link's fields into another link's element and no node ever changed position; its rows now carry a client-only `uid` that never reaches the database, because `socialLinksToColumn` builds each stored object field by field. That list also **drags** — HTML5 drag-and-drop started from a grip button rather than the row, so selecting text inside a field cannot drag a row; each `dragover` moves the dragged `uid` to the slot under the pointer, and the reorder is keyed on the uid instead of a from/to index pair because the array re-indexes under every move. Mouse and trackpad only: the two arrows stay the keyboard and touch path, and they now animate. Known ceiling: an unsaved category row is keyed `new-<index>`, so deleting one can re-key its siblings and read as a content swap; stored rows (`row.id`) animate correctly | `main.css`, `admin/categories.vue`, `admin/site-info.vue`, `useAdminSiteInfoEditor.ts` |
+| Admin row lists: enter / leave / move, and the social drag | Both editor lists are `<TransitionGroup tag="ul" name="row">` sharing one set of classes: enter 200ms `opacity + scale(0.97)`, leave 160ms on the accelerating curve with the leaving row `position: absolute` inside the list's `relative` box (so the rows below slide up *while* it fades, not after), `.row-move` 200ms — which is the point, because the order *is* what both editors exist to change. Three guards are load-bearing, not stylistic: the rules are **unlayered** so they outrank a row's own Tailwind `opacity-60` (the same mechanism as the reduced-transparency floor above); the leaving row carries `pointer-events: none` because `verify` clicks `[data-category-remove="N"]` by index and `querySelector` answers the first node in DOM order; and **`.row-move` must be declared before `.row-enter-active` and `.row-leave-active`**, because TransitionGroup also puts `row-move` on the *leaving* row (going absolute changes its measured position) and `transition` is a shorthand — with `row-move` last it replaced the leave's `opacity 160ms` track, measured as the row jumping from opacity 1 straight to 0 while carrying `row-leave-to` and `transition-duration: 0.2s`. Move → enter → leave is the order that lets a node be relocating and leaving at once. **A row list can only animate a reorder if its rows are keyed on identity, not on slot**: `site-info.vue` used `:key="index"`, so a move patched one link's fields into another link's element and no node ever changed position; its rows now carry a client-only `uid` that never reaches the database, because `socialLinksToColumn` builds each stored object field by field. That list also **drags**, and so does the category editor now — same shape, same `uid`, one handler pair per page rather than a shared drag abstraction (the two row models share nothing else). HTML5 drag-and-drop started from a grip button rather than the row, so selecting text inside a field cannot drag a row. **`dragover` is inert (`preventDefault` and nothing else) and the one reorder happens on `drop`**: reordering live, per `dragover`, made the dragged row flicker violently, because every move starts a 200ms `.row-move` transform and hit-testing follows the *painted* boxes — under a pointer that never moved, the cursor kept landing on a different row than the one that would settle there, so the list swapped itself back and forth at drag-event frequency (measured: three order changes during one held-still hover). Move once, on drop, and the animation has nothing to chase. The reorder is keyed on the uid rather than a from/to index pair because the array re-indexes on every move. Mouse and trackpad only: the two arrows stay the keyboard and touch path, and they now animate. Keying the category rows on that uid also retired their `new-<index>` key, which used to re-key every row after a deleted unsaved one and read as a content swap instead of a leave — that ceiling is gone from both lists | `main.css`, `admin/categories.vue`, `admin/site-info.vue`, `useAdminSiteInfoEditor.ts`, `useAdminCategoryEditor.ts` |
 | CSS press set | `motion-safe:active:scale-[0.97]`, `0.97` being the storefront's own `press` value, on the controls that are not Motion components: the `LanguageSwitcher` pills, `ColorModeToggle`, both clear-search buttons (`index.vue`, `CatalogSearchBox.vue`), the admin pencil on a card, and the admin row up/down/remove buttons. Each needs `scale` written into its transition property list — Tailwind v4's scale utilities write the **standalone `scale` property**, so `transition-colors` or `transition-[transform,…]` animates neither the hover pop nor the press (the pencil's `hover:scale-105` was silently instant for exactly this reason). Tailwind emits `active:` after `hover:` at equal specificity, so a press on a hovered control reads as a press. **Harness reads the computed `scale` property, not `transform`** — the same reason. Deliberately excluded: the `SearchDock` launchers and overlay close (the launcher's transform has a JS owner, so a CSS press is a second writer in a hands-off component) and every `UButton` / `USwitch` press, which is `app.config.ts`'s control language | `LanguageSwitcher.vue`, `ColorModeToggle.vue`, `index.vue`, `CatalogSearchBox.vue`, `ProductCard.vue`, `admin/categories.vue`, `admin/site-info.vue` |
 | Masthead emblem height | 96 / 112 px at base / sm-and-up, 128 px from `xl` | `BrandLogo.vue` (`size="masthead"`) |
 | Masthead contact inset | flush to the margins below `lg`; 32 px at `lg`, 48 px from `xl`, symmetric both ends | `SiteInfoContact.vue` |
@@ -489,9 +489,9 @@ The consequence for verification is deliberate and worth knowing before you chan
 metrics are now the *machine's* metrics, so a measurement that depends on how wide a string is cannot
 be an absolute pixel number if it has to pass on a runner too. The harness's @320 guards are therefore
 about overflow, control height and inset — not about where a particular word ends. The other
-font-related rule lives below in the masthead section: **eyebrow tracking is locale-conditional at
-every label, not just the two in `index.vue`** — Khmer has no system fallback and wide Latin tracking
-corrupts its clusters rather than merely spacing them.
+font-related rule lives below in the masthead section: **Khmer carries no letter-spacing at any label,
+not just the two in `index.vue`** — Khmer has no system fallback, and Latin tracking of any size, wide
+or tight, splits a cluster into its codepoints.
 
 ### The storefront masthead
 
@@ -554,16 +554,48 @@ home-screen icon instead of compositing it. `verify` asserts all of it: a declar
 minimum alpha 0 on the 64px pair and 255 on the tiles and the 180 icon, and that `favicon.ico`
 carries 16 / 32 / 48 / 64 PNG entries rather than the framework's 32px BMP default.
 
-**Eyebrow tracking is locale-conditional, everywhere.** Wide Latin letter-spacing pulls Khmer
-clusters apart (a cluster carries marks below the baseline, and tracking separates them), so every
-`uppercase tracking-[…]` label keys its tracking off the locale: `locale === 'km' ? 'tracking-[0.08em]'
-: '<wide>'`. `index.vue` carried the only guards for a long time; the rule now covers all of them —
-card, dock and masthead eyebrows, the panel's field labels, the specs headings, the admin badges —
-each keeping its own Latin value, so English geometry never moved. The guard stays inline per site
-rather than a shared class for two reasons: `main article p.uppercase` is a *harness selector* (moving
-`uppercase` into a component class in `main.css` would break it), and the sizes disagree (10px, 11px,
-10→11px responsive). The pair is measured in both directions — an English control that must read wide,
-and the Khmer eyebrow under 1.1px — because a bound that can only ever pass proves nothing.
+**Tracking on Khmer is conditional on the script that renders, everywhere — and the Khmer branch is
+always zero.** Wide Latin letter-spacing pulls Khmer clusters apart and *negative* tracking — Tailwind's
+`tracking-tight`, the reflex for a Latin display heading — crowds them together. Both are defects, and
+so is a compromise value: the `tracking-[0.08em]` hairline these labels used to carry still lands between
+every codepoint of a cluster, which at an 11px step is what made បណ្តុំផលិតផល paint as
+"ប ណ្តុំ ផ លិ ត ផ ល". Khmer has no letter-spacing at all, so every label keys its tracking off
+what it is about to print: `locale === 'km' ? '' : '<latin>'` for the shop's own words, and
+`hasKhmerText(value) ? '' : '<latin>'` (`app/utils/locale-script.ts`) wherever the label is a resolved
+translation row. That last half is the part the locale cannot see: `pickTranslation` falls back
+current locale → `en` → first available, so a product or category with only a Khmer row prints Khmer
+through the Latin branch on the English route. `index.vue` carried the only guards for a long time;
+the rule now covers every site — card, dock and masthead eyebrows, the panel's field labels, the specs
+headings, the admin badges, the admin `h1`s, the product names, the sale ribbon and both category dock
+labels — each keeping its own Latin value, so English geometry never moved. The guard stays inline per
+site rather than a shared class for two reasons: `main article p.uppercase` is a *harness selector*
+(moving `uppercase` into a component class in `main.css` would break it), and the sizes disagree (10px,
+11px, 10→11px responsive). The pair is measured in both directions — an English control that must read
+wide, and a sweep over every Khmer run that must find none, reporting how many Khmer runs it judged —
+because a bound that can only ever pass proves nothing.
+
+Two labels key off something other than the route, and both are easy to "fix" back into the bug:
+`LanguageSwitcher` keys its tracking off `language.code`, because the `ខ្មែរ` pill is a Khmer run on
+the English page too — which is exactly where a Khmer visitor has to read it. And the card/detail
+eyebrows and both name headings key off `hasKhmerText`, per above. `verify` sweeps every element on the
+page whose own text contains a Khmer codepoint (`latinSpacedKhmer`, `clippedInk`) instead of only the
+card paragraphs it was originally written against — on the Khmer home and detail page, on the English
+routes carrying a Khmer-only product, and on both admin editors, which no storefront route renders. The
+bound is absolute in either direction (`|letterSpacing / font-size| > 0.005` fails), and because "every
+Khmer run is unspaced" and "the sweep cannot see spacing" print an identical green line, the home check
+also *crowds* one Khmer run by hand and requires the sweep to name it before it passes. A third sweep asks
+the font for its ink box (`measureText().fontBoundingBox*`) wherever a Khmer run sits inside an
+`overflow: hidden` element, and a fourth reads `scrollWidth - clientWidth` on the `max-w-[6.5rem]`
+switch captions, because those carry no `truncate` — a Khmer word too long for one does not clip, it
+overflows its box. Measured, not assumed: the ink sweep found nothing clipped anywhere, so no
+line-height was changed. That is the finding worth keeping — the clipping this rule was expected to fix
+did not exist, and only a measurement could have said so.
+
+A pasted foreign script is the other thing no browser check can see. Thai consonants sat inside
+`contactAskLowStock` and rendered as Khmer-shaped noise: the `/[\u1780-\u17FF]/` probes matched, the
+page looked Khmer, and no computed style changed. `verify` now scans the `km` block of
+`i18n.config.ts` itself before it starts a browser, and fails on any codepoint outside Khmer, ASCII
+and the handful of typographic marks the file uses deliberately.
 
 `data-*` attributes are also how the global stylesheet reaches a component: `main.css`'s
 reduced-transparency block paints `[data-site-dock]`, `[data-sticky-cta]`, `[data-detail-header]`,
@@ -607,8 +639,10 @@ photo frame's corner, tilted -45° with its centre on the corner diagonal and it
 box, never touching the gallery's arrows, and `pointer-events: none` so it cannot swallow a tap on the
 link or the zoom control underneath it.
 
-Two checks measure the accessibility floors rather than the tuned motion: the Khmer card eyebrow must
-compute under 1.1px of tracking with an English control on the same elements reading wide, and
+Two checks measure the accessibility floors rather than the tuned motion: every element whose own text
+carries a Khmer codepoint must compute at or under 0.1em of letter-spacing — swept on the Khmer home
+and detail page, and again on the English routes with a Khmer-only product, which is the case a
+locale-keyed guard cannot see — with an English control on the same card elements reading wide; and
 `prefers-reduced-transparency` must leave the sticky bar and detail header unfrosted (`backdropFilter:
 'none'`) and fully opaque. Both live in the phone-width part of the run, where those surfaces are the
 painted ones.
@@ -817,12 +851,11 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   variables or environments, so the runner builds on that fallback too; it gets through today,
   which is why the caps above are the shape to keep. **Run `bun run verify` from a tree that has
   `.env`**, and treat a red detail-page run there as suspect before believing it.
-- **Two paths the harness cannot see: clicking the locale switch, and a product with no category.**
-  Nothing clicks `LanguageSwitcher` itself, so the `switchLocalePath` half of Boundary rule 4 is still
-  held by reading `@nuxtjs/i18n`'s source rather than by a check — though the *other* half is now
-  measured: the run visits `/km/`, asserts a card's href carries the `/km/products/` prefix, follows it
-  and asserts the page it lands on still renders Khmer. Against the old hardcoded links the first of
-  those cannot pass — `"/products/…".startsWith("/km/products/")` is false — so the guard is the bug. Still open: every fixture product carries a category, so
+- **A product with no category, and the admin sweep's one blind spot.** The Khmer editors are reached
+  by clicking `LanguageSwitcher`'s own pills (both directions), so the `switchLocalePath` half of
+  Boundary rule 4 is now measured rather than held by reading `@nuxtjs/i18n`'s source — what stays open
+  is doing the same on the *storefront*, which the run only ever reaches by URL. Still open there too:
+  every fixture product carries a category, so
   `?? t('uncategorized')` never renders — one fixture row with `categories: null` closes it.
 - **The specifications view model round-trips through a string.** `mapProduct` stores
   `formatSpecifications(jsonb)` on `CatalogProduct.specifications` so the editor textarea can

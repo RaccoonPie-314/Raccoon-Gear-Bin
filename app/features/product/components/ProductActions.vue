@@ -354,7 +354,7 @@ const channelName = platformLabel
         <label
           :for="messageId"
           class="block text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500"
-          :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'"
+          :class="locale === 'km' ? '' : 'tracking-[0.22em]'"
         >
           {{ t('contactMessageLabel') }}
         </label>
@@ -385,7 +385,7 @@ const channelName = platformLabel
           </p>
         </div>
 
-        <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
+        <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
           {{ t('chooseChannel') }}
         </p>
 

@@ -27,7 +27,7 @@ const route = useRoute()
 
 <template>
   <nav :aria-label="t('adminTools')" data-admin-tabs class="w-full">
-    <p class="mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
+    <p class="mb-4 text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
       {{ t('adminTools') }}
     </p>
     <div class="flex flex-wrap gap-2.5 lg:flex-col lg:items-stretch">

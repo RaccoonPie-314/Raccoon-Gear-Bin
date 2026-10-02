@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CatalogProduct } from '~/types/catalog'
 import type { SiteInfo } from '~/types/site-info'
+import { hasKhmerText } from '~/utils/locale-script'
 
 const route = useRoute()
 const { fetchProduct, fetchProducts, parseSpecificationPairs } = useCatalog()
@@ -201,10 +202,10 @@ useHead(() => {
              while the desktop Contact panel is being revealed, the scroll code pins this column
              in place for exactly one frame so its measurement is not taken mid-unstick. -->
         <div data-detail-info-col class="min-w-0 lg:sticky lg:top-24 self-start">
-          <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+          <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="hasKhmerText(product.categoryName ?? t('uncategorized')) ? '' : 'tracking-[0.25em]'">
             {{ product.categoryName ?? t('uncategorized') }}
           </p>
-          <h1 class="mt-3 text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl text-zinc-950 dark:text-white">
+          <h1 class="mt-3 text-3xl font-black sm:text-4xl lg:text-5xl text-zinc-950 dark:text-white" :class="hasKhmerText(product.name) ? '' : 'tracking-tight'">
             {{ product.name }}
           </h1>
           <ProductPrice :product="product" class="mt-4 text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white" />
@@ -219,7 +220,7 @@ useHead(() => {
 
           <!-- Structured Specifications Table -->
           <div v-if="parsedSpecs.length" class="mt-10 border-t border-zinc-200/80 pt-8 dark:border-zinc-800/80">
-            <h2 class="text-xs font-bold uppercase text-zinc-400 dark:text-zinc-500 mb-4" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
+            <h2 class="text-xs font-bold uppercase text-zinc-400 dark:text-zinc-500 mb-4" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
               {{ t('specs') }}
             </h2>
             <dl class="divide-y divide-zinc-100 dark:divide-zinc-800/70 text-sm">
@@ -234,7 +235,7 @@ useHead(() => {
             </dl>
           </div>
           <div v-else-if="product.specifications" class="mt-10 border-t border-zinc-200/80 pt-8 dark:border-zinc-800/80">
-            <h2 class="text-xs font-bold uppercase text-zinc-400 dark:text-zinc-500 mb-4" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.22em]'">
+            <h2 class="text-xs font-bold uppercase text-zinc-400 dark:text-zinc-500 mb-4" :class="locale === 'km' ? '' : 'tracking-[0.22em]'">
               {{ t('specs') }}
             </h2>
             <pre class="mt-2 whitespace-pre-wrap font-sans text-sm leading-relaxed text-zinc-500">{{ product.specifications }}</pre>

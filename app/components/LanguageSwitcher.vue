@@ -26,14 +26,18 @@ const languages: { code: LocaleCode; label: string }[] = [
   <div
     class="inline-flex items-center rounded-full p-0.5 bg-zinc-100/90 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs"
     :aria-label="$t('language')"
+    data-language-switcher
   >
     <NuxtLink
       v-for="language in languages"
       :key="language.code"
       :to="switchLocalePath(language.code)"
       :aria-current="locale === language.code ? 'true' : undefined"
-      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wider transition-[color,background-color,scale] duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white motion-safe:active:scale-[0.97]"
+      class="inline-block rounded-full px-2.5 py-1 text-[11px] font-semibold transition-[color,background-color,scale] duration-200 select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:focus-visible:ring-white motion-safe:active:scale-[0.97]"
       :class="[
+        // Tracking keys off the label, not the page: `ខ្មែរ` is a Khmer run wherever it is drawn,
+        // and the English route is exactly where a Khmer visitor has to read it to switch.
+        language.code === 'km' ? '' : 'tracking-wider',
         locale === language.code
           ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-white'
           : 'text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'

@@ -75,10 +75,10 @@ useHead({ title: pageTitle })
           </div>
         </div>
         <div>
-          <p class="text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? 'tracking-[0.08em]' : 'tracking-[0.25em]'">
+          <p class="text-[10px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.25em]'">
             {{ t('adminAccess') }}
           </p>
-          <h1 class="mt-1 text-2xl sm:text-3xl font-black tracking-tight text-zinc-950 dark:text-white">
+          <h1 class="mt-1 text-2xl sm:text-3xl font-black text-zinc-950 dark:text-white" :class="locale === 'km' ? '' : 'tracking-tight'">
             {{ t('signIn') }}
           </h1>
         </div>
