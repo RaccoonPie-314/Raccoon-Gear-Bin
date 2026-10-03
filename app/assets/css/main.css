@@ -51,13 +51,11 @@ body {
 }
 
 /* Apple-style minimalist scrollbar suppression for touch/horizontal scrollers */
-.no-scrollbar::-webkit-scrollbar,
-.scrollbar-none::-webkit-scrollbar {
+.no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 
-.no-scrollbar,
-.scrollbar-none {
+.no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }

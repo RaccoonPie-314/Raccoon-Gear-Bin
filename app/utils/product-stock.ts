@@ -1,4 +1,6 @@
-import { LOW_STOCK_THRESHOLD } from '~/constants/catalog'
+/** The one number the low band is decided by, and the only place it is written. It lives beside the
+ * rule that reads it because there is no second reader to share it with. */
+export const LOW_STOCK_THRESHOLD = 5
 
 /** The three bands a quantity falls into. Named here because this file is the only place the
  * boundary between them is decided. */

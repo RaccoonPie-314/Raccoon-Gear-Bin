@@ -10,7 +10,7 @@ import type { CategoryIconName } from '~/composables/useCategoryItems'
  * Anything the shop adds beyond the categories with art below falls through to the crate mark:
  * a category is a category, it is not required to have bespoke art to be navigable. Every mark here is
  * drawn on the same 24-unit grid, at the root's 1.75 stroke and round joins, and is picked by slug in
- * `useCategoryItems`' `ICON_BY_SLUG` — adding one is one entry there and one `<template>` here.
+ * `useCategoryItems`' `ICON_SLUGS` — adding one is one entry there and one `<template>` here.
  */
 defineProps<{ name: CategoryIconName }>()
 </script>

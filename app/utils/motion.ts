@@ -34,23 +34,6 @@ export const press = {
 } as const
 
 /**
- * `panel` — a surface that morphs out of its own trigger (the Contact-to-Order panel, on both the
- * inline and the sticky mount). Phase C moved its enter/exit off a fixed-duration CSS transition and
- * onto this spring so the morph is interruptible and velocity-continuous — a rapid open→close→reopen
- * retargets from where the panel actually is rather than restarting a curve.
- *
- * Restrained, near-critically damped (`damping 30`): it settles with no visible overshoot, because a
- * panel that bounces reads as a toy, not a tool. The *start transform is still measured against the
- * trigger in `ProductActions.vue` — Motion owns the physics, not the spatial anchoring.
- *
- * Reduced motion is applied at the call site (a short eased duration instead of this spring), keeping
- * the contained translate but dropping the springy character.
- */
-export const panel = {
-  transition: { type: 'spring', stiffness: 300, damping: 30 }
-} as const
-
-/**
  * `sheet` — the phone bottom sheet (the Share Sheet's mobile shape). Enter and dismiss ride this
  * bezier through an **imperative `animate()` on the slide host** (`data-share-slide`) — the same
  * shape `applePop` gives the contact panel — and that is the point: a declarative `y` is not on
@@ -80,21 +63,6 @@ export const sheet = {
  */
 export const lightbox = {
   transition: { duration: 0.2, ease: [0.33, 1, 0.68, 1] }
-} as const
-
-/**
- * `spotlight` — the SearchDock overlay FLIP: the pill morphs out of the launcher icon into the
- * search field and back (Phase E). The frame spring is the pop-and-settle: stiffness 360 / damping
- * 28 / mass 0.8 is snappy with a hair of life but never overshoots into a wobble. Only `frame`
- * drives a transform (panel translate+scale+radius, glyph flyer); the backdrop and content are
- * opacity-only fades on their own elements, kept fast and independent so the text never stretches
- * while the surface grows. Reduced motion swaps the frame spring for a short eased duration at the
- * call site.
- */
-export const spotlight = {
-  frame: { type: 'spring', stiffness: 360, damping: 28, mass: 0.8 },
-  backdrop: { duration: 0.22, ease: 'linear' },
-  content: { duration: 0.16, ease: [0.16, 1, 0.3, 1] }
 } as const
 
 /**

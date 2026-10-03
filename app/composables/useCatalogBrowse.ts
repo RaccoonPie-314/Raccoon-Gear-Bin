@@ -4,7 +4,7 @@ import { getProductPricing } from '~/utils/product-pricing'
 
 export type CatalogSortOrder = 'newest' | 'price-low' | 'price-high' | 'name'
 
-export const ALL_CATEGORIES = 'all'
+const ALL_CATEGORIES = 'all'
 
 /**
  * The browsing state of the catalog: what the visitor typed, picked and ordered by, plus the

@@ -12,47 +12,37 @@ export type CategoryIconName =
   | 'cpu' | 'gpu' | 'ram' | 'motherboard' | 'storage' | 'cooling' | 'power'
   | 'network' | 'microphone' | 'webcam' | 'speaker' | 'printer'
 
-/** Slug → glyph. Matched on the stored slug and never on a translated name, so a Khmer label keeps
- * its icon and a renamed category keeps its glyph. The key is also the slug the admin's icon picker
- * writes, which is why every one of them is lowercase and hyphen-free.
+/** The slugs a glyph is derived from — every name in the union except the two that are not slugs. */
+type IconSlug = Exclude<CategoryIconName, 'all' | 'other'>
+
+/** Slug = glyph, so this is a list rather than a map from `mice` to `mice`. Matched on the stored
+ * slug and never on a translated name, so a Khmer label keeps its icon and a renamed category keeps
+ * its glyph. Every entry is also the slug the admin's icon picker writes, which is why each one is
+ * lowercase and hyphen-free.
  *
  * Grouped the way the shop files things: the original peripherals, then whole machines, then the
  * parts inside them, then everything that plugs in.
  */
-const ICON_BY_SLUG: Record<string, CategoryIconName> = {
-  controllers: 'controllers',
-  keyboards: 'keyboards',
-  mice: 'mice',
-  headphones: 'headphones',
-  earphones: 'earphones',
-  laptop: 'laptop',
-  desktop: 'desktop',
-  monitor: 'monitor',
-  tablet: 'tablet',
-  cpu: 'cpu',
-  gpu: 'gpu',
-  ram: 'ram',
-  motherboard: 'motherboard',
-  storage: 'storage',
-  cooling: 'cooling',
-  power: 'power',
-  network: 'network',
-  microphone: 'microphone',
-  webcam: 'webcam',
-  speaker: 'speaker',
-  printer: 'printer'
-}
+const ICON_SLUGS: IconSlug[] = [
+  'controllers', 'keyboards', 'mice', 'headphones', 'earphones',
+  'laptop', 'desktop', 'monitor', 'tablet',
+  'cpu', 'gpu', 'ram', 'motherboard', 'storage', 'cooling', 'power',
+  'network', 'microphone', 'webcam', 'speaker', 'printer'
+]
 
 /** The one slug → glyph rule, read by the docks and by the admin's icon picker alike. */
 export const categoryIconOf = (slug?: string): CategoryIconName =>
-  ICON_BY_SLUG[(slug || '').toLowerCase()] || 'other'
+  ICON_SLUGS.find(icon => icon === (slug || '').toLowerCase()) ?? 'other'
 
 /**
  * What the admin's icon picker offers: every slug that has bespoke art, labelled with itself because
  * the label is what gets stored. `all` and `other` are absent on purpose — one is a virtual dock
  * entry, the other is what a slug with no art falls through to.
+ *
+ * Annotated rather than inferred: the stored slug is a `string` the shop types, so the picker's value
+ * stays a `string` and not the union — `row.slug` binds to it directly.
  */
-export const CATEGORY_ICON_ITEMS = Object.keys(ICON_BY_SLUG).map(slug => ({ label: slug, value: slug }))
+export const CATEGORY_ICON_ITEMS: { label: string, value: string }[] = ICON_SLUGS.map(slug => ({ label: slug, value: slug }))
 
 /** A dock entry resolved against the live `categories` rows. */
 export interface CategoryItem {

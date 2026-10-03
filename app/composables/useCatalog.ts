@@ -226,5 +226,5 @@ export const useCatalog = () => {
     return { products: products.value, categories: categories.value }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation, products, categories, product }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation, products, categories, product }
 }
