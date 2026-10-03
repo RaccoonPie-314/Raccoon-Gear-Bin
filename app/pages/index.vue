@@ -2,6 +2,7 @@
 import type { CatalogProduct } from '~/types/catalog'
 import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
 import { hasKhmerText } from '~/utils/locale-script'
+import { disintegrateText } from '~/utils/text-disintegrate'
 
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
@@ -29,6 +30,19 @@ const loadError = ref('')
 
 // Browsing state lives in its own composable; the page only reads what it renders.
 const { search, selectedCategory, sortOrder, filteredProducts } = useCatalogBrowse(products)
+
+// The clear control is owed to a field that has something in it: an ✕ over an empty box offers nothing,
+// and here it would also sit next to the placeholder telling the visitor to type. `trim`, because a
+// field holding only spaces reads as empty and the visitor expects the same answer from both.
+const searchInputEl = ref<HTMLInputElement | null>(null)
+const canClearSearch = computed(() => search.value.trim().length > 0)
+const clearSearch = () => {
+  // Asked for the letters before the value goes: the effect mirrors whatever the visitor typed, and a
+  // cleared input has nothing left to show.
+  disintegrateText(searchInputEl.value)
+  search.value = ''
+  searchInputEl.value?.focus({ preventScroll: true })
+}
 
 // No assignment here: `products`/`categories`/`siteInfo` are the data layer's own computeds over the
 // rows it loaded, so this call exists to fill them, and a language change re-resolves them from what
@@ -192,6 +206,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 </svg>
               </span>
               <input
+                ref="searchInputEl"
                 v-model="search"
                 type="text"
                 autocomplete="off"
@@ -202,11 +217,13 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 class="h-full w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium text-zinc-950 outline-none placeholder:text-zinc-400 sm:text-base dark:text-white dark:placeholder:text-zinc-500"
               >
               <button
+                v-if="canClearSearch"
+                data-search-clear
                 type="button"
                 class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-[background-color,color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
                 :aria-label="t('clearSearch')"
                 :title="t('clearSearch')"
-                @click="search = ''"
+                @click="clearSearch"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true">
                   <path d="M18 6 6 18" />

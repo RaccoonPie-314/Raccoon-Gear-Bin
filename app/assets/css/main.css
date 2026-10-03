@@ -268,6 +268,19 @@ body {
   opacity: 0;
 }
 
+/* While a locale decode is cycling inside a box the plugin pinned (`data-decode-pin`, see
+   app/plugins/locale-decode.client.ts), nothing in that box may trail an ellipsis. Most of the labels
+   on this storefront are `truncate`, so a noise string wider than the real word would paint a "…" that
+   the word itself never needs — it reads as a permanently short label, and it flickers in and out with
+   every glyph. This lives here rather than as an inline style on the pinned box because the element
+   doing the truncating is usually a *descendant* of it (a `truncate` span inside a flex anchor), and the
+   pin has no business writing inline styles onto markup it does not own. Unlayered so it outranks the
+   utility it is overriding. */
+[data-decode-pin],
+[data-decode-pin] * {
+  text-overflow: clip;
+}
+
 /* Frosted surfaces, defeated. `prefers-reduced-transparency` is the platform's answer to "do not make
    me read text over a moving background", and this storefront has nine translucent surfaces — the
    sticky header, the mobile category dock, the sticky CTA bar, the panels, the sheet, the lightbox and

@@ -18,13 +18,21 @@ import { SCRAMBLE_STEP_MS, scrambleDuration, scrambleFrame, textClusters } from 
  * - **One read pass per batch, then the writes.** Text is the one thing a per-frame write cannot put on
  *   the compositor — every swap invalidates style and layout for that box — so all of the page's nodes
  *   are written inside a single `requestAnimationFrame` callback and the browser coalesces them into
- *   one layout pass, and the batch's only read (each pinned box's final width, below) happens before
+ *   one layout pass, and the batch's only reads (each pinned box's final size, below) happen before
  *   any write. Measured rather than assumed: see the numbers in ARCHITECTURE → Locale switch.
- * - **Layout-stable.** A string can move other people's boxes only where its width drives a layout —
- *   an item of a `flex-wrap` row (`wrapDriver`). Such a box is pinned to its FINAL width for the
- *   length of the decodes inside it, so the row re-flows once, with the language change, instead of
- *   every 40ms step of the noise crossing the wrap threshold — the header jump a phone reported — and
- *   is released when its last node settles. Blocks sized by their containing box are never touched.
+ * - **Layout-stable.** A string can move other people's boxes wherever its size is measured, and noise
+ *   changes both axes: a wider string re-wraps a `flex-wrap` row, a string that takes a second line
+ *   grows its own box and pushes everything under it down. So the batch pins the box its words sit in
+ *   (`freezeBox`) to the size it will end at — its width always, and its *height* only when the text
+ *   already wraps; a one-line label is held by `white-space: nowrap` instead, so it keeps the single
+ *   line it was designed with rather than being clipped down to one. Both are read in the batch's one
+ *   pass while the real text is still up and released as each node settles, so the page re-flows once,
+ *   with the language change — the jump a phone reported on the detail header, and the one a desktop
+ *   reports on rows whose real names cross a threshold the fixtures never reach. Transformed boxes are
+ *   stepped over: their rect is not their layout box, and sizing from it deforms them (the rotated
+ *   sale ribbon is the case that proved it). Nothing trailing an ellipsis either: a pinned box carries
+ *   `data-decode-pin`, which `main.css` turns into `text-overflow: clip` for the box and everything in
+ *   it, because a "…" that only the noise causes reads as the label being short.
  * - **~25 Hz.** `SCRAMBLE_STEP_MS` gates the writes; 60 new glyphs a second is a flicker, not a cycle.
  * - **Never under `prefers-reduced-motion`.** A decode is a flicker by construction; the plain swap
  *   Vue already performed is the answer for that setting.
@@ -55,7 +63,7 @@ interface Decoding {
   final: string
   start: number
   last: number
-  /** The wrapping-row box this string's width could move, pinned while this node decodes. */
+  /** The box this string's size could move, pinned while this node decodes. */
   box?: HTMLElement
 }
 
@@ -101,24 +109,47 @@ const MAX_WINDOW_MS = 1200
 const STAGGER_MS = 14
 const STAGGER_WRAP = 24
 /**
- * The one box a changing string can move other people with: the nearest ancestor that is an item of a
- * *wrapping* flex row. `flex-wrap` re-measures its items' content every frame, so a header label that
- * grows a few pixels mid-noise can flip a row onto a new line and back — measured on a phone at
- * 390px, the detail header's utility group swinging 263→286px per step and the header standing one
- * line (44px) taller until the last cluster settled, then jumping. A block whose width comes from its
- * containing block needs nothing: its text re-wraps inside a box no other element is placed against.
+ * The one box a changing string can move other people with: the nearest ancestor that lays out as a
+ * box of its own. Inline elements are stepped over — they have no height, the line they sit on
+ * belongs to the block underneath — and so are *transformed* ones: `getBoundingClientRect` answers
+ * with the transformed bounds, and writing those back as a layout size resizes the element itself.
+ * The rotated sale ribbon is exactly that case — pinning its 45° band turned a 128px-wide band into a
+ * ~104px square one, which is what "it breaks the promotion bow tag" described. All four transform
+ * properties count, because the storefront rotates with the independent `rotate` property rather than
+ * a `transform` shorthand (measured: guarding `transform` alone left the band sized in 16 frames).
  */
-const wrapDriver = (el: Element | null): HTMLElement | null => {
+const isTransformed = (cs: CSSStyleDeclaration) =>
+  cs.transform !== 'none' || cs.rotate !== 'none' || cs.scale !== 'none' || cs.translate !== 'none'
+
+const freezeBox = (el: Element | null): HTMLElement | null => {
   for (let node = el; node && node !== document.body; node = node.parentElement) {
-    const parent = node.parentElement
-    if (!parent) break
-    const cs = getComputedStyle(parent)
-    if ((cs.display === 'flex' || cs.display === 'inline-flex') && cs.flexWrap === 'wrap') return node as HTMLElement
+    const cs = getComputedStyle(node)
+    if (cs.display === 'inline' || cs.display === 'contents' || isTransformed(cs)) continue
+    return node as HTMLElement
   }
   return null
 }
+/**
+ * Does this string sit on one line as it stands? Asked of the node before any noise is written, with
+ * a Range over just that string — one rect per line fragment. It decides *how* the box is held: a
+ * one-line label is held by keeping it one line (`white-space: nowrap` inherits, so nothing inside it
+ * can take the second line either, and its height is then a fact of its CSS rather than of its text),
+ * and only text that already wraps gets its height pinned. That distinction is the difference between
+ * a decode that looks like the control it stands in and one that visibly breaks it.
+ */
+const oneLine = (node: Text): boolean => {
+  const range = document.createRange()
+  range.selectNodeContents(node)
+  let top = NaN
+  for (const rect of range.getClientRects()) {
+    if (rect.width === 0) continue
+    if (!Number.isNaN(top) && Math.abs(rect.top - top) > 1) return false
+    top = rect.top
+  }
+  return true
+}
 /** Boxes pinned for the length of a decode: the inline values to restore, and how many nodes share it. */
-const held = new Map<HTMLElement, { width: string, overflow: string, refs: number }>()
+const held = new Map<HTMLElement, { width: string, height: string, whiteSpace: string, overflow: string, refs: number }>()
 /**
  * What the stagger is now allowed to do: order when each node's clusters start settling, nothing more.
  * It used to also defer each node's first write, and that is what made the page snap to a wall of
@@ -138,6 +169,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   const releaseAll = () => {
     for (const [box, state] of held) {
       box.style.width = state.width
+      box.style.height = state.height
+      box.style.whiteSpace = state.whiteSpace
+      box.removeAttribute('data-decode-pin')
       box.style.overflow = state.overflow
     }
     held.clear()
@@ -146,11 +180,23 @@ export default defineNuxtPlugin((nuxtApp) => {
   // Measured while the real words are still up, so the box keeps the size its own language gives it.
   // Clipped while pinned, because the noise is not always narrower than the string it stands in for
   // and a label spilling out of a fixed box would lay its gibberish over the control beside it.
-  const pin = (box: HTMLElement) => {
+  // Clipped, not ellipsised: `data-decode-pin` is what `main.css` keys its no-ellipsis rule on, and it
+  // goes on the box rather than as an inline `text-overflow` because the element that actually truncates
+  // is usually a descendant of the box being held (a `truncate` span inside a flex anchor), whose own
+  // inline style the pin has no business writing.
+  const pin = (box: HTMLElement, line: boolean) => {
+    // ponytail: the first node to claim a box sets the rule for all of them, because the height is only
+    // trustworthy while the real words are still up. A one-line label that shares its box with text that
+    // already wraps would flatten that text to one line for the length of the decode; nothing on this
+    // storefront does that today, and re-deciding on the join would measure a box that may hold noise.
     const state = held.get(box)
     if (state) { state.refs++; return }
-    held.set(box, { width: box.style.width, overflow: box.style.overflow, refs: 1 })
-    box.style.width = `${box.getBoundingClientRect().width}px`
+    const rect = box.getBoundingClientRect()
+    held.set(box, { width: box.style.width, height: box.style.height, whiteSpace: box.style.whiteSpace, overflow: box.style.overflow, refs: 1 }) // prettier-ignore
+    box.style.width = `${rect.width}px`
+    if (line) box.style.whiteSpace = 'nowrap'
+    else box.style.height = `${rect.height}px`
+    box.setAttribute('data-decode-pin', '')
     box.style.overflow = 'hidden'
   }
 
@@ -159,6 +205,9 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (!state || --state.refs > 0) return
     held.delete(box)
     box.style.width = state.width
+    box.style.height = state.height
+    box.style.whiteSpace = state.whiteSpace
+    box.removeAttribute('data-decode-pin')
     box.style.overflow = state.overflow
   }
 
@@ -224,7 +273,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       final: value,
       start: performance.now() + STAGGER_MS * (entries.length % STAGGER_WRAP),
       last: 0,
-      box: wrapDriver(node.parentElement) ?? undefined,
+      box: freezeBox(node.parentElement) ?? undefined,
     }, fresh)
   }
 
@@ -288,7 +337,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       // words are still up (this is the same microtask as Vue's patch, before any noise), so the row
       // lays out once — into its final shape — and the glyphs cycled after it cannot move it. A read
       // inside the loop above would force a layout per node instead of one for the batch.
-      for (const entry of fresh) if (entry.box) pin(entry.box)
+      for (const entry of fresh) if (entry.box) pin(entry.box, oneLine(entry.node as Text))
       for (const entry of fresh) write(entry, scrambleFrame(entry.parts, 0))
       // Vue patches the DOM in a microtask after the locale is applied, which is why the work starts
       // here and not above. Every batch restarts the quiet countdown, so a slow re-render (the

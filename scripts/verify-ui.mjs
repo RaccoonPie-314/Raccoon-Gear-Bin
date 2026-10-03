@@ -25,6 +25,7 @@
  *   bun run verify                 # build first, then all checks
  *   node scripts/verify-ui.mjs     # same, on Node 24 (global WebSocket; no dependencies)
  *   ... --only=guest | --only=admin
+ *   ... --only=guest &  ... --only=admin & wait   # the two slices are independent; run them at once
  *   ... --build                    # run `bun run build` first
  *   ... --keep                     # leave Chrome + profile running for debugging
  *   CHROME_PATH=/path/to/chrome    # override the browser binary
@@ -44,12 +45,18 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const FIXTURE_PATH = join(ROOT, 'scripts', 'fixtures.json')
-const WORK = join(ROOT, '.nuxt', 'verify')
 const FIXTURES = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8'))
 const argv = process.argv.slice(2)
 const flag = name => argv.find(a => a.startsWith(`--${name}`))
 const ONLY = flag('only=')?.split('=')[1] || 'all'
 const URL_OVERRIDE = flag('url=')?.split('=')[1] || null
+// One work dir per `--only` slice. The Chrome profile, `chrome.log` and the upload probe all live
+// under WORK, and `shutdown` rmSyncs the whole tree — so with a shared dir, whichever slice exits
+// first deletes the profile the other is still running on, which surfaces as Chrome refusing to
+// start rather than as "you ran two verifies over one scratch dir". Per-slice is also what makes
+// running guest and admin concurrently safe, which is the only way to get the wall clock down:
+// the run spends it waiting on CDP round-trips, not computing.
+const WORK = join(ROOT, '.nuxt', 'verify', ONLY)
 
 const results = []
 const check = (name, ok, detail) => {
@@ -629,6 +636,42 @@ const run = async () => {
     await clickAt(clearBtn.x, clearBtn.y)
     check('clearing the search restores the grid', await waitFor(`document.querySelectorAll("main article").length === ${EXP.cards}`))
 
+    // The clear control belongs to a box that has something to clear: an empty field renders no ✕ at all
+    // (it would sit over the placeholder offering to delete nothing), and a box holding only spaces *is*
+    // an empty box. Asserted on the live DOM because the rule is a `v-if` a template edit can delete.
+    const anchorClear = '[...document.querySelectorAll(\'[data-search-anchor] [data-search-clear]\')]'
+    const anchorInput = 'document.querySelector(\'[data-search-anchor] input\')'
+    check('an empty field renders no clear ✕', await waitFor(`${anchorClear}.length === 0`), { found: await ev(`${anchorClear}.length`) })
+    await clickAt(search.x, search.y)
+    await cdp.send('Input.insertText', { text: '   ' })
+    check('a field holding only spaces renders no clear ✕', await waitFor(`${anchorClear}.length === 0`), { value: await ev(`${anchorInput}.value`) })
+    await cdp.send('Input.insertText', { text: 'ke' })
+    check('text brings the clear ✕ back', await waitFor(`${anchorClear}.length === 1`), { value: await ev(`${anchorInput}.value`) })
+    // Let the ✕ pressed by the grid-restore check above finish its own scatter first, so the layer being
+    // counted below is this click's and not two overlapping clears.
+    await sleep(700)
+    // And pressing it lets the letters go rather than deleting them: a mirror of what was typed is on
+    // screen the instant the click lands. Read in ONE expression around the click, because the ghosts live
+    // ~0.4s and a second round trip can land after they are gone. The field's own value is Vue state and
+    // empties on the next microtask, so it is waited for below rather than read here.
+    const ghostShot = await ev('(() => { const b = document.querySelector(\'[data-search-anchor] [data-search-clear]\'); if (!b) return null; b.click(); const g = [...document.querySelectorAll(\'[data-clear-ghost] span\')]; const a = g.length ? g[0].getAnimations()[0] : null; const META = new Set([\'offset\', \'easing\', \'computedEasing\', \'composite\', \'computedOffset\']); const keys = a ? [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k)).filter(p => !META.has(p)))] : []; return { ghosts: g.length, layers: document.querySelectorAll(\'[data-clear-ghost]\').length, keys } })()')
+    check('pressing ✕ leaves the letters mid-flight over the field', !!ghostShot && ghostShot.ghosts >= 2 && ghostShot.layers === 1, ghostShot)
+    check('the ✕ still empties the field', await waitFor(`${anchorInput}.value === ''`), { value: await ev(`${anchorInput}.value`) })
+    // Only the two compositor properties move. This is the per-glyph layer's whole reason to exist: a
+    // scatter that touched `left`/`width` would reflow the page once per letter.
+    check('the scatter animates only transform and opacity', !!ghostShot && ghostShot.keys.length === 2 && ghostShot.keys.every(k => k === 'transform' || k === 'opacity'), { keys: ghostShot && ghostShot.keys })
+    check('the ghost layer removes itself when the last letter has gone', await waitFor('!document.querySelector(\'[data-clear-ghost]\')', 3000) && await waitFor(`document.querySelectorAll("main article").length === ${EXP.cards}`, 3000))
+    // Reduced motion: the text simply goes. The scatter is decoration, and a flicker of flying letters is
+    // what the preference asks not to be forced on a visitor.
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await clickAt(search.x, search.y)
+    await cdp.send('Input.insertText', { text: 'ash' })
+    const rmShot = await ev('(() => { const b = document.querySelector(\'[data-search-anchor] [data-search-clear]\'); if (!b) return null; b.click(); return { ghosts: document.querySelectorAll(\'[data-clear-ghost] span\').length, layers: document.querySelectorAll(\'[data-clear-ghost]\').length } })()')
+    check('under reduced motion no letter is scattered', !!rmShot && rmShot.ghosts === 0 && rmShot.layers === 0, rmShot)
+    check('and under reduced motion the field still empties', await waitFor(`${anchorInput}.value === ''`), { value: await ev(`${anchorInput}.value`) })
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+    await sleep(250)
+
     const dock = await ev(boxesExpr('nav[aria-label="Product categories"] button'))
     const keyboards = dock.find(b => b.t === 'Keyboards')
     await clickAt(keyboards.x, keyboards.y)
@@ -760,6 +803,16 @@ const run = async () => {
       const settled = await waitFor('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); return !!p && p.getBoundingClientRect().width > 400 })()', 6000)
       const panel = await ev('(() => { const p = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-panel]\'); if (!p) return null; const r = p.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })()')
       check('spotlight panel settles as a wide field', settled && !!panel && panel.w > 400 && panel.h > 40, panel)
+      // The spotlight field never had a clear control at all — its ✕ was always the one that leaves the
+      // overlay — so a visitor who mistyped one letter had nothing to press. It has one now, on the same
+      // rule as the other two fields (nothing to clear, no control), and clearing must NOT close the
+      // search: the visitor is mid-query, not leaving.
+      const dlgClear = '[...document.querySelectorAll(\'[role="dialog"][aria-label="Search products"] [data-search-clear]\')]'
+      check('the open spotlight shows no clear control while the field is empty', await waitFor(`${dlgClear}.length === 0`), { found: await ev(`${dlgClear}.length`) })
+      await cdp.send('Input.insertText', { text: 'ke' })
+      check('typing shows the spotlight\'s clear control', await waitFor(`${dlgClear}.length === 1`), { found: await ev(`${dlgClear}.length`) })
+      await ev('(() => { const b = document.querySelector(\'[role="dialog"][aria-label="Search products"] [data-search-clear]\'); b && b.click() })()')
+      check('clearing the spotlight empties it and keeps the search open', await waitFor(`(() => { const d = document.querySelector('[role="dialog"][aria-label="Search products"]'); const i = d && d.querySelector('input'); return !!i && i.value === '' && !!d.querySelector('[data-search-panel]') })()`, 2000) && await waitFor(`${dlgClear}.length === 0`), { found: await ev(`${dlgClear}.length`) })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       check('spotlight closes on Escape', await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')'))
@@ -1632,6 +1685,12 @@ const run = async () => {
     const readsAfterFirst = await productsReads()
     await sleep(450)
     check('no keystroke queries: reads stay put while typing', emptyShown && (await productsReads()) === readsAfterFirst, { readsAfterFirst })
+    // The detail box had the visibility rule first (`v-if` on the query) and keeps it, on the same trim
+    // test as the other two: text in the box, ✕ in the box; ✕ pressed, box empty and ✕ gone.
+    const sbClear = (await ev(boxesExpr(`${SB} [data-search-clear]`)))[0]
+    check('the detail box shows its clear ✕ while the query has text', !!sbClear, { text: await ev(`document.querySelector(${JSON.stringify(SB_INPUT)}).value`) })
+    await clickAt(sbClear.x, sbClear.y)
+    check('pressing it empties the detail box and retires the ✕', await waitFor(`!document.querySelector(${JSON.stringify(`${SB} [data-search-clear]`)}) && document.querySelector(${JSON.stringify(SB_INPUT)}).value === ''`))
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
     await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
     check('Escape closes the search popover', await waitFor(`!document.querySelector(${JSON.stringify(`${SB} ul`)})`))
@@ -2350,23 +2409,39 @@ const run = async () => {
     check('the sheet never reached the platform share API on mobile', (await shareCalls()).length === 0, { calls: await shareCalls() })
 
     // ---- the decode must not move the sticky header (phone) --------------------------------------
-    // A decoded label changes width every 40ms step, and the header's first row is a `flex-wrap` row:
-    // at 390px the Khmer label puts it a line taller. Before the pinned box, that line stayed until
-    // the last cluster settled and the whole header then jumped ~44px — the reported flicker. The pin
-    // holds the row at its FINAL width from the first decoded frame, so the one reflow happens with
-    // the language change and nothing moves after. Sampled per frame because "it settled eventually" is
-    // exactly what the broken build does.
+    // A decoded label changes size every 40ms step, and size is what layout measures: the header's first
+    // row is a `flex-wrap` row that re-wraps on its items' widths, and at 390px the Khmer label puts it a
+    // line taller. Before the pinned box, that line stayed until the last cluster settled and the whole
+    // header then jumped ~44px — the reported flicker. The pin holds the box at its FINAL width and
+    // height from the first decoded frame, so the one reflow happens with the language change and nothing
+    // moves after. Sampled per frame because "it settled eventually" is exactly what the broken build
+    // does, and paired with the check below it that counts the pins: a row with nothing to cross would
+    // hand the height sequence a free pass. A pin is `white-space: nowrap` on a one-line box, or a
+    // height on text that already wraps — counting either is what proves the mechanism fired.
     await ev('(() => { const p = document.querySelector(\'[data-detail-header] [data-language-switcher] a:nth-of-type(2)\'); if (p) p.focus(); return true })()')
     await press('Enter', 'Enter', 13)
     await waitFor('location.pathname.startsWith("/km/products")', 4000)
     await sleep(1600)
-    await ev('(() => { window.__H = []; window.__Hdone = false; const tick = () => { const h = document.querySelector("[data-detail-header]"); window.__H.push(h ? Math.round(h.getBoundingClientRect().height) : -1); if (window.__H.length < 60) requestAnimationFrame(tick); else window.__Hdone = true }; requestAnimationFrame(tick); return true })()')
+    await ev('(() => { window.__H = []; window.__F = []; window.__E = []; window.__Hdone = false; const tick = () => { const h = document.querySelector("[data-detail-header]"); window.__H.push(h ? Math.round(h.getBoundingClientRect().height) : -1); window.__F.push([...document.querySelectorAll("[data-detail-header] *")].filter(e => e.style.whiteSpace === "nowrap" || e.style.height !== "").length); window.__E.push((() => { const pins = [...document.querySelectorAll("[data-decode-pin]")]; let ell = 0, clip = 0; for (const p of pins) for (const e of [p, ...p.querySelectorAll("*")]) { if (getComputedStyle(e).textOverflow === "ellipsis") ell++; if (e.scrollWidth > e.clientWidth + 1) clip++ } return pins.length + "," + ell + "," + clip })()); if (window.__H.length < 60) requestAnimationFrame(tick); else window.__Hdone = true }; requestAnimationFrame(tick); return true })()')
     await ev('(() => { const p = document.querySelector(\'[data-detail-header] [data-language-switcher] a:nth-of-type(1)\'); if (p) p.focus(); return true })()')
     await press('Enter', 'Enter', 13)
     await waitFor('window.__Hdone', 5000)
     const headerHeights = await ev('window.__H') || []
+    const headerPins = await ev('window.__F') || []
+    const headerEllipsis = (await ev('window.__E') || []).map(r => r.split(','))
     const lastH = headerHeights.at(-1) ?? -1
     check('the header reaches its final row before the words finish decoding', headerHeights.length > 20 && [...new Set(headerHeights)].length <= 2 && lastH > 0 && headerHeights.slice(10).every(h => h === lastH), { headerHeights: headerHeights.slice(0, 45), lastH })
+    check('the decode holds the shape of the box its words sit in', Math.max(...headerPins) > 0, { pinned: Math.max(...headerPins, 0) })
+    // A pinned box must clip, not ellipsise. Most labels here are `truncate`, so with the default
+    // `text-overflow` a noise string wider than the real word paints a "…" the word never needed — the
+    // trailing dots reported as "some parts has the … at the end". Read over the pinned box AND its
+    // descendants, because the element doing the truncating is usually a `truncate` span inside the box
+    // the pin holds. Three claims, so it cannot pass by idleness: boxes were pinned, something under a
+    // pinned box was actually overflowing (the rule had work to do), and no frame ever computed ellipsis.
+    const ellipsisFrames = headerEllipsis.filter(r => +r[1] > 0).length
+    const pinnedFrames = headerEllipsis.filter(r => +r[0] > 0).length
+    const clipFrames = headerEllipsis.filter(r => +r[2] > 0).length
+    check('a pinned box clips instead of trailing an ellipsis', pinnedFrames > 0 && clipFrames > 0 && ellipsisFrames === 0, { pinnedFrames, clipFrames, ellipsisFrames })
     await waitFor('location.pathname.startsWith("/products")', 4000)
     await sleep(600)
 
@@ -2580,6 +2655,22 @@ const run = async () => {
     await waitFor('!!document.querySelector(\'[data-sale-ribbon]\')')
     const kmRibbon = await ev('(() => { const el = document.querySelector("[data-sale-ribbon] span"); if (!el) return null; const own = (el.textContent || "").trim(); const c = getComputedStyle(el); const cv = document.createElement("canvas").getContext("2d"); cv.font = c.fontWeight + " " + c.fontSize + " " + c.fontFamily; const m = cv.measureText(own); return { text: own, ink: +(m.fontBoundingBoxAscent + m.fontBoundingBoxDescent).toFixed(1), lh: +parseFloat(c.lineHeight).toFixed(1), em: +(c.letterSpacing === "normal" ? 0 : parseFloat(c.letterSpacing) / parseFloat(c.fontSize)).toFixed(3) } })()')
     check('the Khmer Sale ribbon fits the band it is cut from and carries no tracking at all', !!kmRibbon && /[\u1780-\u17FF]/.test(kmRibbon.text) && kmRibbon.ink <= kmRibbon.lh + 0.5 && kmRibbon.em <= 0.005, { kmRibbon })
+    // The transform guard, asked while the ribbon is guaranteed on screen and a real decode is running:
+    // the band is `-rotate-45`, so its bounding rect is the bounds of a diamond, and writing that back
+    // as a layout size turns the ribbon into a stub — the deformation reported as "it breaks the
+    // promotion bow tag". Flipping the locale here rather than counting nodes in the recording above,
+    // because a ribbon that is simply absent would pass a count (`ribbonFrames: 0` did exactly that).
+    await ev('(() => { window.__RB = []; const tick = () => { const b = document.querySelector("[data-sale-ribbon] > span"); window.__RB.push(b ? (b.style.width !== "" || b.style.height !== "" ? 1 : 0) : -1); if (window.__RB.length < 90) requestAnimationFrame(tick); else window.__RBdone = true }; requestAnimationFrame(tick); return true })()')
+    await ev('(() => { const p = document.querySelector(\'div[data-language-switcher] a:nth-of-type(1)\'); if (p) p.focus(); return true })()')
+    await press('Enter', 'Enter', 13)
+    await waitFor('window.__RBdone === true', 8000)
+    const ribbonHold = await ev('(() => { const r = window.__RB || []; return { frames: r.filter(v => v >= 0).length, sized: r.filter(v => v === 1).length, path: location.pathname } })()')
+    check('the rotated sale ribbon is never sized from its own transformed rect', ribbonHold.frames > 0 && ribbonHold.sized === 0, ribbonHold)
+    // Back into Khmer, because the ribbon's own assertion above and the checks after it read Khmer copy.
+    await ev('(() => { const p = document.querySelector(\'div[data-language-switcher] a:nth-of-type(2)\'); if (p) p.focus(); return true })()')
+    await press('Enter', 'Enter', 13)
+    await waitFor('location.pathname.startsWith("/km/")', 8000)
+    await sleep(1400)
     await stopForNextDocument(kmRibbonArm)
     // The hole a locale-keyed guard cannot see: this product now has *no* English row, so on the
     // unprefixed (English) route its name and its category eyebrow both render Khmer — and the

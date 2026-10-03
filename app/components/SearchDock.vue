@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { animate, useReducedMotion } from 'motion-v'
 import { arrival } from '~/utils/motion'
+import { disintegrateText } from '~/utils/text-disintegrate'
 
 const searchQuery = defineModel<string>({ default: '' })
 
@@ -87,6 +88,19 @@ const mobileLauncherRef = ref<HTMLButtonElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
 const panelSizerRef = ref<HTMLElement | null>(null)
 const overlayInputRef = ref<HTMLInputElement | null>(null)
+
+// The spotlight field's own clear control, which it never had: its ✕ was always the one that closes the
+// overlay, so a visitor typing a wrong letter had nothing to press. It appears only while there is
+// something to clear (`v-if="canClearQuery"`) and it is drawn as a filled disc, because two identical
+// hairline ✕ glyphs side by side — one clearing text, one leaving the page — is a coin toss.
+const canClearQuery = computed(() => searchQuery.value.trim().length > 0)
+const clearButtonRef = ref<HTMLButtonElement | null>(null)
+const clearQuery = () => {
+  disintegrateText(overlayInputRef.value)
+  searchQuery.value = ''
+  // The visitor was mid-search; a clear that drops the caret hands them a second tap to get it back.
+  overlayInputRef.value?.focus({ preventScroll: true })
+}
 const closeButtonRef = ref<HTMLButtonElement | null>(null)
 const realGlyphRef = ref<HTMLElement | null>(null)
 const reduced = useReducedMotion()
@@ -695,7 +709,9 @@ const handleKeydown = (event: KeyboardEvent) => {
   if (event.target !== overlayInputRef.value && SCROLL_KEYS.has(event.key)) event.preventDefault()
   if (event.key !== 'Tab') return
 
-  const focusables = [overlayInputRef.value, closeButtonRef.value].filter(Boolean) as HTMLElement[]
+  // In DOM order, and the clear disc has to be in here: the list is also the membership test below, so
+  // a button that is focused but absent from it gets its Tab swallowed and sent back to the input.
+  const focusables = [overlayInputRef.value, clearButtonRef.value, closeButtonRef.value].filter(Boolean) as HTMLElement[]
   const first = focusables[0]
   const last = focusables[focusables.length - 1]
   if (!first || !last) return
@@ -1060,6 +1076,23 @@ onUnmounted(() => {
             class="h-full w-full min-w-0 border-0 bg-transparent p-0 text-base font-medium text-zinc-950 outline-none placeholder:text-zinc-400 dark:text-white dark:placeholder:text-zinc-500"
             :style="{ opacity: contentOpacity, transition: contentTransition }"
           >
+
+          <button
+            v-if="canClearQuery"
+            ref="clearButtonRef"
+            data-search-clear
+            type="button"
+            class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:focus-visible:ring-white"
+            :style="{ opacity: contentOpacity, transition: contentTransition }"
+            :aria-label="t('clearSearch')"
+            :title="t('clearSearch')"
+            @click="clearQuery"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="h-4.5 w-4.5" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" class="fill-zinc-400 dark:fill-zinc-500" />
+              <path d="M9 9l6 6M15 9l-6 6" stroke-width="2" stroke-linecap="round" class="stroke-white dark:stroke-zinc-900" />
+            </svg>
+          </button>
 
           <button
             ref="closeButtonRef"

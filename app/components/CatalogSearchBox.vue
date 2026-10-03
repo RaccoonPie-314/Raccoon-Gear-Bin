@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CatalogProduct } from '~/types/catalog'
 import { getProductPricing } from '~/utils/product-pricing'
+import { disintegrateText } from '~/utils/text-disintegrate'
 
 // Presentational by design: the results are the page's `useCatalogBrowse` output, filtered
 // where the fetch lives. This box owns only the popover's open state and its keyboard exit —
@@ -26,8 +27,18 @@ const priceOf = (product: CatalogProduct) => getProductPricing(product).price
 
 const isFocused = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
+const inputEl = ref<HTMLInputElement | null>(null)
 const isOpen = computed(() => isFocused.value && query.value.trim().length > 0 && !props.loading)
 const displayed = computed(() => props.results.slice(0, MAX_RESULTS))
+
+// The ✕ belongs to a box that has something to clear (`v-if="canClear"` below), and pressing it lets the
+// letters go rather than deleting them — the same rule and the same effect as the catalog's own field.
+const canClear = computed(() => query.value.trim().length > 0)
+const clear = () => {
+  disintegrateText(inputEl.value)
+  query.value = ''
+  inputEl.value?.focus({ preventScroll: true })
+}
 
 const onFocus = () => {
   isFocused.value = true
@@ -70,6 +81,7 @@ const onKeydown = (event: KeyboardEvent) => {
         </svg>
       </span>
       <input
+        ref="inputEl"
         :value="query"
         type="text"
         autocomplete="off"
@@ -84,12 +96,13 @@ const onKeydown = (event: KeyboardEvent) => {
         @keydown="onKeydown"
       >
       <button
-        v-if="query"
+        v-if="canClear"
+        data-search-clear
         type="button"
         class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-[background-color,color,scale] duration-150 ease-out motion-safe:active:scale-[0.97] hover:bg-zinc-100 hover:text-zinc-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white dark:focus-visible:ring-white"
         :aria-label="t('clearSearch')"
         :title="t('clearSearch')"
-        @click="query = ''"
+        @click="clear"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4" aria-hidden="true">
           <path d="M18 6 6 18" />

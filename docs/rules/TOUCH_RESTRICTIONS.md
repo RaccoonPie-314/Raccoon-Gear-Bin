@@ -11,7 +11,7 @@ Design rationale for everything below lives in
 
 | Area | Why it is fragile |
 |---|---|
-| `app/components/SearchDock.vue` — morph / measure logic | Two cooperating engines: the overlay FLIP (matrix inversion, per-axis radius compensation) and the scroll-collapse fixed-box rAF flight that re-aims from the live box on a mid-flight reversal. Both were tuned by measurement; neither is readable from the diff. Phase E moved ONLY the overlay-FLIP playback to Motion (`app/utils/motion.ts` `spotlight.frame`, settle via `.finished`) — the matrix-inversion measurement stays. Phase E.2 then touched the flight engine on purpose: `flyStep` bends the ease-out-cubic lerp with a `sin(t·π)` parabolic bow (**ARC_BOW_PX=80**) that is **0 at launch and at landing**, so the endpoints stay pixel-exact and the mid-flight reversal re-aim still reads the live box; it also writes a decorative `flyTransform` (3D `scale`+aerodynamic `rotate`) and floating `flyShadow` on top of the drift-free `left/top` box, reset by `endFlight`/`endFieldReturn`; and `endFlight(true)` plays an `arrival` catch recoil (Motion scale spring 1→1.28→0.92→1.05→1, suppressed under reduced motion, with `suppressLauncherMotion` held so Motion is the launcher transform's only writer for it). `updateFieldMorph` and the in-place width scrub remain untouched. Motion writes the panel/flyer inline transform; the reactive `:style` transform refs stay pinned during the spring so Vue never clobbers it. |
+| `app/components/SearchDock.vue` — morph / measure logic | Two cooperating engines: the overlay FLIP (matrix inversion, per-axis radius compensation) and the scroll-collapse fixed-box rAF flight that re-aims from the live box on a mid-flight reversal. Both were tuned by measurement; neither is readable from the diff. Phase E moved ONLY the overlay-FLIP playback to Motion (`app/utils/motion.ts` `spotlight.frame`, settle via `.finished`) — the matrix-inversion measurement stays. Phase E.2 then touched the flight engine on purpose: `flyStep` bends the ease-out-cubic lerp with a `sin(t·π)` parabolic bow (**ARC_BOW_PX=80**) that is **0 at launch and at landing**, so the endpoints stay pixel-exact and the mid-flight reversal re-aim still reads the live box; it also writes a decorative `flyTransform` (3D `scale`+aerodynamic `rotate`) and floating `flyShadow` on top of the drift-free `left/top` box, reset by `endFlight`/`endFieldReturn`; and `endFlight(true)` plays an `arrival` catch recoil (Motion scale spring 1→1.28→0.92→1.05→1, suppressed under reduced motion, with `suppressLauncherMotion` held so Motion is the launcher transform's only writer for it). `updateFieldMorph` and the in-place width scrub remain untouched. Motion writes the panel/flyer inline transform; the reactive `:style` transform refs stay pinned during the spring so Vue never clobbers it. **What was later added to this file, and how far it may go:** the spotlight field's clear disc (`[data-search-clear]`, `v-if="canClearQuery"`) is template + focus-list only — it sits in DOM order between the input and the close button and is a member of that keydown handler's `focusables` array, because the array doubles as the Tab membership test and a focused button left out of it gets its Tab swallowed back to the input. It reads no geometry, sets no timing constant, and must stay that way. |
 | `app/components/category/CategoryDesktop.vue` + `CategoryMobile.vue` — drag + indicator | Tuned input models that are *deliberately* different (mouse Y-axis with `grabOffsetY` vs. touch X-axis with axis-lock detection and `scrollLeft` compensation). Merging them is a regression, not a cleanup. **Which items the docks show is data, not geometry** —
 `useCategoryItems` builds the list from the shop's own `categories` rows, and both components iterate it
 and measure whatever arrives; changing the list's length therefore does not license touching either
@@ -83,11 +83,23 @@ Phase F added tactile motion without touching either engine: buttons are `<motio
   observer's `childList` for `characterData` alone and it collects nothing at all — Vue sets text by
   replacing the node, which is a `childList` mutation, and that mistake shipped green once already.
   Renaming `aside p.uppercase` or restructuring the rail breaks the check in the same commit, not in
-  the next one. And the **pinned box** is part of this contract: a decoded string may not move a
-  `flex-wrap` row, so `wrapDriver`'s box is held to its final width (and clipped) from the batch's one
-  read pass until its last node settles — drop the pin and the sticky header jumps ~44px at the end of
-  a phone decode, harness-locked as `the header reaches its final row before the words finish
-  decoding`. And **never call `useI18n()` from a plugin**: it throws during app initialisation
+  the next one. And the **pinned box** is part of this contract: a decoded string may not move the
+  page, so `freezeBox`'s box — the tightest ancestor of the words that lays out as a box of its own,
+  skipping inline *and* transformed elements (a transformed box's rect is the bounds of the transform,
+  and sizing from it deforms the element: the `-rotate-45` sale band became a stub) — is held at its
+  final width, plus `white-space: nowrap` when the string sits on one line and a pinned height only
+  when it already wraps, from the batch's one read pass until its last node settles — and it CLIPS
+  rather than ellipsising: the box takes `data-decode-pin`, and one unlayered `main.css` rule turns that
+  into `text-overflow: clip` for the box and everything inside it, because these labels are mostly
+  `truncate` and a noise string wider than the word would paint a "…" the word never needed. Never pin height
+  on everything: that version stopped the jump and broke the look, because a one-line button holding a
+  two-line height grows and its text breaks all over the place. Drop the pin and a phone's sticky
+  header jumps ~44px at the end of a decode and a desktop's catalog rows shift mid-noise;
+  harness-locked as `the header reaches its final row before the words finish decoding`,
+  `the decode holds the shape of the box its words sit in` (counts the pins, so a fixture with nothing
+  to cross cannot pass by idleness), `a pinned box clips instead of trailing an ellipsis` and
+  `the rotated sale ribbon is never sized from its own
+  transformed rect`. And **never call `useI18n()` from a plugin**: it throws during app initialisation
   (NUXT_E1005), which is not a warning you can miss — the whole client fails to boot and every
   storefront check goes red at once.
 - **The editor's two entry points** — `index.vue` types its `adminEditor` ref against
