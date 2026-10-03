@@ -816,16 +816,28 @@ const run = async () => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', code: 'Escape', key: 'Escape', windowsVirtualKeyCode: 27 })
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', code: 'Escape', key: 'Escape' })
       check('spotlight closes on Escape', await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')'))
+      // The clear-control checks above typed a query and emptied it again. While the query was up the grid
+      // was filtered, so the page was SHORTER and the browser clamped `scrollY` to that shorter bottom —
+      // which scrolls the anchor field back into view and hides the launcher the two blocks below aim at
+      // (CI hit exactly this and died on a null probe; a laptop's taller rows never clamp). Re-take the
+      // stage's own scroll so they start from the geometry they were written against.
+      await ev('(() => { const a = document.querySelector(\'[data-search-anchor]\'); window.scrollTo({ top: a.getBoundingClientRect().bottom + window.scrollY + 120, behavior: "instant" }); return true })()')
+      await sleep(700)
       // Reverse-window guard: Escape DURING the expansion (openPlaying true) reverses the panel back
       // to the icon and still completes — the dialog must go away, not hang mid-reverse. (Scroll-lock
       // release is asserted by the early-Escape check below; this one deliberately leaves scroll.)
       {
         const l3 = await ev(launchExpr)
-        await clickAt(l3.x, l3.y)
-        await sleep(150)
-        await press('Escape', 'Escape', 27)
-        const goneR = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')', 3000)
-        check('Escape mid-expansion reverses the panel and still completes (no hang)', goneR, { goneR })
+        // Asserted rather than assumed, in this file's own terms: a missing mount must read as a failed
+        // check, not as the TypeError that aborts every check after it.
+        check('the launcher is on screen for the reverse-window guard', !!l3, { l3 })
+        if (l3) {
+          await clickAt(l3.x, l3.y)
+          await sleep(150)
+          await press('Escape', 'Escape', 27)
+          const goneR = await waitFor('!document.querySelector(\'[role="dialog"][aria-label="Search products"]\')', 3000)
+          check('Escape mid-expansion reverses the panel and still completes (no hang)', goneR, { goneR })
+        }
       }
       // Regression guard: Escape landing DURING the opening must release the scroll lock. Click to
       // open, then Escape 25ms later — while the open spring is still running and the panel may not
@@ -833,6 +845,8 @@ const run = async () => {
       // the keepScrollPosition listener snaps it straight back to the locked offset).
       {
         const l2 = await ev(launchExpr)
+        check('the launcher is on screen for the scroll-lock guard', !!l2, { l2 })
+        if (l2) {
         await clickAt(l2.x, l2.y)
         await sleep(25)
         await press('Escape', 'Escape', 27)
@@ -846,6 +860,7 @@ const run = async () => {
         await sleep(700)
         const launcherBack = await ev('(() => [...document.querySelectorAll(\'button[aria-haspopup="dialog"]\')].some(b => { const r = b.getBoundingClientRect(); return r.width > 0 && getComputedStyle(b).pointerEvents === "auto" }))()')
         check('Fast Escape does not leave the launcher stuck taken', launcherBack, { launcherBack })
+        }
       }
     }
     await ev('window.scrollTo({ top: 0, behavior: "instant" }); true'); await sleep(400)
