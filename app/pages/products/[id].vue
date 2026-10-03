@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import type { CatalogProduct } from '~/types/catalog'
-import type { SiteInfo } from '~/types/site-info'
+import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
 import { hasKhmerText } from '~/utils/locale-script'
 
 const route = useRoute()
-const { fetchProduct, fetchProducts, parseSpecificationPairs } = useCatalog()
-const { fetchSiteInfo } = useSiteInfo()
+const { fetchProduct, fetchProducts, parseSpecificationPairs, product, products } = useCatalog()
+const { fetchSiteInfo, siteInfo } = useSiteInfo()
 const { locale, t } = useI18n()
 // The header search, the logo and the back link all resolve through the locale, so a Khmer visitor
 // who landed here from a card stays in Khmer instead of being handed the English route.
 const localePath = useLocalePath()
-const product = ref<Awaited<ReturnType<typeof fetchProduct>>>(null)
+
+// Same rule as the storefront home: a locale switch is this page in another language, so it keeps the
+// component, the scroll position and the loaded product, and re-resolves the translations the row
+// already carries. A different product id is a different key, and still rebuilds everything.
+definePageMeta({ key: pageKeyFor, scrollToTop: shouldScrollToTop })
+
 const isLoading = ref(true)
 const loadError = ref('')
 
@@ -18,7 +22,7 @@ const loadProduct = async () => {
   isLoading.value = true
   loadError.value = ''
   try {
-    product.value = await fetchProduct(String(route.params.id))
+    await fetchProduct(String(route.params.id))
   } catch (error: any) {
     loadError.value = error?.message || t('productLoadError')
   } finally {
@@ -29,9 +33,10 @@ const loadProduct = async () => {
 // The header search filters a loaded catalog list locally: the fetch is `useCatalog`'s, the
 // matching is `useCatalogBrowse`'s — the same pair the home page uses, so the detail page adds
 // no second search implementation and never queries on a keystroke. The list is pulled once,
-// lazily, on the first focus of the field.
-const searchProducts = ref<CatalogProduct[]>([])
-const { search, filteredProducts } = useCatalogBrowse(searchProducts)
+// lazily, on the first focus of the field, and it is the *same* list the home page grids (one
+// cache, one query), so a Khmer visitor searching after a language switch gets Khmer results
+// without another round trip.
+const { search, filteredProducts } = useCatalogBrowse(products)
 const isSearchCatalogLoading = ref(false)
 const isSearchCatalogLoaded = ref(false)
 
@@ -39,7 +44,7 @@ const ensureSearchCatalog = async () => {
   if (isSearchCatalogLoaded.value || isSearchCatalogLoading.value) return
   isSearchCatalogLoading.value = true
   try {
-    searchProducts.value = await fetchProducts()
+    await fetchProducts()
     isSearchCatalogLoaded.value = true
   } catch (error) {
     // Like the home masthead's site-info read: a failed auxiliary fetch degrades to "no
@@ -65,9 +70,8 @@ const parsedSpecs = computed(() => parseSpecificationPairs(product.value?.specif
 // not the product page — so it logs and leaves `siteInfo` null rather than setting `loadError`.
 // `useSiteInfo` stays the only reader of `site_settings`; this page holds no query and no shape of
 // its own, and a detail→detail navigation keeps the loaded row instead of fetching it twice.
-const siteInfo = ref<SiteInfo | null>(null)
 const loadSiteInfo = async () => {
-  try { siteInfo.value = await fetchSiteInfo() } catch (error) { console.error('Site info load failed:', error) }
+  try { await fetchSiteInfo() } catch (error) { console.error('Site info load failed:', error) }
 }
 
 onMounted(() => { void loadSiteInfo() })
@@ -112,9 +116,9 @@ useHead(() => {
 <template>
   <main class="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
     <!-- Sticky Translucent Minimalist Header. `data-detail-header` is a measured contract: the
-         desktop Contact CTA scrolls the panel it opens to sit just below this header, and reads
-         this element's live height to do it (see ProductActions.vue's toggle). Rename it in the
-         same commit as that scroll, never across two. -->
+         desktop conversion panels (contact and share) scroll the panel they open to sit just below
+         this header, and read this element's live height to do it (see ProductActions.vue's watch).
+         Rename it in the same commit as that scroll, never across two. -->
     <header data-detail-header class="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/80 backdrop-blur-md dark:border-zinc-800/80 dark:bg-zinc-950/80 transition-colors">
       <!-- The search sits between the brand and the utility group from `sm` up, and drops to
            its own full-width line below that — the same reflow valve the masthead uses, so a
@@ -199,7 +203,7 @@ useHead(() => {
              padding + label + icons) stretch the whole page instead of letting the label truncate —
              measured at 320px it was 5px of horizontal scroll before this was added. -->
         <!-- `data-detail-info-col` marks the sticky partner of the `data-detail-header` contract:
-             while the desktop Contact panel is being revealed, the scroll code pins this column
+             while a desktop panel is being revealed, the scroll code pins this column
              in place for exactly one frame so its measurement is not taken mid-unstick. -->
         <div data-detail-info-col class="min-w-0 lg:sticky lg:top-24 self-start">
           <p class="text-[10px] sm:text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="hasKhmerText(product.categoryName ?? t('uncategorized')) ? '' : 'tracking-[0.25em]'">

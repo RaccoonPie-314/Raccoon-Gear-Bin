@@ -108,10 +108,18 @@ export const useSiteInfo = () => {
     socialLinks: parseSocialLinks(row.social_links)
   })
 
+  // The same shape as the catalog's public view: keep the row, resolve the label per read. The
+  // masthead's location label is locale-resolved jsonb, so a locale switch that does not refetch has
+  // to re-resolve it here or the header would keep naming the place in the language the visitor just
+  // left. `fetchSiteInfo` still writes through on every real load, so nothing is served stale.
+  const rawSiteRow = useState<SiteInfoRow | null>('site:row', () => null)
+  const siteInfo = computed(() => (rawSiteRow.value ? mapSiteInfo(rawSiteRow.value) : null))
+
   const fetchSiteInfo = async (): Promise<SiteInfo | null> => {
     const { data, error } = await siteInfoQuery()
     if (error) throw error
-    return data ? mapSiteInfo(data) : null
+    rawSiteRow.value = data ?? null
+    return siteInfo.value
   }
 
   const fetchSiteInfoDraft = async (): Promise<SiteInfoDraft | null> => {
@@ -134,5 +142,5 @@ export const useSiteInfo = () => {
     .filter((link) => link.platform.trim() && link.url.trim())
     .map((link, index) => ({ platform: link.platform.trim().toLowerCase(), url: link.url.trim(), enabled: link.enabled, contact_enabled: link.contactEnabled, sort_order: index }))
 
-  return { fetchSiteInfo, fetchSiteInfoDraft, locationLabelsToColumn, socialLinksToColumn }
+  return { fetchSiteInfo, fetchSiteInfoDraft, locationLabelsToColumn, socialLinksToColumn, siteInfo }
 }

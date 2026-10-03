@@ -57,12 +57,14 @@ body {
   scrollbar-width: none;
 }
 
-/* The route transition is what a locale switch *is* — switching EN ⇄ ខ្មែរ is a navigation, because
-   translations are resolved at fetch time — so it is shaped like one gesture rather than two
-   animations. The outgoing page gets out of the way fast on an accelerating curve (nobody needs to
-   watch a page leave); the incoming one arrives slower on the storefront's ease-out. Both travel the
-   same 4px in the same direction, so the path out is the path back. `out-in` mode means they never
-   overlap and the durations add: ~320ms from tap to a fully painted page. */
+/* The route transition is what a real navigation *is* — a page arriving replaces the one that left.
+   A locale switch no longer takes this path: the storefront pages key themselves on the locale-less
+   path, so the same component is reused and the highlight crossfades on its own `transition` instead.
+   The shape is the same as it always was: the outgoing page gets out of the way fast on an
+   accelerating curve (nobody needs to watch a page leave); the incoming one arrives slower on the
+   storefront's ease-out. Both travel the same 4px in the same direction, so the path out is the path
+   back. `out-in` mode means they never overlap and the durations add: ~320ms from tap to a fully
+   painted page. */
 .page-enter-active {
   transition: opacity 220ms ease-out, transform 220ms cubic-bezier(0.33, 1, 0.68, 1);
 }

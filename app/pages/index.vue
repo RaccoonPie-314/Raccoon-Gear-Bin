@@ -1,20 +1,27 @@
 <script setup lang="ts">
-import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
-import type { SiteInfo } from '~/types/site-info'
+import type { CatalogProduct } from '~/types/catalog'
+import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
+import { hasKhmerText } from '~/utils/locale-script'
 
 const user = useSupabaseUser()
 const { signOut, isAdmin } = useAdminAuth()
-const { fetchCatalog } = useCatalog()
-const { fetchSiteInfo } = useSiteInfo()
+const { fetchCatalog, products, categories } = useCatalog()
+const { fetchSiteInfo, siteInfo } = useSiteInfo()
 const { locale, t } = useI18n()
 // Every internal path on the storefront resolves through the locale. A bare `/` happens to come out
 // right today only because `redirectOn: 'root'` sends it back to `/km/` from the cookie — a redirect
 // hop that depends on a cookie being present; `localePath` states the route it means.
 const localePath = useLocalePath()
 
-const products = ref<CatalogProduct[]>([])
-const categories = ref<CatalogCategory[]>([])
-const siteInfo = ref<SiteInfo | null>(null)
+// A locale switch is the same page in another language, so it must not rebuild this component: the
+// key drops the locale prefix (the visitor keeps their scroll, their search text and their loaded
+// catalog) and `scrollToTop` declines for that navigation alone. Both rules are one function in
+// `app/utils/locale-route.ts`, shared with the product page, because a locale prefix is a fact about
+// routing and not about either page.
+// Real navigation still remounts: `/products/a` and `/products/b` are different keys, and every entry
+// into this page from anywhere else runs `loadCatalog()` exactly as it did before.
+definePageMeta({ key: pageKeyFor, scrollToTop: shouldScrollToTop })
+
 const isAdminMode = ref(false)
 const isLoading = ref(true)
 const isSigningOut = ref(false)
@@ -23,13 +30,14 @@ const loadError = ref('')
 // Browsing state lives in its own composable; the page only reads what it renders.
 const { search, selectedCategory, sortOrder, filteredProducts } = useCatalogBrowse(products)
 
+// No assignment here: `products`/`categories`/`siteInfo` are the data layer's own computeds over the
+// rows it loaded, so this call exists to fill them, and a language change re-resolves them from what
+// is already in memory instead of asking the server for text it already sent.
 const loadCatalog = async () => {
   isLoading.value = true
   loadError.value = ''
   try {
-    const catalog = await fetchCatalog()
-    products.value = catalog.products
-    categories.value = catalog.categories
+    await fetchCatalog()
   } catch (error: any) {
     loadError.value = error?.message || t('catalogLoadError')
   } finally { isLoading.value = false }
@@ -39,7 +47,7 @@ const loadCatalog = async () => {
 // links are the masthead's least load-bearing content, and a red banner there would outweigh
 // the phone number it stands in for. The reason is still logged for the console.
 const loadSiteInfo = async () => {
-  try { siteInfo.value = await fetchSiteInfo() } catch (error: any) { console.error('Site info load failed:', error) }
+  try { await fetchSiteInfo() } catch (error: any) { console.error('Site info load failed:', error) }
 }
 
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
@@ -118,8 +126,12 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
       <section class="flex flex-wrap items-center justify-between gap-x-6 gap-y-4 pt-7 sm:pt-9">
         <!-- Wide display tracking reads as word-spacing on Khmer, whose clusters carry marks above and
              below the base letter — letter-spacing lands between those codepoints and tears a cluster in
-             two — so in that locale these labels carry no tracking at all. -->
-        <h1 class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="locale === 'km' ? '' : 'tracking-[0.25em]'">
+             two — so a Khmer run carries no tracking at all. The guard reads the string rather than the
+             route, and that distinction is the point here: the shop names this heading "Collection Bin"
+             in both locales, so on the Khmer route it is still Latin, still wants the same display
+             spacing it has in English, and nothing tears. Translate it into Khmer and the tracking
+             disappears on its own, because `hasKhmerText` is what decides, not `locale`. -->
+        <h1 class="text-[11px] font-bold uppercase text-zinc-400 dark:text-zinc-500" :class="hasKhmerText(t('collection')) ? '' : 'tracking-[0.25em]'">
           {{ t('collection') }}
         </h1>
         <UButton

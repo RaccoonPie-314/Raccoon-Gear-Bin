@@ -86,12 +86,29 @@ const REVEAL_GAP = 12
 let revealFrom = 0
 let revealTo = 0
 const RETURN_OWNERSHIP_PX = 160
-// Exactly one of this mount's two surfaces is open at a time on a phone; on desktop the popover floats
-// above the panel instead of replacing it (see `openSheet`). They are separate affordances, but stacking
-// a dropdown under a modal popover reads as a bug, and Escape already assumes a topmost surface.
+// Set for as long as a return scroll is owed, and read by the panel's leave (see `waitForReturn`).
+let returning = false
+// Exactly one of this mount's two surfaces is open at a time, on every width — and on a desktop they
+// are the same kind of surface: two panels sharing one slot in the flow under the buttons, so opening
+// one is closing the other. On a phone the swap is direct — the sheet is teleported and fixed, the
+// floating panel is absolute, and neither changes the document's height. On a desktop it is sequenced
+// through the outgoing panel's own leave (`queued`, consumed in `onPanelAfterLeave`), because that
+// slot IS the page's scrollable height: unmounting a panel while the viewport is parked in its own
+// space clamps `scrollY` to the new maximum in one frame — the page jump this file exists to prevent.
+let queued: 'sheet' | 'panel' | null = null
+// Set by a consumed swap for exactly one open: the incoming panel inherits the slot's return
+// target (`revealFrom`) instead of claiming its own, because the page is still riding the outgoing
+// panel's return scroll when the slot changes hands, and where that glide happens to be at the
+// moment is nobody's idea of "where the page stood".
+let chained = false
 const toggle = () => {
   const opening = !isOpen.value
-  if (opening) isSheetOpen.value = false
+  if (opening && isSheetOpen.value) {
+    if (props.compact) { isSheetOpen.value = false; isOpen.value = true; return }
+    queued = 'panel'
+    isSheetOpen.value = false
+    return
+  }
   isOpen.value = opening
 }
 
@@ -117,20 +134,25 @@ const pinColumnStatic = (panel: HTMLElement) => {
 }
 
 // Only the scroll waits for the settled layout; the column pin happens synchronously in the
-// enter hook, before the FLIP measures anything (see below).
-watch(isOpen, (open) => {
+// enter hook, before the FLIP measures anything (see below). The source covers both panels: the
+// reveal belongs to whichever one is opening, the return to whichever one just closed, and a swap
+// is both halves in sequence.
+watch(() => isOpen.value || isSheetOpen.value, (anyOpen) => {
   if (props.compact) return
-  if (!open) {
+  if (!anyOpen) {
     // Put the viewport back the way we found it, smoothly, while the panel is still in the DOM (its
     // leave runs 240ms, so the document is still tall enough to be scrolled to). Unpinning first — which
     // is what this used to do — shrinks the column by the panel's height under a scrolled viewport, the
-    // browser clamps `scrollY`, and the page snaps up in one frame. That clamp is the "forceful" return,
-    // and it is also what left the Share button near the viewport bottom so its popover flipped upward.
+    // browser clamps `scrollY`, and the page snaps up in one frame. That clamp is the "forceful" return.
     if (Math.abs(window.scrollY - revealTo) < RETURN_OWNERSHIP_PX) {
+      returning = true
       window.scrollTo({ top: revealFrom, behavior: reduced.value ? 'auto' : 'smooth' })
     }
     return
   }
+  // A re-open that interrupts a queued swap cancels it: the leave that would have consumed the
+  // flag was cancelled with the closure, so nothing else would ever clear it.
+  queued = null
   void nextTick(() => {
     const panel = panelEl.value
     if (!panel) return
@@ -141,8 +163,14 @@ watch(isOpen, (open) => {
     if (!host) return
     const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
     const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
-    revealFrom = window.scrollY
-    revealTo = target
+    if (!chained) revealFrom = window.scrollY
+    chained = false
+    // The return needs the destination the page ACTUALLY took, not the aim: the aim can exceed the
+    // document (a short panel on a page that ends under it), and the browser clamps the glide to the
+    // bottom. Recorded raw, the close's ownership test would read that clamp's gap as "the visitor
+    // scrolled away", skip the return scroll, and let the unmount clamp the page in one frame — the
+    // snappy scroll-up. `scrollTo` below keeps the raw aim; the clamp is the browser's.
+    revealTo = Math.min(target, Math.max(0, document.documentElement.scrollHeight - window.innerHeight))
     // Let the first bloom frame paint before the viewport moves, so the pop and the reveal-scroll do
     // not collide on the same frame (the jarring stretch this replaces).
     requestAnimationFrame(() => window.scrollTo({ top: target, behavior: reduced.value ? 'auto' : 'smooth' }))
@@ -150,12 +178,22 @@ watch(isOpen, (open) => {
 })
 
 // The column goes back to being sticky only once the panel has actually left — see the close branch
-// above. `onBeforeUnmount` stays as the net for a product swap or a navigation mid-flight.
-const onPanelAfterLeave = () => { unpinColumn() }
+// above. `onBeforeUnmount` stays as the net for a product swap or a navigation mid-flight. The leave
+// is also where a queued swap lands: by then the return scroll has settled, the outgoing panel's
+// space is the only thing leaving the document, and the incoming panel mounts into a viewport that
+// is already back where the page stood — which is what makes "close one, open the other" jumpless.
+const onPanelAfterLeave = () => {
+  unpinColumn()
+  const next = queued
+  queued = null
+  chained = next !== null
+  if (next === 'sheet') isSheetOpen.value = true
+  else if (next === 'panel') isOpen.value = true
+}
 
 onBeforeUnmount(unpinColumn)
 
-// ---- Contact panel: Apple popover bloom (uniform scale + offset), played by a Motion spring ----
+// ---- The panel slot: Apple popover bloom (uniform scale + offset), played by a Motion spring ----
 // Phase H replaced the asymmetric 2D FLIP (which scaled the whole panel onto the CTA's footprint and
 // stretched the textarea / channel pills mid-flight) with a native macOS/iOS "share pop": the panel
 // blooms from a slightly-shrunk, offset state to full size on a UNIFORM scale (no distortion),
@@ -174,34 +212,45 @@ const settleForMeasurement = (p: HTMLElement) => {
   running = null
   p.style.transform = ''
   p.style.opacity = ''
-  // The reflow that commits the rest geometry exists for the desktop reveal: `watch(isOpen)` reads
-  // the panel's `offsetTop` and the host's live rect, so a rect taken mid-pop would aim at the morph
-  // instead of the destination. The phone mount reads nothing after the pop (it has no reveal to
+  // The reflow that commits the rest geometry exists for the desktop reveal: the reveal watch
+  // reads the panel's `offsetTop` and the host's live rect, so a rect taken mid-pop would aim at
+  // the morph instead of the destination. The phone mount reads nothing after the pop (it has no reveal to
   // aim), so forcing a full-column layout inside its first animation frame is pure cost — paid on
   // the slowest device this surface runs on.
   if (!props.compact) void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
-// The bloom's numbers all live in `applePop` now — the same preset the Share Sheet's desktop popover
-// reads — so the two menus cannot drift apart. `rest` is the identity the spring settles on; the
+// The bloom's numbers all live in `applePop` now — one preset, read by every panel this feature
+// shows, so the two menus cannot drift apart. `rest` is the identity the spring settles on; the
 // shrunk/offset start and the shorter exit travel are keyed by which side of its trigger this mount's
 // panel sits on (the inline block drops *down* out of the CTA, the sticky bar's panel rises *up* out of
 // the bar), which is also the edge `transform-origin` is pinned to. The sticky-bar mount takes
 // `applePop.slide`: same travel, same spring, no scale, because it blooms inside the frosted bar.
 const popPair = () => props.compact ? applePop.slide : applePop.below
 
-// The corner a mount's trigger occupies, so both its enter and its leave travel the same path: the
-// sticky bar's panel rises out of the bar's bottom edge (`center bottom`, and it never scales), while
-// the inline desktop panel hangs under its CTA row, whose primary button sits at the row's left — so
-// `top left`, not the `center top` it used to bloom from. A popover scales from its control; only
-// modals keep `center`.
-const panelOrigin = () => (props.compact ? 'center bottom' : 'top left')
+// The corner a panel grows from and collapses back into, so both its enter and its leave travel the
+// same path. The sticky bar's panel rises out of the bar's bottom edge (`center bottom`, and it never
+// scales). In the slot under the buttons it is the trigger's own corner: the contact panel's CTA
+// starts at the row's left edge, so the panel's `top left` IS that button — but the Share button sits
+// mid-row and its panel is column-wide, so no corner of the panel is under it. That origin is the
+// trigger's centre in the panel's own coordinates, read on the settled layout (every hook calls this
+// after `settleForMeasurement`, so the rect is the rest box, not a frame of the morph).
+const panelOrigin = (el: Element) => {
+  if (props.compact) return 'center bottom'
+  if (el.hasAttribute('data-contact-panel')) return 'top left'
+  const p = el as HTMLElement
+  const b = shareEl.value
+  if (!b) return 'top left'
+  const pr = p.getBoundingClientRect()
+  const br = b.getBoundingClientRect()
+  return `${Math.round(br.left + br.width / 2 - pr.left)}px ${Math.round(br.top + br.height / 2 - pr.top)}px`
+}
 
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
   // Pin before the first measurement so the reveal scroll aims at a stable destination.
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
-  p.style.transformOrigin = panelOrigin()
+  p.style.transformOrigin = panelOrigin(p)
   // Promote for the length of the pop only: without this the panel is rasterised on the first
   // animated frame, which is the hitch at the start of the bloom. Cleared in `onPanelAfterEnter`.
   p.style.willChange = 'transform, opacity'
@@ -221,44 +270,69 @@ const onPanelAfterEnter = (el: Element) => {
   p.style.transformOrigin = ''
   p.style.willChange = ''
 }
+// The panel is what makes this document tall enough to be scrolled to `revealTo`; the frame it leaves
+// the flow, the maximum drops back to (almost) where the page started, and a return scroll that has not
+// finished is clamped — measured as a single 304px step, which is the page jump this exists to prevent.
+// So the leave holds the element until the viewport stops moving. It is at opacity 0 by then, so what
+// is being held is an invisible spacer, and the hold is bounded (40 frames) so a scroll that never
+// settles can never strand it. The phone mount never sets `returning` — it has no reveal to undo — and
+// neither does a close where the visitor had already scrolled away.
+const waitForReturn = (done: () => void) => {
+  if (!returning) { done(); return }
+  let last = -1
+  let still = 0
+  let frames = 0
+  const tick = () => {
+    const y = window.scrollY
+    still = y === last ? still + 1 : 0
+    last = y
+    if (still >= 2 || ++frames > 40) {
+      returning = false
+      done()
+      return
+    }
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+}
+
 const onPanelLeave = (el: Element, done: () => void) => {
   const p = el as HTMLElement
   // Settle first, then shrink: the exit starts from the same rest box the entry landed on, so a close
   // that interrupts an open retargets cleanly instead of compounding transforms.
   settleForMeasurement(p)
-  p.style.transformOrigin = panelOrigin()
+  p.style.transformOrigin = panelOrigin(p)
   p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
   animate(p, { opacity: [1, 0] }, red ? { duration: 0.12, ease: 'easeIn' } : applePop.opacity.out)
   // Desktop dismisses into its trigger (the genie — `collapseTransform` measures this panel against
-  // the CTA that opened it, so it lands on the button rather than on a guessed fraction); the phone
-  // mount keeps `applePop.slide`'s travel-only exit, because a scale inside the frosted sticky bar is
-  // the shape that was measured expensive. Reduced motion drops the collapse everywhere.
-  const leaveTo = props.compact || red ? popPair().to : collapseTransform(p, ctaEl.value)
+  // the control that opened it, so it lands on the button rather than on a guessed fraction: the CTA
+  // for the contact panel, the Share button for the share panel); the phone mount keeps
+  // `applePop.slide`'s travel-only exit, because a scale inside the frosted sticky bar is the shape
+  // that was measured expensive. Reduced motion drops the collapse everywhere.
+  const leaveTo = props.compact || red ? popPair().to : collapseTransform(p, p.hasAttribute('data-contact-panel') ? ctaEl.value : shareEl.value)
   const a = animate(p, { transform: [applePop.rest, leaveTo] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
-  void a.finished.then(() => { if (running === a) running = null; done() })
+  void a.finished.then(() => { if (running === a) running = null; waitForReturn(done) })
 }
 
-// The sheet is opened by this mount's own Share button, which stays its anchor: a desktop popover is
-// placed beside the control the visitor just pressed, and a phone's bottom sheet is anchored to the
-// viewport instead and needs no measurement at all.
+// The Share button toggles its own panel, and a swap is sequenced the same way (`toggle` queues the
+// other direction): pressing Share while the contact panel is open closes it exactly as pressing the
+// contact CTA would, and the share panel blooms into the now-empty slot when the leave reports done.
 const openSheet = () => {
-  // On a phone the sheet is a modal bottom sheet that covers the whole surface anyway, so the panel
-  // closes under it. On desktop it is a popover, and closing the panel there is what lurches the page:
-  // the reveal parks the viewport *inside the panel's own height*, so removing the panel makes the
-  // document shorter than the current offset and the browser clamps `scrollY` back to the top in a
-  // single frame (measured: y 358 → 0 and scrollHeight 1258 → 900 on the same frame). Leaving the panel
-  // standing keeps that space, so the page stays put and the popover floats above the surface it came
-  // from — and Escape already answers the topmost thing first.
-  if (props.compact) isOpen.value = false
+  if (queued) return // a swap is already in flight; a second press is the same intent
+  if (isSheetOpen.value) { isSheetOpen.value = false; return }
+  if (props.compact) { isOpen.value = false; isSheetOpen.value = true; return }
+  if (isOpen.value) { queued = 'sheet'; isOpen.value = false; return }
   isSheetOpen.value = true
 }
 
-// Escape closes the topmost thing this mount opened, and only that one: the sheet floats above the
-// panel, so pressing it once should take the sheet away and leave the panel. Both hand focus back to
-// the control that opened them — the dismiss removes whatever was focused inside, and a visitor left
-// on `<body>` loses their place in the tab order entirely.
+// Escape closes the topmost thing this mount opened, and only that one. Since Share now takes the panel
+// away on desktop, the usual state is one open surface and one Escape. The ordering still matters: the
+// sheet is the topmost, so it goes first and hands focus to the Share button, and a panel opened on its
+// own is dismissed by the branch below and hands focus back to the CTA. Both matter because the dismiss
+// removes whatever was focused inside, and a visitor left on `<body>` loses their place in the tab
+// order entirely.
 const close = (returnFocus = false) => {
   if (isSheetOpen.value) {
     isSheetOpen.value = false
@@ -329,9 +403,9 @@ const channelName = platformLabel
     <!-- Only ever rendered after a copy actually failed. The last thing this flow should do is tell a
          visitor to copy a link they cannot see — which is what happened while the canonical address
          existed only inside the message field, behind a closed panel. Read-only, selected on focus,
-         and labelled so the accessible name is "Product link" rather than an anonymous field. The
-         sheet carries its own copy of this fallback while it is open, because that is where the
-         visitor was asked to copy from. -->
+         and labelled so the accessible name is "Product link" rather than an anonymous field. While
+         the share panel is open it carries its own copy of this fallback — that is the surface the
+         visitor was just asked to copy from — so this row steps aside on the row's own `v-if`. -->
     <div v-if="revealLink && !isSheetOpen" class="mt-2 flex min-w-0 items-center">
       <input
         readonly
@@ -461,11 +535,40 @@ const channelName = platformLabel
           </li>
         </ul>
       </div>
+
+      <!-- The other occupant of the same slot, on every width above `lg`. The share panel is a
+           panel, not a floating menu: it expands downward out of the Share button and collapses
+           back into it through the same hooks and the same `applePop`/genie pair the contact panel
+           uses — which is the whole reason it lives here instead of teleporting itself, so that
+           "one open surface" is one shape of surface. Its rows are `ProductShareBody`, the same
+           body the phone's sheet wears; its chrome is this slot's, like the contact panel's. -->
+      <div
+        v-else-if="isSheetOpen && !compact"
+        ref="panelEl"
+        data-share-sheet
+        role="group"
+        :aria-label="t('shareSheetLabel', { name: share.title })"
+        tabindex="0"
+        class="mt-3 max-h-[70vh] min-w-0 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white p-3 text-zinc-950 shadow-xl outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white dark:focus-visible:ring-white"
+      >
+        <ProductShareBody
+          :payload="share"
+          :destinations="destinations"
+          :feedback="sheetFeedback"
+          :reveal-link="!!revealLink"
+          :compact="false"
+          @close="close(true)"
+          @copy-link="emit('copyLink')"
+          @copy-message="emit('copyMessage')"
+        />
+      </div>
     </Transition>
 
-    <!-- The sheet itself is `ProductShareSheet`'s business; this mount only says that it is open,
-        where it is anchored, and which of the three things the visitor did was intended. -->
+    <!-- The phone's shape is the sheet's own business: teleported, backdrop, swipe — the same rows
+        in the shape a 390px viewport needs. Only the compact mount renders it; above `lg` the slot
+        inside the Transition carries this surface instead. -->
     <ProductShareSheet
+      v-if="compact"
       :open="isSheetOpen"
       :payload="share"
       :destinations="destinations"

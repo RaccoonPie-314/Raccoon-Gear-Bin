@@ -470,7 +470,7 @@ const run = async () => {
   // Both mounts of the conversion UI in one read: the inline block and the teleported sticky bar
   // are the same component twice, so every assertion below asks the same question of each and the
   // answers are what prove the two cannot drift apart.
-  const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, panelTabbable: panel ? panel.getAttribute("tabindex") === "0" : false, panelOverflow: panel ? panel.scrollHeight - panel.clientHeight : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, shareLink: (el.querySelector("[data-share-link]") || {}).value || null, readonly: el.querySelector("[data-share-link]") ? el.querySelector("[data-share-link]").getAttribute("readonly") !== null : null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => { const mark = a.querySelector("svg"); return { href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-contact-prefilled") === "true", svgs: a.querySelectorAll("svg").length, paths: a.querySelectorAll("svg path").length, fill: mark ? mark.getAttribute("fill") : null, stroke: mark ? mark.getAttribute("stroke") : null, ink: mark ? (() => { const bb = mark.getBBox(); return [Math.round(bb.width), Math.round(bb.height)] })() : null } }) }) } return out })()'
+  const MOUNTS = '(() => { const out = []; for (const el of document.querySelectorAll("[data-product-actions]")) { const cta = el.querySelector("[data-contact-cta]"); const msg = el.querySelector("[data-contact-message]"); const fb = el.querySelector("[data-contact-feedback]"); const panel = el.querySelector("[data-contact-panel]"); const label = el.querySelector("label"); const field = el.querySelector("textarea"); out.push({ where: el.closest("[data-sticky-cta]") ? "sticky" : "inline", visible: el.getClientRects().length > 0, tag: cta ? cta.tagName : null, type: cta ? cta.getAttribute("type") : null, ctaText: cta ? (cta.textContent || "").trim() : null, expanded: cta ? cta.getAttribute("aria-expanded") : null, controls: cta ? cta.getAttribute("aria-controls") : null, panelOpen: !!panel, panelLabel: panel ? panel.getAttribute("aria-label") : null, panelControls: panel ? panel.id : null, panelTabbable: panel ? panel.getAttribute("tabindex") === "0" : false, panelOverflow: panel ? panel.scrollHeight - panel.clientHeight : null, message: msg ? msg.value : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, role: fb ? fb.getAttribute("role") : null, labelFor: label ? label.getAttribute("for") : null, fieldId: field ? field.id : null, labelText: label ? (label.textContent || "").trim() : null, shareTag: (el.querySelector("[data-share-cta]") || {}).tagName || null, shareLink: (function () { const l = el.querySelector("[data-share-link]"); return l && l.getClientRects().length > 0 && getComputedStyle(l).visibility !== "hidden" ? l.value : null })(), readonly: el.querySelector("[data-share-link]") ? el.querySelector("[data-share-link]").getAttribute("readonly") !== null : null, channels: [...el.querySelectorAll("[data-contact-channel]")].map(a => { const mark = a.querySelector("svg"); return { href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-contact-prefilled") === "true", svgs: a.querySelectorAll("svg").length, paths: a.querySelectorAll("svg path").length, fill: mark ? mark.getAttribute("fill") : null, stroke: mark ? mark.getAttribute("stroke") : null, ink: mark ? (() => { const bb = mark.getBBox(); return [Math.round(bb.width), Math.round(bb.height)] })() : null } }) }) } return out })()'
   const mounts = async () => await ev(MOUNTS)
   // The Share Sheet is teleported to `body` — a fixed panel may not inherit the sticky bar's
   // containing block, whose `backdrop-blur` would otherwise make the bar its viewport — so it is asked
@@ -1769,6 +1769,13 @@ const run = async () => {
     // sticky column grows with it.
     const settleOnCta = async () => { await ev(ctaBoxExpr); await sleep(500); return await ev(ctaBoxExpr) }
     const flight = async () => { const box = await settleOnCta(); await ev(START_FLIGHT); await clickAt(box.x, box.y); await waitFor('!!window.__Fdone', 4000); return await ev('window.__F || []') }
+    // A reveal/return glide is still running after a panel's transform settles, and the geometry
+    // checks that use this read viewport rects: two level reads in a row is the cheapest way to say
+    // "the page has stopped". The bound is a smooth scroll's own duration plus slack.
+    const waitScrollStill = async () => {
+      await ev('window.__SY = null')
+      return await waitFor('(() => { const y = Math.round(window.scrollY); const ok = y === window.__SY; window.__SY = y; return ok })()', 4000)
+    }
     const enter = await flight()
     check('the panel enters through a Motion transform morph that actually runs and settles full-size', enter.length >= 3 && travelled(enter) && faded(enter) && enter[enter.length - 1].op === 1 && enter[enter.length - 1].sc >= 0.99, { frames: enter.length, first: enter[0], middle: enter[Math.floor(enter.length / 2)], last: enter[enter.length - 1] })
     const leave = await flight()
@@ -1836,34 +1843,101 @@ const run = async () => {
     const returnedTo = await ev('window.scrollY')
     check('closing the panel returns the page to where it stood, and the reveal really moved it', revealedTo > returnFrom + 40 && Math.abs(returnedTo - returnFrom) <= 8, { returnFrom, revealedTo, returnedTo })
 
-    const pairBox = await settleOnCta()
-    await clickAt(pairBox.x, pairBox.y)
+    // ---- one open surface: either control closes the other's panel -----------------------------
+    // The two panels share one slot in the flow under the buttons, so opening one is closing the
+    // other — Share out of an open contact panel, the contact CTA out of an open share panel. The
+    // swap is sequenced (the outgoing panel's leave reports done before the incoming mounts), which
+    // is what keeps the document from ever going empty under a viewport parked in the panel's own
+    // height: on this fixture the panels ARE the page's scrollable height (scrollHeight 1438 with
+    // the contact panel, 900 without, viewport 900), and an emptied slot clamps `scrollY` to the new
+    // maximum in a single frame — the 302px jump the frame recorder caught when a panel was simply
+    // unmounted. `step` is the biggest one-frame move; the swap's smooth glides run 30-60px a frame,
+    // so the bound of 80 separates them from a clamp by an order of magnitude. `overlap` counts
+    // frames with both panels in the DOM: one at a time is the whole contract, and it is
+    // frame-sampled because a report of "never both" is only as good as the frames it was seen in.
+    //
+    // Where the page SETTLES is the one thing a swap may legitimately change: the two panels are
+    // different heights, and the reveal aims the incoming panel's top under the header — an aim the
+    // shorter share panel's document cannot always satisfy, so the browser clamps the glide to the
+    // document's own bottom. Both outcomes are asserted and nothing else: the viewport either stays
+    // where the outgoing panel had it, or it ends at the bottom edge of the shorter document, with
+    // the incoming panel fully visible either way. Pinning a fixed y here would re-encode the
+    // fixture's exact heights, which is not what "no jump" means.
+    const swapFrames = '(() => { window.__P = []; window.__Pdone = false; const t0 = performance.now(); const tick = function () { window.__P.push({ y: Math.round(window.scrollY), panel: !!document.querySelector("[data-contact-panel]"), sheet: !!document.querySelector("[data-share-sheet]") }); if (performance.now() - t0 < 3000) requestAnimationFrame(tick); else window.__Pdone = true }; requestAnimationFrame(tick); return true })()'
+    const swapStats = async () => {
+      const frames = await ev('window.__P || []')
+      const overlap = frames.filter(f => f.panel && f.sheet).length
+      const step = frames.reduce((m, f, i) => i ? Math.max(m, Math.abs(f.y - frames[i - 1].y)) : m, 0)
+      return { overlap, step, last: frames[frames.length - 1] || {} }
+    }
+    const pageBottom = async () => await ev('Math.round(document.documentElement.scrollHeight - innerHeight)')
+    const liveBox = async sel => await ev('(() => { const el = [...document.querySelectorAll(' + JSON.stringify(sel) + ')].find(e => e.getClientRects().length); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()')
+    const panelBox = async sel => await ev('(() => { const p = document.querySelector(' + JSON.stringify(sel) + '); if (!p) return null; const r = p.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight } })()')
+
+    const swapCta = await settleOnCta()
+    const swapFrom = await ev('Math.round(window.scrollY)')
+    await clickAt(swapCta.x, swapCta.y)
     await waitFor('!!document.querySelector(\'[data-contact-panel]\')')
     await sleep(900)
-    const sharePairBox = await ev('(() => { const r = [...document.querySelectorAll("[data-share-cta]")].find(e => e.getClientRects().length).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()')
-    const yBeforeShare = await ev('Math.round(window.scrollY)')
-    await clickAt(sharePairBox.x, sharePairBox.y)
-    await waitFor('!!document.querySelector(\'[data-share-sheet]\')')
-    await sleep(700)
-    const pairOrigin = await ev('(() => { const s = document.querySelector("[data-share-sheet]"); return s ? getComputedStyle(s).transformOrigin : null })()')
-    // The page must not move. It cannot, now, because the panel is still standing: the reveal parks the
-    // viewport inside the panel's own height, so if Share removed the panel the document would get shorter
-    // than the current offset and the browser would clamp `scrollY` back to the top in one frame (the real
-    // regression measured 358 → 0, and the same trip on a page whose reveal parked it at 538 → 8).
-    // The tolerance is not slack for the bug — measured against a live page the drift is 0px — it is for
-    // this rig's own fixture photos, which size themselves asynchronously and can shorten the document by
-    // a few dozen px while the popover opens. An exact-equality assert here would fail on an image.
-    const afterShare = await ev('({ y: Math.round(window.scrollY), panel: !!document.querySelector("[data-contact-panel]") })')
-    check('a Share opened out of an open contact panel hangs below its button and leaves the page where it was',
-      pairOrigin === '0px 0px' && afterShare.panel && yBeforeShare - afterShare.y <= 60,
-      { pairOrigin, yBeforeShare, afterShare })
-    await press('Escape', 'Escape', 27)
-    await waitFor('!document.querySelector(\'[data-share-sheet]\')')
-    // Escape answers the topmost surface only, so the panel is still open here — that is the whole point
-    // of leaving it standing. The second Escape is what dismisses it and lets the page return.
-    check('the first Escape dismisses the popover and leaves the panel standing', await ev('!!document.querySelector("[data-contact-panel]")'))
+    const swapRevealed = await ev('Math.round(window.scrollY)')
+    const shareSwap = await liveBox('[data-share-cta]')
+    await ev(swapFrames)
+    await clickAt(shareSwap.x, shareSwap.y)
+    await waitFor('window.__Pdone === true', 5000)
+    const toShare = await swapStats()
+    const swapEnd = await panelBox('[data-share-sheet]')
+    const swapY = await ev('Math.round(window.scrollY)')
+    const swapBottom = await pageBottom()
+    check('Share out of the open contact panel swaps the panels and never jumps the page',
+      swapRevealed > swapFrom + 60 && toShare.overlap === 0 && toShare.step <= 80
+      && toShare.last.panel === false && toShare.last.sheet === true
+      && (Math.abs(swapY - swapRevealed) <= 80 || Math.abs(swapY - swapBottom) <= 12)
+      && !!swapEnd && swapEnd.top >= -1 && swapEnd.bottom <= swapEnd.vh + 1,
+      { swapFrom, swapRevealed, swapY, swapBottom, toShare, swapEnd })
+    const ctaSwap = await liveBox('[data-contact-cta]')
+    await ev(swapFrames)
+    await clickAt(ctaSwap.x, ctaSwap.y)
+    await waitFor('window.__Pdone === true', 5000)
+    const toPanel = await swapStats()
+    const panelEnd = await panelBox('[data-contact-panel]')
+    const backY = await ev('Math.round(window.scrollY)')
+    const backBottom = await pageBottom()
+    check('the contact CTA out of the open share panel swaps them back the same way',
+      toPanel.overlap === 0 && toPanel.step <= 80
+      && toPanel.last.panel === true && toPanel.last.sheet === false
+      && (Math.abs(backY - swapY) <= 80 || Math.abs(backY - backBottom) <= 12)
+      && !!panelEnd && panelEnd.top >= -1 && panelEnd.bottom <= panelEnd.vh + 1,
+      { backY, backBottom, toPanel, panelEnd })
+    // Leave the run as it likes to find things: the checks after this one drive the CTA as a closed
+    // surface, and the return scroll has to be allowed to finish before they measure it.
     await press('Escape', 'Escape', 27)
     await waitFor(panelGone)
+    await sleep(900)
+
+    // ---- the share panel's own collapse, pressed off ------------------------------------------
+    // Pressing Share again is the path a visitor takes to collapse the panel, and it is the one
+    // where the reveal's aim can exceed the document: the share panel is short and this page ends
+    // under it, so the browser clamps the reveal's glide to the document's own bottom. A return
+    // target recorded as the raw aim would make the close's ownership test read that clamp as "the
+    // visitor scrolled away", skip the return glide, and let the unmount clamp the page in one
+    // frame — ~280px of snap. `step` catches exactly that: a clamp is ~280 in a frame, a glide under
+    // 80. And the viewport has to land back where it stood, because the return scroll played.
+    const shareBtn1 = await liveBox('[data-share-cta]')
+    const shareFrom = await ev('Math.round(window.scrollY)')
+    await clickAt(shareBtn1.x, shareBtn1.y)
+    await waitFor('!!document.querySelector(\'[data-share-sheet]\')')
+    await waitScrollStill()
+    const shareRevealed = await ev('Math.round(window.scrollY)')
+    const shareBtn2 = await liveBox('[data-share-cta]')
+    await ev(swapFrames)
+    await clickAt(shareBtn2.x, shareBtn2.y)
+    await waitFor('window.__Pdone === true', 5000)
+    const collapse = await swapStats()
+    const collapsedY = await ev('Math.round(window.scrollY)')
+    check('pressing Share again collapses the panel and glides the page back without a snap',
+      shareRevealed > shareFrom + 60 && collapse.step <= 80 && collapse.last.sheet === false
+      && Math.abs(collapsedY - shareFrom) <= 12,
+      { shareFrom, shareRevealed, collapsedY, collapse })
 
     // Reduced motion keeps the FLIP — it is a short, contained morph of one panel back into its own
     // button, not the large-area travel the preference targets — and only trims the duration. So the
@@ -1917,7 +1991,7 @@ const run = async () => {
     // The enter transition moves the panel by its own height, so a rect read on the first frame is
     // the sheet mid-slide — off the bottom of the viewport. Every geometry read waits for it to rest.
     const sheetAtRest = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return false; const t = getComputedStyle(s).transform; const settled = t === "none" || (() => { const m = new DOMMatrixReadOnly(t); return Math.abs(m.a - 1) < 0.02 && Math.abs(m.d - 1) < 0.02 && Math.abs(m.e) < 2 && Math.abs(m.f) < 2 })(); const running = s.getAnimations().some(a => a.playState === "running"); return settled && !running })()'
-    const openSheet = async () => { await clickSelector('[data-share-cta]', sheetOpen); return await waitFor(sheetAtRest) }
+    const openSheet = async () => { await clickSelector('[data-share-cta]', sheetOpen); await waitFor(sheetAtRest); return await waitScrollStill() }
     const closeSheet = async () => { await press('Escape', 'Escape', 27); return await waitFor('!document.querySelector(\'[data-share-sheet]\')') }
 
     // A clean visit: the copy failures above legitimately revealed the manual link for this product,
@@ -1930,8 +2004,12 @@ const run = async () => {
     await clearFeedback()
     await openSheet()
     const openedSheet = await sheet()
-    check('the Share button opens the custom sheet, and the platform share API is never called', !!openedSheet && (await shareCalls()).length === 0, { calls: await shareCalls(), sheet: !!openedSheet })
-    check('the sheet is a fixed dialog named for the product it shares', !!openedSheet && openedSheet.position === 'fixed' && openedSheet.label === S.label.replace('{name}', shareRow.name) && openedSheet.text.includes(shareRow.name) && openedSheet.text.includes(shareRow.short_description), { label: openedSheet && openedSheet.label, position: openedSheet && openedSheet.position })
+    check('the Share button opens the share panel, and the platform share API is never called', !!openedSheet && (await shareCalls()).length === 0, { calls: await shareCalls(), panel: !!openedSheet })
+    // The panel is the contact panel's twin, not a floating menu: it sits in the info column's own
+    // flow, expanding down from the button row it hangs from.
+    const openedBelow = await ev('(() => { const p = document.querySelector("[data-share-sheet]"); const b = [...document.querySelectorAll("[data-share-cta]")].find(e => e.getClientRects().length); if (!p || !b) return null; const pr = p.getBoundingClientRect(), br = b.getBoundingClientRect(); return { below: pr.top >= br.bottom - 1, gap: Math.round(pr.top - br.bottom), position: getComputedStyle(p).position } })()')
+    check('the panel expands downward in the page\u2019s own flow, directly under the Share control', !!openedBelow && openedBelow.position !== 'fixed' && openedBelow.below && openedBelow.gap <= 80, { openedBelow })
+    check('the panel is named for the product it shares', !!openedSheet && openedSheet.label === S.label.replace('{name}', shareRow.name) && openedSheet.text.includes(shareRow.name) && openedSheet.text.includes(shareRow.short_description), { label: openedSheet && openedSheet.label })
     check('the sheet carries Copy link, Copy message and its own dismiss, in the page\u2019s words', !!openedSheet && openedSheet.hasCopyLink && openedSheet.hasCopyMessage && openedSheet.hasClose && openedSheet.copyLinkText === S.copyLink && openedSheet.copyMessageText === S.copyMessage && openedSheet.viaText.includes(S.viaLabel), { copyLink: openedSheet && openedSheet.copyLinkText, copyMessage: openedSheet && openedSheet.copyMessageText, via: openedSheet && openedSheet.viaText })
     const wantShareHrefs = S.destinationHrefs.map(href => href.replace('{share}', encodeURIComponent(shareText)))
     const rowsOf = m => (m && m.rows || []).map(r => r.href)
@@ -1962,20 +2040,24 @@ const run = async () => {
 
     check('Escape closes the sheet and hands focus back to the Share button', await closeSheet() && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-share-cta") !== null })()'))
     await openSheet()
-    await clickAt(12, 12)
-    check('a click outside the sheet closes it', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
+    // No modal catcher and no outside-click dismissal: this is a panel in the page, like the contact
+    // panel — it is dismissed by the control that opened it, its close button, or Escape.
+    check('the desktop panel carries no modal backdrop, unlike the phone sheet', !(await ev('!!document.querySelector("[data-share-backdrop]")')))
+    await clickSelector('[data-share-cta]', '!document.querySelector(\'[data-share-sheet]\')')
+    check('pressing Share again closes the panel it opened', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
     await ev('(() => { const el = document.querySelector("[data-share-cta]"); if (el) el.focus(); return true })()')
     await press('Enter', 'Enter', 13, '\r')
     await waitFor(sheetAtRest)
+    await waitScrollStill()
     const keyed = await sheet()
     const shareBtnGeo = await ev('(() => { const el = [...document.querySelectorAll("[data-share-cta]")].find(b => b.getClientRects().length); if (!el) return null; const r = el.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) } })()')
-    check('the keyboard opens the sheet, and the desktop popover stays inside the viewport', !!keyed && keyed.position === 'fixed' && keyed.left >= 0 && keyed.top >= 0 && keyed.right <= keyed.vw + 1 && keyed.bottom <= keyed.vh + 1 && keyed.overflow <= 1, { keyed })
-    // Anchored, not centred and not bottom-bleeding: the popover sits next to the control that opened
-    // it, which is the difference between a share popover and a modal dialog on a desktop.
-    check('the popover is anchored beside the Share control that opened it', !!keyed && !!shareBtnGeo && keyed.width > 100 && keyed.width < keyed.vw * 0.5 && (Math.abs(keyed.top - shareBtnGeo.bottom) < 40 || Math.abs(keyed.bottom - shareBtnGeo.top) < 40) && keyed.bottom < keyed.vh - 1, { keyed, shareBtnGeo })
-    check('the desktop popover carries no thumb-reach close row', !!keyed && keyed.hasCloseBottom === false, { hasCloseBottom: keyed && keyed.hasCloseBottom })
+    check('the keyboard opens the panel, and it stays inside the viewport', !!keyed && keyed.position !== 'fixed' && keyed.left >= 0 && keyed.top >= 0 && keyed.right <= keyed.vw + 1 && keyed.bottom <= keyed.vh + 1 && keyed.overflow <= 1, { keyed })
+    // Directly under its control, not floating beside it: the panel occupies the slot below the
+    // button row, so its top edge clears the button's bottom with only the row gap between them.
+    check('the panel expands directly under the Share control that opened it', !!keyed && !!shareBtnGeo && keyed.width > 100 && keyed.top >= shareBtnGeo.bottom - 1 && keyed.top - shareBtnGeo.bottom <= 80, { keyed, shareBtnGeo })
+    check('the desktop panel carries no thumb-reach close row', !!keyed && keyed.hasCloseBottom === false, { hasCloseBottom: keyed && keyed.hasCloseBottom })
     await closeSheet()
-    // ---- the popover's bloom (desktop shape) ------------------------------------------------
+    // ---- the panel's bloom (desktop shape) --------------------------------------------------
     // The desktop shape used to unfold on `scaleY` alone, which stretched every copy row and
     // destination pill vertically for the length of the pop — the defect Phase H removed from the
     // contact panel. Frame-sampled rather than read at rest, because a settled popover reports the
@@ -1993,13 +2075,13 @@ const run = async () => {
     await waitFor('!!window.__SFdone', 4000)
     const sframes = await ev('window.__SF || []')
     const popBloom = sframes.filter(f => f.a > 0.5 && f.a < 0.995)
-    check('the desktop popover blooms on a uniform scale, not a one-axis stretch', sframes.length > 3 && popBloom.length > 0 && popBloom.every(f => Math.abs(f.a - f.d) <= 0.01), { frames: sframes.slice(0, 6) })
+    check('the desktop panel blooms on a uniform scale, not a one-axis stretch', sframes.length > 3 && popBloom.length > 0 && popBloom.every(f => Math.abs(f.a - f.d) <= 0.01), { frames: sframes.slice(0, 6) })
     // The other half of "the same animation as the Contact panel": the bloom travels a few px back
     // toward the control it opened from, and opacity fades on its own curve rather than riding the
     // spring. A scale-only pop passes the check above and fails this one.
     const popTravelled = sframes.filter(f => Math.abs(f.f) >= 2)
     const popFaded = sframes.some(f => f.o > 0.02 && f.o < 0.98)
-    check('the popover travels toward its trigger and fades on its own curve, like the panel', popTravelled.length > 0 && popFaded, { travel: popTravelled.slice(0, 4), frames: sframes.slice(0, 4) })
+    check('the panel travels toward its trigger and fades on its own curve, like the contact panel', popTravelled.length > 0 && popFaded, { travel: popTravelled.slice(0, 4), frames: sframes.slice(0, 4) })
     await waitFor(sheetAtRest)
     await closeSheet()
     check('the sheet never reached the platform share API during the whole visit', (await shareCalls()).length === 0, { calls: await shareCalls() })
@@ -2234,6 +2316,102 @@ const run = async () => {
     // and the run wants to make that trip through the pill itself two lines later.
     await mouse('mouseReleased', kmPill.x, kmPill.y + 320, 0)
     check('the locale pill answers on press, before the new page paints', /^0\.9/.test(pillPress), { pillPress })
+    // ---- the switch: same page, same component, no round trip --------------------------------
+    // A locale switch used to cost everything a page change costs: the component was rebuilt, the
+    // catalog was fetched a second time for text the first response had already embedded, and Nuxt's
+    // default scroll behaviour threw the visitor back to the masthead. It is now `setLocale()` on a
+    // page keyed by the path *without* the locale prefix, which is a claim about three separate
+    // mechanisms — Vue's page key, the data layer's computed, and `scrollToTop` — so all three are
+    // measured on the same click. An expando on the page root is the cheapest honest identity probe:
+    // it survives if and only if the same DOM node is still there. `resetW` is the request log the
+    // admin flow already trusts. And the scroll is read *before* and *after*, with the smooth-scroll
+    // rule in `main.css` asked to stay out of the way, because a `scrollTo` that animates would make
+    // the before-read a lie.
+    //
+    // The switch is made from the KEYBOARD, and that is not a preference: the masthead is not sticky,
+    // so scrolling the visitor down takes the pill's viewport coordinates with it. The first version
+    // of this check measured the pill at `scrollY = 0`, scrolled to 600, then clicked those stale
+    // coordinates — and landed on a product card, which dutifully navigated, rebuilt the page, fetched
+    // and scrolled to top. Every one of the four assertions below went red for a bug in the test. A
+    // focused link answers Enter wherever it sits in the page, and it is the path a keyboard visitor
+    // takes anyway.
+    await ev('(() => { const m = document.querySelector("main"); if (m) m.__localeProbe = "kept"; window.scrollTo({ top: 600, behavior: "instant" }); const p = document.querySelector(\'div[data-language-switcher] a:nth-of-type(2)\'); if (p) p.focus(); return true })()')
+    await sleep(150)
+    const yBefore = await ev('window.scrollY')
+    const enTracking = await ev('(() => { const h = document.querySelector("h1"); return h ? getComputedStyle(h).letterSpacing : null })()')
+    const pillFocused = await ev('document.activeElement === document.querySelector(\'div[data-language-switcher] a:nth-of-type(2)\')')
+    // The decode is recorded, not read: "it cycled then settled" and "it painted the right string" are
+    // indistinguishable in one read, and the page-wide version makes a second claim a single element
+    // cannot — that the rest of the page moved too. So every frame captures the rail eyebrow's text *and*
+    // how many text nodes currently hold a Greek or Cyrillic glyph, which is noise by construction: no
+    // string on this storefront contains either script. Those two sets sit in the pool unprobed (every
+    // platform's system font carries them), so the metric cannot go quiet on a machine with no Hanzi or
+    // Hangul face — the optional scripts are a bonus, never the evidence. 110 frames outruns the whole
+    // ~300ms cycle, so the read below never races it.
+    await ev('(() => { window.__DECODE = []; window.__DECODE_DONE = false; var noise = /[\u0370-\u03FF\u0400-\u04FF]/; var rec = function () { var h = document.querySelector("aside p.uppercase"); var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); var n = 0; while (w.nextNode()) { var v = w.currentNode.nodeValue; if (v && noise.test(v)) n++ } var s = document.querySelector("[data-slot=value]"); var i = document.querySelector("input[type=text]"); window.__DECODE.push([h ? h.textContent : "-", n, noise.test(s ? s.textContent : "") ? 1 : 0, noise.test(i ? i.placeholder : "") ? 1 : 0, (document.querySelector("main article p.uppercase") || {}).textContent || "-", Math.round(performance.now())].join("\\u0001")); if (window.__DECODE.length < 110) requestAnimationFrame(rec); else window.__DECODE_DONE = true; }; requestAnimationFrame(rec); return true })()')
+    await resetW()
+    await press('Enter', 'Enter', 13)
+    const switched = await waitFor('location.pathname.startsWith("/km")', 4000)
+    const keptComponent = await ev('(() => { const m = document.querySelector("main"); return !!m && m.__localeProbe === "kept" })()')
+    const yAfter = await ev('window.scrollY')
+    const readsAfterSwitch = (await allW()).filter(w => w.method === 'GET' && w.p.startsWith('/rest/v1/'))
+    check('a locale switch lands on the Khmer route without leaving the page', switched && pillFocused && keptComponent === true, { switched, pillFocused, keptComponent })
+    check('a locale switch asks the server for nothing it already has', readsAfterSwitch.length === 0, { calls: seqOf(readsAfterSwitch) })
+    check('a locale switch keeps the place the visitor was reading', yBefore > 200 && Math.abs(yAfter - yBefore) <= 2, { yBefore, yAfter })
+    await waitFor('window.__DECODE_DONE === true', 5000)
+    const decodeRun = await ev('(() => { const h = document.querySelector("aside p.uppercase"); const label = h ? h.textContent : null; const all = []; const stamps = []; let prev = null; let eprev = null; let holdHead = 0; let holdCard = 0; let peak = 0; let last = 0; let sort = 0; let ph = 0; for (const row of (window.__DECODE || [])) { const c = row.split("\\u0001"); const t = c[0]; const n = +c[1]; const ms = +c[5]; sort += +c[2]; ph += +c[3]; peak = Math.max(peak, n); last = n; if (t !== prev) { if (prev !== null && stamps.length) holdHead = Math.max(holdHead, ms - stamps[stamps.length - 1]); all.push(t); stamps.push(ms); prev = t } if (c[4] !== eprev) { if (eprev !== null) holdCard = Math.max(holdCard, ms - (stamps[stamps.length - 1] ?? ms)); eprev = c[4] } } const from = all.findIndex(t => /[\u1780-\u17FF]/.test(t)); const seen = from < 0 ? all : all.slice(from); const seg = new Intl.Segmenter("km", { granularity: "grapheme" }); const count = t => { let n = 0; for (const g of seg.segment(t)) n++; return n }; const want = label ? count(label) : 0; const sl = document.querySelector("[data-slot=value]"); return { first: all[0] ?? null, label, seen, want, peak, last, sort, ph, holdHead, holdCard, sortLabel: sl ? sl.textContent.trim() : null, off: seen.filter(t => count(t) !== want).length, noise: seen.filter(t => t !== label).length } })()')
+    // One heading's cycle, asserted four ways: it must cycle (≥3 frames that are not the word), it must
+    // land on the word (`ទិញតាមប្រភេទ` — proof the row re-resolved in place rather than
+    // waiting for a refetch), the FIRST frame already in the new language must not be the word (the wave
+    // defers each node's cycle by up to `STAGGER_MS * index`, and a deferred node otherwise paints the
+    // translated string and sits on it until its turn — the flash this locks out), and every frame must
+    // hold the same number of grapheme clusters, which is
+    // the property `textClusters` exists to keep: `ខ្មែរ` is five codepoints in two clusters, and a
+    // codepoint split strands a coeng (្) with nothing to subscript. That last one was written after a
+    // deliberate sabotage — a regex for "a mark at the head of a cluster" stayed green on the broken
+    // build, because UAX #29 binds a trailing coeng into the consonant before it. The frames before the
+    // first Khmer one are the English heading the recorder watched up to the click, and they are left
+    // out of the count assertion for the obvious reason — but `first` still has to name them, or the
+    // check would pass on a heading that never changed language at all.
+    check('the section heading decodes into the new language and settles on it', !!decodeRun.label
+      && /[ក-៿]/.test(decodeRun.label)
+      && typeof decodeRun.first === 'string' && !/[ក-៿]/.test(decodeRun.first)
+      && decodeRun.noise >= 3
+      && decodeRun.seen[0] !== decodeRun.label
+      // Nothing sits still mid-decode. The step is 40ms, so a hold past ~140ms is not frame jitter — it
+      // is the frozen-gibberish state: deferring each node's first write left it on one random string
+      // for up to `STAGGER_MS * STAGGER_WRAP` = 336ms before anything moved. The sidebar eyebrow is early
+      // in the wave and the card eyebrow is late, so the two together sample both ends of it.
+      && decodeRun.holdHead <= 140 && decodeRun.holdCard <= 140
+      && decodeRun.seen[decodeRun.seen.length - 1] === decodeRun.label
+      && decodeRun.off === 0 && decodeRun.want >= 2, { decodeRun })
+    // The page-wide half, which is the claim the single element cannot make: at the peak, many text
+    // nodes are mid-noise at the same instant, and by the end none of them is. `peak >= 5` is a floor
+    // and not a census on purpose — a run where only the eyebrow decoded (what this was before the
+    // observer) fails it, while a throttled CI machine that catches fewer frames still passes.
+    check('the whole page decodes, not one label', decodeRun.peak >= 5 && decodeRun.last === 0, { peak: decodeRun.peak, last: decodeRun.last })
+    // The two the page-wide sweep used to miss, named rather than counted, because both were reported
+    // as "still static" and a node count cannot tell you which one stayed behind: the sort control's
+    // label arrives inside a re-rendered *element* (Reka rebuilds the trigger subtree), and the search
+    // field's placeholder is an *attribute* — not a text node at all, on either path. The selector is
+    // Nuxt UI's slot name, not `aria-haspopup`: this `USelect` renders Reka's trigger without one, and
+    // a selector that matches nothing reports zero frames exactly like a control that never decodes.
+    check('the sort control and the search placeholder decode too', decodeRun.sort >= 2 && decodeRun.ph >= 2, { sortFrames: decodeRun.sort, placeholderFrames: decodeRun.ph, sortFound: decodeRun.sortLabel })
+    // The masthead heading is "Collection Bin" in both locales, so it keeps its display tracking on
+    // the Khmer route — the guard reads the string, not the route. Compared against the same element
+    // measured on the English route, and required to be *some* tracking: two zeros would pass the
+    // equality and prove nothing.
+    const kmTracking = await ev('(() => { const h = document.querySelector("h1"); return h ? getComputedStyle(h).letterSpacing : null })()')
+    const trackPx = v => v === 'normal' ? 0 : parseFloat(v) || 0
+    check('the Latin brand heading keeps its EN tracking on the Khmer route, and it is not zero',
+      kmTracking === enTracking && trackPx(kmTracking) > 0.5, { enTracking, kmTracking })
+    // And the observer has to be gone once the settle is over: after this point a text change is a
+    // keystroke, a filter or a re-render, and none of them is a language change. Written by hand so
+    // nothing else can be blamed for the result, and read back after the window would have closed.
+    await ev('(() => { const h = document.querySelector("aside p.uppercase"); if (h && h.firstChild) h.firstChild.nodeValue = "MUTATED"; return true })()')
+    await sleep(320)
+    const afterSettle = await ev('(() => { const h = document.querySelector("aside p.uppercase"); return h ? h.textContent : null })()')
+    check('an ordinary text change after the settle is not decoded', afterSettle === 'MUTATED', { afterSettle })
     await nav(new URL('/km/products/' + G.manyId, appUrl).href)
     await waitFor('!!document.querySelector(\'[data-sticky-cta] [data-share-cta]\')')
     await clickSelector('[data-sticky-cta] [data-share-cta]', sheetOpen)
@@ -2266,10 +2444,20 @@ const run = async () => {
     // route under `prefix_except_default`, so a Khmer visitor clicking a listing was handed English
     // until they found the storefront again. Assert the href carries the prefix, then follow it and
     // assert the page it lands on is still Khmer — a link that only looks right in the DOM fails there.
+    // The other half of the page-key rule: a *real* navigation is still a real navigation. Same probe
+    // as the locale switch, planted on the Khmer home page before the card is followed — if it survived
+    // here, the key would be swallowing genuine page changes and every product link would be an
+    // in-place swap that never re-reads. The request log is the second half of that: a card click has
+    // to fetch, or the detail page would render the home page's cache.
+    await ev('(() => { const m = document.querySelector("main"); if (m) m.__localeProbe = "kept"; return true })()')
+    await resetW()
     const kmHref = await ev('(() => { const a = document.querySelector("main article a[href]"); return a ? a.getAttribute("href") : null })()')
     check('a Khmer card links into the Khmer route', typeof kmHref === 'string' && kmHref.startsWith('/km/products/'), { kmHref })
     await clickSelector('main article a[href]', 'location.pathname.startsWith("/km/products/")')
     await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
+    const rebuilt = await ev('(() => { const m = document.querySelector("main"); return !m || m.__localeProbe !== "kept" })()')
+    const readsAfterCard = (await allW()).filter(w => w.method === 'GET' && w.p.startsWith('/rest/v1/'))
+    check('a product navigation rebuilds the page and reads again', rebuilt === true && readsAfterCard.length > 0, { rebuilt, calls: seqOf(readsAfterCard).slice(0, 3) })
     check('following that card keeps the detail page in Khmer', await ev('(() => { const p = location.pathname; const khmer = /[\u1780-\u17FF]/.test(document.body.innerText); return p.startsWith("/km/products/") && khmer })()'), { href: kmHref })
     const kmDetailWide = await latinSpacedKhmer()
     check('no Khmer run on the Khmer detail page is letter-spaced like Latin', kmDetailWide.bad.length === 0 && kmDetailWide.seen > 5, { kmDetailWide })

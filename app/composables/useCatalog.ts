@@ -68,6 +68,12 @@ export const useCatalog = () => {
   // so a locale can never resolve differently in one place than another. Also exported for
   // the one other locale-resolved jsonb in the app (site_settings.location_translations) —
   // this stays the only implementation in the codebase.
+  //
+  // It reads `locale.value` while the mapping computeds above are evaluating, which is what makes a
+  // locale switch reactive: the mappers re-run on the rows already held, no request involved. The
+  // comment this used to carry — "runs at fetch time, which makes the route load-bearing" — described
+  // the flatten-everything-into-a-string version of this layer, where the only way to re-resolve was
+  // to ask the server again.
   const pickTranslation = <T extends { locale: string }>(translations: T[] | null | undefined): T | undefined => {
     if (!translations?.length) return undefined
     return translations.find((item) => item.locale === locale.value) || translations.find((item) => item.locale === FALLBACK_LOCALE) || translations[0]
@@ -159,22 +165,46 @@ export const useCatalog = () => {
     return specLinesToPairs(raw).filter((item) => item.label || item.value)
   }
 
+  // The loaded rows are kept, not flattened away. `PRODUCT_SELECT` already embeds *every* locale
+  // (`product_translations(… locale …)`), so a language switch has nothing to fetch: it has to
+  // re-RESOLVE, and that is what these three computeds do — they read `locale.value` through
+  // `pickTranslation`, so changing locale re-runs the mappers over the rows already in memory.
+  // `useState` rather than a module `ref`: per-request on the server (no cross-request leak), a plain
+  // ref across client navigations (so it survives the page it describes). Every genuine load still
+  // writes through `fetch*`, so nothing is ever served stale — the cache only ever mirrors what is on
+  // screen, which is why it needs no expiry rule. Declared after the mappers it calls, so reading
+  // this file top to bottom never has to wonder about a function that appears further down.
+  const rawProducts = useState<ProductRow[]>('catalog:products', () => [])
+  const rawCategories = useState<CategoryRow[]>('catalog:categories', () => [])
+  const rawProduct = useState<ProductRow | null>('catalog:product', () => null)
+
+  const products = computed(() => rawProducts.value.map(mapProduct))
+  const categories = computed(() => rawCategories.value.map(mapCategory))
+  const product = computed(() => (rawProduct.value ? mapProduct(rawProduct.value) : null))
+
   const fetchProducts = async () => {
     const { data, error } = await productsQuery().eq('status', 'published').order('created_at', { ascending: false })
     if (error) throw error
-    return (data || []).map(mapProduct)
+    rawProducts.value = data || []
+    return products.value
   }
 
+  // Emptied before the round trip, not after: this cache outlives the page that filled it, so a
+  // navigation from one product to another would otherwise paint the previous product's name while
+  // the new row is in flight — the skeleton is the answer, and clearing is what produces it.
   const fetchProduct = async (id: string) => {
+    rawProduct.value = null
     const { data, error } = await productsQuery().eq('id', id).eq('status', 'published').maybeSingle()
     if (error) throw error
-    return data ? mapProduct(data) : null
+    rawProduct.value = data ?? null
+    return product.value
   }
 
   const fetchCategories = async (): Promise<CatalogCategory[]> => {
     const { data, error } = await categoriesQuery().eq('is_active', true).order('sort_order')
     if (error) throw error
-    return (data || []).map(mapCategory)
+    rawCategories.value = data || []
+    return categories.value
   }
 
   /**
@@ -190,9 +220,11 @@ export const useCatalog = () => {
 
   /** Everything the catalog landing page needs, in one round-trip pair. */
   const fetchCatalog = async () => {
-    const [products, categories] = await Promise.all([fetchProducts(), fetchCategories()])
-    return { products, categories }
+    await Promise.all([fetchProducts(), fetchCategories()])
+    // The computeds' own output, not a second mapping: this is the same array the page is bound to,
+    // so a caller that reads the return value and a caller that reads `products` cannot disagree.
+    return { products: products.value, categories: categories.value }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategories, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation, products, categories, product }
 }
