@@ -208,8 +208,10 @@ onBeforeUnmount(unpinColumn)
 // anchored at the edge that faces its trigger — top for the inline block (drops down out of the CTA),
 // bottom for the sticky bar (rises up out of the bar). Enter rides the `applePop` spring; exit is a
 // short sharp ease-in shrink. Under reduced motion both become brief eased durations.
-// The phone mount keeps the travel, the spring and the fade but drops the scale — it blooms inside the
-// frosted sticky bar, and that combination is the one shape this trace measured as expensive.
+// The phone mount blooms too, on the mirrored `above` pair: its panel rises out of the sticky bar, so
+// it grows from `center bottom`. The one cost of that shape there — a scale inside the bar's
+// `backdrop-filter` re-runs the filter pass every frame — was measured and accepted (see `applePop`),
+// because a phone whose panel only fades no longer reads as the same surface as the desktop's.
 let running: { stop(): void } | null = null
 // The bloom's rest value is the identity, but the box must be measured at rest before it is animated.
 // Stopping a running animation and clearing its transform, then forcing the reflow that commits the
@@ -222,22 +224,23 @@ const settleForMeasurement = (p: HTMLElement) => {
   p.style.opacity = ''
   // The reflow that commits the rest geometry exists for the desktop reveal: the reveal watch
   // reads the panel's `offsetTop` and the host's live rect, so a rect taken mid-pop would aim at
-  // the morph instead of the destination. The phone mount reads nothing after the pop (it has no reveal to
-  // aim), so forcing a full-column layout inside its first animation frame is pure cost — paid on
-  // the slowest device this surface runs on.
+  // the morph instead of the destination. The phone mount reads one thing after the pop — the caret's
+  // placement — and that read forces its own layout, so this reflow stays desktop-only; forcing a
+  // full-column layout inside the phone's first animation frame is pure cost on the slowest device
+  // this surface runs on.
   if (!props.compact) void p.offsetWidth // the writes above only become a measurable rect after this read flushes them
 }
 // The bloom's numbers all live in `applePop` now — one preset, read by every panel this feature
 // shows, so the two menus cannot drift apart. `rest` is the identity the spring settles on; the
 // shrunk/offset start and the shorter exit travel are keyed by which side of its trigger this mount's
 // panel sits on (the inline block drops *down* out of the CTA, the sticky bar's panel rises *up* out of
-// the bar), which is also the edge `transform-origin` is pinned to. The sticky-bar mount takes
-// `applePop.slide`: same travel, same spring, no scale, because it blooms inside the frosted bar.
-const popPair = () => props.compact ? applePop.slide : applePop.below
+// the bar) — which is also the edge `transform-origin` is pinned to, and the only difference left
+// between the two mounts' blooms.
+const popPair = () => props.compact ? applePop.above : applePop.below
 
 // The corner a panel grows from and collapses back into, so both its enter and its leave travel the
-// same path. The sticky bar's panel rises out of the bar's bottom edge (`center bottom`, and it never
-// scales). In the slot under the buttons it is the trigger's own corner: the contact panel's CTA
+// same path. The sticky bar's panel rises out of the bar's bottom edge (`center bottom`, the edge that
+// faces the bar). In the slot under the buttons it is the trigger's own corner: the contact panel's CTA
 // starts at the row's left edge, so the panel's `top left` IS that button — but the Share button sits
 // mid-row and its panel is column-wide, so no corner of the panel is under it. That origin is the
 // trigger's centre in the panel's own coordinates, read on the settled layout (every hook calls this
@@ -254,22 +257,31 @@ const panelOrigin = (el: Element) => {
 }
 
 // The arrow that names which button a panel belongs to. It is rendered BEFORE the panel in the same
-// stacking context, so the panel's own background covers the diamond's lower half and only its upper
-// triangle shows above the panel's top border — the standard tooltip caret, with no z-index tricks
-// and nothing to clip it (the panels scroll internally, so a caret inside one would scroll away with
-// the content and be clipped at the edge). Its x is the trigger's centre in the panel's own
-// coordinates — the panel is column-wide and its button is not — read on the settled layout exactly
-// like `panelOrigin`; its y is the panel's `offsetTop`, which already speaks the root's coordinate
-// space because the root is the element both the panel and this caret position against. The phone
-// shapes get none: the sticky panel rises out of the bar directly above it, and the bottom sheet is
-// anchored to the viewport rather than to a button.
-const caret = ref<{ x: number, y: number } | null>(null)
+// stacking context, so the panel's own background covers one half of the diamond and only the other
+// half shows — the standard tooltip caret, with no z-index tricks and nothing to clip it (the panels
+// scroll internally, so a caret inside one would drift with the content and be shaved at the edge).
+// Which half shows is the mount's geometry: a desktop panel hangs below its row, so the caret rides
+// its TOP edge and points up at the button; the phone panel floats above the sticky bar, so the caret
+// rides its BOTTOM edge and points down into the bar's 8px gap. Both panels give the same reason to
+// measure rather than assume: the panel is as wide as the column but its trigger is one pill inside
+// that row, so the arrow's x is the trigger's centre in the panel's own coordinates, read on the
+// settled layout exactly like `panelOrigin`. Its y is the panel's own edge — top or bottom — because
+// the root is the element both the panel and this caret position against, and both edges are read as
+// rects rather than `offsetTop`: the phone panel is placed by `bottom: 100%` with its own margin, so
+// an offset-based y lands a gap-width off the border it is supposed to grow out of.
+const caret = ref<{ x: number, y: number, below: boolean } | null>(null)
 const placeCaret = (p: HTMLElement) => {
   const trigger = p.hasAttribute('data-contact-panel') ? ctaEl.value : shareEl.value
-  if (!trigger) { caret.value = null; return }
+  const host = p.closest('[data-product-actions]') as HTMLElement | null
+  if (!trigger || !host) { caret.value = null; return }
+  const hr = host.getBoundingClientRect()
   const pr = p.getBoundingClientRect()
   const tr = trigger.getBoundingClientRect()
-  caret.value = { x: Math.round(tr.left + tr.width / 2 - pr.left), y: p.offsetTop }
+  caret.value = {
+    x: Math.round(tr.left + tr.width / 2 - pr.left),
+    y: Math.round((props.compact ? pr.bottom : pr.top) - hr.top),
+    below: props.compact === true,
+  }
 }
 
 const onPanelEnter = (el: Element, done: () => void) => {
@@ -278,8 +290,8 @@ const onPanelEnter = (el: Element, done: () => void) => {
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
   p.style.transformOrigin = panelOrigin(p)
-  // The caret is placed on the same settled layout the bloom is measured on.
-  if (!props.compact) placeCaret(p)
+  // The caret is placed on the same settled layout the bloom is measured on, on both mounts.
+  placeCaret(p)
   // Promote for the length of the pop only: without this the panel is rasterised on the first
   // animated frame, which is the hitch at the start of the bloom. Cleared in `onPanelAfterEnter`.
   p.style.willChange = 'transform, opacity'
@@ -347,12 +359,11 @@ const onPanelLeave = (el: Element, done: () => void) => {
   p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
   animate(p, { opacity: [1, 0] }, red ? { duration: 0.12, ease: 'easeIn' } : applePop.opacity.out)
-  // Desktop dismisses into its trigger (the genie — `collapseTransform` measures this panel against
-  // the control that opened it, so it lands on the button rather than on a guessed fraction: the CTA
-  // for the contact panel, the Share button for the share panel); the phone mount keeps
-  // `applePop.slide`'s travel-only exit, because a scale inside the frosted sticky bar is the shape
-  // that was measured expensive. Reduced motion drops the collapse everywhere.
-  const leaveTo = props.compact || red ? popPair().to : collapseTransform(p, p.hasAttribute('data-contact-panel') ? ctaEl.value : shareEl.value)
+  // Dismisses into its trigger (the genie — `collapseTransform` measures this panel against the
+  // control that opened it, so it lands on the button rather than on a guessed fraction: the CTA for
+  // the contact panel, the Share button for the share panel, and the phone's CTA sits in the bar
+  // right under its panel). Reduced motion drops the collapse everywhere, back to the preset's `.to`.
+  const leaveTo = red ? popPair().to : collapseTransform(p, p.hasAttribute('data-contact-panel') ? ctaEl.value : shareEl.value)
   const a = animate(p, { transform: [applePop.rest, leaveTo] }, red ? { duration: 0.16, ease: 'easeIn' } : applePop.exit)
   running = a
   void a.finished.then(() => { if (running === a) running = null; waitForReturn(done) })
@@ -464,18 +475,18 @@ const channelName = platformLabel
       />
     </div>
 
-    <!-- The arrow that names which button the open panel grew out of. It paints BEHIND the panel — the
-         desktop panels are `relative` and later in the DOM, so they cover the diamond's lower half and
-         only its upper triangle shows above the top border — which is why it can sit in the root's
-         padding gap instead of inside a panel: both panels scroll internally, and a caret inside one
-         would drift with the content and be clipped at the edge. `placeCaret` puts it on the trigger's
-         centre; it is `aria-hidden` and takes no pointer events because it describes a shape, not a
-         control. -->
+    <!-- The arrow that names which button the open panel grew out of. It paints BEHIND the panel (the
+         panels are positioned and later in the DOM, so they cover one half of the diamond), which is
+         why it can sit in the gap outside the scroll box instead of inside a panel that scrolls. The
+         mount decides which end it rides: pointing up from a desktop panel's top edge, pointing down
+         from a phone panel's bottom edge into the bar's own gap. `aria-hidden` and pointer-events-
+         none because it describes a shape, not a control. -->
     <div
       v-if="caret"
       data-panel-caret
       aria-hidden="true"
-      class="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-zinc-200/80 bg-white dark:border-zinc-800/80 dark:bg-zinc-900"
+      class="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-zinc-200/80 bg-white dark:border-zinc-800/80 dark:bg-zinc-900"
+      :class="caret.below ? 'border-b border-r' : 'border-l border-t'"
       :style="{ left: `${caret.x}px`, top: `${caret.y}px` }"
     />
 

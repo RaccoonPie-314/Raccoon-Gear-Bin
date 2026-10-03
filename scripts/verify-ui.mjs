@@ -2600,18 +2600,30 @@ const run = async () => {
     await metrics(390, 844, true)
     await sleep(250)
     await armClipboard('ok')
-    // The phone mount blooms in a different shape from the desktop one on purpose: it hangs off the
-    // sticky bar, which is `backdrop-blur-xl`, and a scale animation inside a filtered ancestor makes
-    // the engine re-run that filter pass every frame (traced at 390x844 @3x with a 4x CPU throttle:
-    // 28.9ms of main-thread Layout+Paint+PrePaint over four plays, against 19.0-20.7ms for any shape
-    // that dropped either the frost or the scale). Sampled frame by frame rather than at rest, because
+    // The phone mount must read as the same surface as the desktop one, so it blooms on the same
+    // preset, mirrored: it hangs off the bottom edge of the sticky bar, so it grows from `center
+    // bottom` on `applePop.above`. A travel-only shape once stood in for it — a scale inside the
+    // bar's `backdrop-blur-xl` re-runs the filter pass every frame (traced at 390x844 @3x with a 4x
+    // CPU throttle: 28.9ms of main-thread Layout+Paint+PrePaint over four plays, against 19.0-20.7ms
+    // for any shape that dropped either half) — and it is no longer worth the mismatch, so the lock
+    // is the OPPOSITE of the one it replaces: the bloom must run (a frame uniform-scaled below 1),
+    // with the travel and the fade riding along. Sampled frame by frame rather than at rest, because
     // a settled panel reports the identity matrix whatever curve got it there.
     const START_STICKY_FRAMES = '(() => { window.__KF = []; window.__KFdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (p) { const c = getComputedStyle(p); const m = new DOMMatrixReadOnly(c.transform); window.__KF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +c.opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__KFdone = true }; requestAnimationFrame(tick); return true })()'
     await ev(START_STICKY_FRAMES)
     await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
     await waitFor('!!window.__KFdone', 4000)
     const kframes = await ev('window.__KF || []')
-    check('the mobile panel rises out of the bar on a travel and never on a scale', kframes.some(f => Math.abs(f.f) >= 2) && !kframes.some(f => f.a > 0.5 && f.a < 0.995) && kframes.some(f => f.o > 0.02 && f.o < 0.98), { frames: kframes.slice(0, 5) })
+    const kBloom = kframes.filter(f => f.a > 0.5 && f.a < 0.995)
+    check('the mobile panel blooms out of the bar on the shared preset: uniform scale, travel, its own fade', kframes.length > 3 && kBloom.length > 0 && kBloom.every(f => Math.abs(f.a - f.d) <= 0.01) && kframes.some(f => Math.abs(f.f) >= 2) && kframes.some(f => f.o > 0.02 && f.o < 0.98), { frames: kframes.slice(0, 5) })
+    // And the leave has to actually retract: the phone panel dismisses with the same genie the desktop
+    // one uses, collapsing into the CTA that sits in the bar right under it. Before this lock the
+    // phone exit was the preset's own `.to` shrink — 4% — which under a 240ms fade read as the panel
+    // simply switching off: it popped out but never popped in. The bound is 0.8 with the two axes 0.2
+    // apart rather than the desktop's 0.75: the phone's collapse ratio is its CTA-to-panel widths
+    // (~0.72), so a 0.75 line sits a rounding error from the real geometry, while a fade-only or
+    // uniform exit reads `a ≈ d ≈ 1` and fails either way.
+    const START_STICKY_LEAVE = '(() => { window.__KL = []; window.__KLdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (p) { const c = getComputedStyle(p); const m = new DOMMatrixReadOnly(c.transform); window.__KL.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), o: +c.opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__KLdone = true }; requestAnimationFrame(tick); return true })()'
     const stickyOpen = await stickyMount()
     check('the sticky panel offers the same channels and the same message as the inline block', JSON.stringify(stickyOpen.channels.map(c => c.href)) === JSON.stringify(inlineNow.channels.map(c => c.href)) && stickyOpen.message === inlineNow.message && stickyOpen.ctaText === inlineNow.ctaText, { channels: stickyOpen.channels.map(c => c.href), cta: stickyOpen.ctaText })
     // Two things the desktop-only geometry checks could not see, both found by looking at the page:
@@ -2621,6 +2633,11 @@ const run = async () => {
     const surface = await ev('(() => { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (!p) return null; const c = getComputedStyle(p); const f = p.querySelector("[data-contact-message]"); const r = p.getBoundingClientRect(); return { bg: c.backgroundColor, fieldClip: f ? f.scrollHeight - f.clientHeight : null, fieldH: f ? Math.round(f.getBoundingClientRect().height) : 0, top: Math.round(r.top), bottom: Math.round(r.bottom), vh: innerHeight } })()')
     check('the floating mobile panel is opaque rather than a translucent wash', !!surface && !/\/\s*0\./.test(surface.bg), surface)
     check('the mobile panel shows the whole prepared message and stays entirely on screen', !!surface && surface.fieldClip <= 1 && surface.top >= 0 && surface.bottom <= surface.vh + 1, surface)
+    // The phone panel floats above the bar, so its arrow has to hang off the panel's BOTTOM edge and
+    // line up with the CTA pill sitting in that bar — the same "which button is this" answer the
+    // desktop panels give, hung at the other end because the geometry is upside down there.
+    const stickyCaret = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const c = bar.querySelector("[data-panel-caret]"); const p = bar.querySelector("[data-contact-panel]"); const b = bar.querySelector("[data-contact-cta]"); if (!c || !p || !b) return null; const cr = c.getBoundingClientRect(), pr = p.getBoundingClientRect(), br = b.getBoundingClientRect(); return { dx: Math.round(cr.left + cr.width / 2 - (br.left + br.width / 2)), onEdge: Math.round(cr.top + cr.height / 2 - pr.bottom) } })()')
+    check('the mobile panel hangs its arrow off its bottom edge, aimed at the bar\u2019s CTA', !!stickyCaret && Math.abs(stickyCaret.dx) <= 2 && Math.abs(stickyCaret.onEdge) <= 2, { stickyCaret })
     const beforeStickyCopy = (await copies()).length
     const expectStickyFeedback = value => '((document.querySelector("[data-sticky-cta] [data-contact-feedback]") || {}).textContent || "").trim() === ' + value
     await clickSelector('[data-sticky-cta] [data-copy-message]', expectStickyFeedback(JSON.stringify(C.feedback.copied)))
@@ -2643,9 +2660,13 @@ const run = async () => {
     // accidentally closed from anyway.
     await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
     await ev('(() => { const el = document.querySelector("[data-sticky-cta] [data-contact-message]"); if (el) el.focus(); return true })()')
+    await ev(START_STICKY_LEAVE)
     await press('Escape', 'Escape', 27)
     await waitFor(stickyPanelGone)
     check('Escape closes the mobile panel and hands focus back to the control that opened it', await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-contact-cta") !== null })()'), { active: await ev('(() => { const el = document.activeElement; return el ? el.tagName : null })()') })
+    await waitFor('!!window.__KLdone', 4000)
+    const lframes = await ev('window.__KL || []')
+    check('the mobile panel collapses into its CTA on leave, not just a fade', lframes.length > 3 && lframes.some(f => f.a < 0.8 && Math.abs(f.d - f.a) > 0.2) && lframes.some(f => f.o > 0.02 && f.o < 0.98), { n: lframes.length, minA: lframes.length ? Math.min(...lframes.map(f => f.a)) : null, minD: lframes.length ? Math.min(...lframes.map(f => f.d)) : null, first: lframes.slice(0, 4), last: lframes.slice(-4) })
     // Tab reaches the bar's own controls from its field, and every stop in the bar wears a ring:
     // with the inline block switched off at this width, the panel and its buttons are the tab
     // path through the bar, and one of the two surfaces the visitor can reach must be lit.
@@ -3093,9 +3114,14 @@ const run = async () => {
     const kmSiteCaptions = await captionOverflow(SWITCH_CAPTIONS)
     check('every Khmer site-info caption fits the box it is bounded to', kmSiteCaptions.length === 6 && kmSiteCaptions.every(c => c.over <= 1), { kmSiteCaptions })
     // Control, because "nothing overflows" and "the probe never fired" are the same green line.
-    // Squeeze one caption on purpose, read the overflow back, restore it in the same expression.
-    const kmCaptionProbe = await ev('(() => { const s = document.querySelector(' + JSON.stringify(SWITCH_CAPTIONS) + '); if (!s) return null; s.style.maxWidth = "2rem"; const o = s.scrollWidth - s.clientWidth; s.style.maxWidth = ""; return o })()')
-    check('the caption-overflow measurement can report an overflow', typeof kmCaptionProbe === 'number' && kmCaptionProbe > 1, { kmCaptionProbe })
+    // Squeeze one caption on purpose, read the overflow back, restore it in the same expression — and
+    // pin `white-space` for the squeeze: the captions are measured while the locale decode may still be
+    // scrambling them, and whether the string in the box at that instant happens to be a run of
+    // unbreakable noise glyphs or a real caption that can wrap decides the answer. The control's claim
+    // is that the measurement reports an overflow at all, which needs a box that cannot make the
+    // content fit.
+    const kmCaptionProbe = await ev('(() => { const s = document.querySelector(' + JSON.stringify(SWITCH_CAPTIONS) + '); if (!s) return null; const before = { tag: s.tagName, display: getComputedStyle(s).display, white: getComputedStyle(s).whiteSpace, text: (s.textContent || "").trim().slice(0, 24), w: Math.round(s.getBoundingClientRect().width), rects: s.getClientRects().length, cw: s.clientWidth, sw: s.scrollWidth }; s.style.maxWidth = "2rem"; s.style.whiteSpace = "nowrap"; const o = s.scrollWidth - s.clientWidth; s.style.maxWidth = ""; s.style.whiteSpace = ""; return { over: o, ...before } })()')
+    check('the caption-overflow measurement can report an overflow', !!kmCaptionProbe && kmCaptionProbe.over > 1, { kmCaptionProbe })
 
     await clickSelector('[data-admin-tab="categories"]', 'location.pathname === "/admin/categories"')
     await clickSelector('div[data-language-switcher] a[href^="/km/"]', 'location.pathname === "/km/admin/categories"')

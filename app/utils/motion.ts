@@ -157,28 +157,18 @@ export const copyPop = {
  *
  * Two surfaces read it: the Contact-to-Order panel (`ProductActions`) and the Share Sheet's desktop
  * popover (`ProductShareSheet`). Both are menus opening from a control, so both get the same numbers
- * from the same place — that is the point of the preset. The phone sheet stays on `sheet`: it is a
- * dragged gesture surface, so its spring has to carry release velocity.
+ * from the same place — that is the point of the preset. The sticky bar's panel reads the mirrored
+ * `above` pair: it rises out of the bar, so it blooms from `center bottom` on the same spring. The
+ * one thing that shape costs there — a scale inside the bar's `backdrop-filter` re-runs the filter
+ * pass each frame, measured at 4× CPU throttle as ~2.5ms a play over a scale-free travel — is paid
+ * deliberately, because a phone whose panel fades instead of blooming no longer reads as the same
+ * surface as the desktop's. The phone share sheet stays on `sheet`: it is a dragged gesture surface,
+ * so its spring has to carry release velocity.
  */
 export const applePop = {
   rest: 'scale(1) translateY(0px)',
   below: { from: 'scale(0.93) translateY(-8px)', to: 'scale(0.95) translateY(-4px)' },
   above: { from: 'scale(0.94) translateY(10px)', to: 'scale(0.96) translateY(6px)' },
-  /**
-   * The phone mount's pair: the SAME travel, the SAME spring, no scale.
-   *
-   * The sticky bar is `backdrop-blur-xl`, and a scale animation inside a filtered ancestor makes the
-   * engine re-run that filter pass every frame: traced at 390×844 @3× with a 4× CPU throttle, the
-   * scale bloom inside the frosted bar cost 28.9ms of main-thread Layout+Paint+PrePaint over four
-   * plays, and 19.0–20.7ms for every shape that removed either half (no frost, no scale, or the panel
-   * detached). A phone also re-rasterises the scaled text of a viewport-wide, 55vh scroll panel
-   * mid-pop — the same 90ms of work the desktop does with a GPU to spare. `scale(1) translateY()`
-   * keeps the surface's texture untouched (and keeps the keyframe list the same shape as `rest`, so
-   * nothing leans on transform-list padding), so the panel still rises out of the bar on the same
-   * curve and lands in the same place. Desktop keeps the bloom: it is a menu leaving a small control,
-   * and the two desktop surfaces still share one preset.
-   */
-  slide: { from: 'scale(1) translateY(10px)', to: 'scale(1) translateY(6px)' },
   /**
    * The genie collapse — where a *dismissed* menu goes when it is put back into its control.
    *
