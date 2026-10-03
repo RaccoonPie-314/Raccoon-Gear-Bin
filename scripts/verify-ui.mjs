@@ -1856,19 +1856,21 @@ const run = async () => {
     // frames with both panels in the DOM: one at a time is the whole contract, and it is
     // frame-sampled because a report of "never both" is only as good as the frames it was seen in.
     //
-    // Where the page SETTLES is the one thing a swap may legitimately change: the two panels are
-    // different heights, and the reveal aims the incoming panel's top under the header — an aim the
-    // shorter share panel's document cannot always satisfy, so the browser clamps the glide to the
-    // document's own bottom. Both outcomes are asserted and nothing else: the viewport either stays
-    // where the outgoing panel had it, or it ends at the bottom edge of the shorter document, with
-    // the incoming panel fully visible either way. Pinning a fixed y here would re-encode the
-    // fixture's exact heights, which is not what "no jump" means.
+    // A swap moves the page nowhere: the outgoing panel is not dismissed to its reveal's origin and
+    // the incoming one is not aimed anywhere — the slot changes hands at the position both panels
+    // share, which is the whole point (a tour up and back down is motion without a journey). And the
+    // outgoing panel leaves its height behind on the slot, because a shorter incoming panel would
+    // otherwise shrink the document under the viewport and the browser would clamp the scroll up "a
+    // bit" the frame the panels changed places — a clamp no scroll call causes, so none prevents.
+    // Which makes the assertion strict: `minY >= swapY - 12` and a landing within 12px of where the
+    // outgoing panel had the page. Not one pixel of uncommanded travel.
     const swapFrames = '(() => { window.__P = []; window.__Pdone = false; const t0 = performance.now(); const tick = function () { window.__P.push({ y: Math.round(window.scrollY), panel: !!document.querySelector("[data-contact-panel]"), sheet: !!document.querySelector("[data-share-sheet]") }); if (performance.now() - t0 < 3000) requestAnimationFrame(tick); else window.__Pdone = true }; requestAnimationFrame(tick); return true })()'
     const swapStats = async () => {
       const frames = await ev('window.__P || []')
       const overlap = frames.filter(f => f.panel && f.sheet).length
       const step = frames.reduce((m, f, i) => i ? Math.max(m, Math.abs(f.y - frames[i - 1].y)) : m, 0)
-      return { overlap, step, last: frames[frames.length - 1] || {} }
+      const minY = frames.reduce((m, f) => Math.min(m, f.y), Infinity)
+      return { overlap, step, minY, last: frames[frames.length - 1] || {} }
     }
     const pageBottom = async () => await ev('Math.round(document.documentElement.scrollHeight - innerHeight)')
     const liveBox = async sel => await ev('(() => { const el = [...document.querySelectorAll(' + JSON.stringify(sel) + ')].find(e => e.getClientRects().length); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()')
@@ -1888,10 +1890,10 @@ const run = async () => {
     const swapEnd = await panelBox('[data-share-sheet]')
     const swapY = await ev('Math.round(window.scrollY)')
     const swapBottom = await pageBottom()
-    check('Share out of the open contact panel swaps the panels and never jumps the page',
-      swapRevealed > swapFrom + 60 && toShare.overlap === 0 && toShare.step <= 80
+    check('Share out of the open contact panel swaps the panels where the page stands',
+      swapRevealed > swapFrom + 60 && toShare.overlap === 0
       && toShare.last.panel === false && toShare.last.sheet === true
-      && (Math.abs(swapY - swapRevealed) <= 80 || Math.abs(swapY - swapBottom) <= 12)
+      && toShare.minY >= swapY - 12 && Math.abs(swapY - swapRevealed) <= 12
       && !!swapEnd && swapEnd.top >= -1 && swapEnd.bottom <= swapEnd.vh + 1,
       { swapFrom, swapRevealed, swapY, swapBottom, toShare, swapEnd })
     const ctaSwap = await liveBox('[data-contact-cta]')
@@ -1902,11 +1904,13 @@ const run = async () => {
     const panelEnd = await panelBox('[data-contact-panel]')
     const backY = await ev('Math.round(window.scrollY)')
     const backBottom = await pageBottom()
-    check('the contact CTA out of the open share panel swaps them back the same way',
-      toPanel.overlap === 0 && toPanel.step <= 80
+    check('the contact CTA out of the open share panel swaps them back where it stands',
+      toPanel.overlap === 0
       && toPanel.last.panel === true && toPanel.last.sheet === false
-      && (Math.abs(backY - swapY) <= 80 || Math.abs(backY - backBottom) <= 12)
-      && !!panelEnd && panelEnd.top >= -1 && panelEnd.bottom <= panelEnd.vh + 1,
+      && toPanel.minY >= backY - 12 && Math.abs(backY - swapY) <= 12
+      // Begins on screen, tail and all that runs past the fold: the page did not move to show the
+      // taller incoming panel, which is the requested behaviour, so only its top edge is owed.
+      && !!panelEnd && panelEnd.top >= -1 && panelEnd.top <= panelEnd.vh - 1,
       { backY, backBottom, toPanel, panelEnd })
     // Leave the run as it likes to find things: the checks after this one drive the CTA as a closed
     // surface, and the return scroll has to be allowed to finish before they measure it.
@@ -2009,6 +2013,11 @@ const run = async () => {
     // flow, expanding down from the button row it hangs from.
     const openedBelow = await ev('(() => { const p = document.querySelector("[data-share-sheet]"); const b = [...document.querySelectorAll("[data-share-cta]")].find(e => e.getClientRects().length); if (!p || !b) return null; const pr = p.getBoundingClientRect(), br = b.getBoundingClientRect(); return { below: pr.top >= br.bottom - 1, gap: Math.round(pr.top - br.bottom), position: getComputedStyle(p).position } })()')
     check('the panel expands downward in the page\u2019s own flow, directly under the Share control', !!openedBelow && openedBelow.position !== 'fixed' && openedBelow.below && openedBelow.gap <= 80, { openedBelow })
+    // The arrow that answers "which button is this?": it must sit ON its own button's centre line and
+    // ride the panel's top edge, or it is pointing at nothing. `dx` is read against the painted button
+    // rather than a stored number because the panel is column-wide and its trigger is not.
+    const caretGeo = await ev('(() => { const c = document.querySelector("[data-panel-caret]"); const b = [...document.querySelectorAll("[data-share-cta]")].find(e => e.getClientRects().length); const p = document.querySelector("[data-share-sheet]"); if (!c || !b || !p) return null; const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect(), pr = p.getBoundingClientRect(); return { dx: Math.round(cr.left + cr.width / 2 - (br.left + br.width / 2)), onEdge: Math.round(pr.top - (cr.top + cr.height / 2)), painted: c.getClientRects().length > 0 } })()')
+    check('the share panel wears an arrow centred on the Share button it grew out of', !!caretGeo && caretGeo.painted && Math.abs(caretGeo.dx) <= 2 && caretGeo.onEdge >= -1 && caretGeo.onEdge <= 2, { caretGeo })
     check('the panel is named for the product it shares', !!openedSheet && openedSheet.label === S.label.replace('{name}', shareRow.name) && openedSheet.text.includes(shareRow.name) && openedSheet.text.includes(shareRow.short_description), { label: openedSheet && openedSheet.label })
     check('the sheet carries Copy link, Copy message and its own dismiss, in the page\u2019s words', !!openedSheet && openedSheet.hasCopyLink && openedSheet.hasCopyMessage && openedSheet.hasClose && openedSheet.copyLinkText === S.copyLink && openedSheet.copyMessageText === S.copyMessage && openedSheet.viaText.includes(S.viaLabel), { copyLink: openedSheet && openedSheet.copyLinkText, copyMessage: openedSheet && openedSheet.copyMessageText, via: openedSheet && openedSheet.viaText })
     const wantShareHrefs = S.destinationHrefs.map(href => href.replace('{share}', encodeURIComponent(shareText)))
@@ -2037,6 +2046,27 @@ const run = async () => {
     check('and the sheet shows the very link its message asks the visitor to copy', refusedSheet.link === canonical(G.manyId) && refusedSheet.readonly === true, { link: refusedSheet.link })
     check('the fallback is shown once, in the sheet the visitor is using', (await inlineMount()).shareLink === null, { mountLink: (await inlineMount()).shareLink })
     await armClipboard('ok')
+
+    // The manual fallback's row is the one thing that can differ between the two panels' slot while
+    // it is revealed, and it keeps its space (`invisible`, not `v-if`) while the share panel is open
+    // for exactly this: opening either panel must aim its reveal at the same place. `offsetTop` is
+    // read rather than a rect, so a panel mid-bloom cannot skew the number with its transform — and
+    // the fixture's own clamp is beside the point here: the share panel's shorter document lands the
+    // scroll differently, but the slot the reveal aims with is what the two openings must agree on.
+    await closeSheet()
+    await waitScrollStill()
+    const parityBox = await settleOnCta()
+    await clickAt(parityBox.x, parityBox.y)
+    await waitFor('!!document.querySelector(\'[data-contact-panel]\')')
+    const ctoTop = await ev('(() => { const p = document.querySelector("[data-contact-panel]"); return p ? p.offsetTop : null })()')
+    const ctoCaret = await ev('(() => { const c = document.querySelector("[data-panel-caret]"); const b = document.querySelector("[data-product-actions] [data-contact-cta]"); const p = document.querySelector("[data-contact-panel]"); if (!c || !b || !p) return null; const cr = c.getBoundingClientRect(), br = b.getBoundingClientRect(); return { dx: Math.round(cr.left + cr.width / 2 - (br.left + br.width / 2)), ownButton: p.hasAttribute("data-contact-panel") } })()')
+    await press('Escape', 'Escape', 27)
+    await waitFor(panelGone)
+    await waitScrollStill()
+    await openSheet()
+    const slotTop = await ev('(() => { const p = document.querySelector("[data-share-sheet]"); return p ? p.offsetTop : null })()')
+    check('opening either panel aims its reveal at the same slot, fallback row included', ctoTop !== null && slotTop !== null && Math.abs(ctoTop - slotTop) <= 2, { ctoTop, slotTop })
+    check('the contact panel wears an arrow centred on its own CTA, not the share button', !!ctoCaret && ctoCaret.ownButton === true && Math.abs(ctoCaret.dx) <= 2, { ctoCaret })
 
     check('Escape closes the sheet and hands focus back to the Share button', await closeSheet() && await ev('(() => { const el = document.activeElement; return !!el && el.getAttribute("data-share-cta") !== null })()'))
     await openSheet()
@@ -2359,7 +2389,7 @@ const run = async () => {
     check('a locale switch asks the server for nothing it already has', readsAfterSwitch.length === 0, { calls: seqOf(readsAfterSwitch) })
     check('a locale switch keeps the place the visitor was reading', yBefore > 200 && Math.abs(yAfter - yBefore) <= 2, { yBefore, yAfter })
     await waitFor('window.__DECODE_DONE === true', 5000)
-    const decodeRun = await ev('(() => { const h = document.querySelector("aside p.uppercase"); const label = h ? h.textContent : null; const all = []; const stamps = []; let prev = null; let eprev = null; let holdHead = 0; let holdCard = 0; let peak = 0; let last = 0; let sort = 0; let ph = 0; for (const row of (window.__DECODE || [])) { const c = row.split("\\u0001"); const t = c[0]; const n = +c[1]; const ms = +c[5]; sort += +c[2]; ph += +c[3]; peak = Math.max(peak, n); last = n; if (t !== prev) { if (prev !== null && stamps.length) holdHead = Math.max(holdHead, ms - stamps[stamps.length - 1]); all.push(t); stamps.push(ms); prev = t } if (c[4] !== eprev) { if (eprev !== null) holdCard = Math.max(holdCard, ms - (stamps[stamps.length - 1] ?? ms)); eprev = c[4] } } const from = all.findIndex(t => /[\u1780-\u17FF]/.test(t)); const seen = from < 0 ? all : all.slice(from); const seg = new Intl.Segmenter("km", { granularity: "grapheme" }); const count = t => { let n = 0; for (const g of seg.segment(t)) n++; return n }; const want = label ? count(label) : 0; const sl = document.querySelector("[data-slot=value]"); return { first: all[0] ?? null, label, seen, want, peak, last, sort, ph, holdHead, holdCard, sortLabel: sl ? sl.textContent.trim() : null, off: seen.filter(t => count(t) !== want).length, noise: seen.filter(t => t !== label).length } })()')
+    const decodeRun = await ev('(() => { const h = document.querySelector("aside p.uppercase"); const label = h ? h.textContent : null; const all = []; const stamps = []; let prev = null; let eprev = null; let holdHead = 0; let run = 0; let holdCard = 0; let peak = 0; let last = 0; let sort = 0; let ph = 0; for (const row of (window.__DECODE || [])) { const c = row.split("\\u0001"); const t = c[0]; const n = +c[1]; const ms = +c[5]; sort += +c[2]; ph += +c[3]; peak = Math.max(peak, n); last = n; if (t === prev) { if (t !== label) run++ } else { holdHead = Math.max(holdHead, run); run = 0; all.push(t); stamps.push(ms); prev = t } if (c[4] !== eprev) { if (eprev !== null) holdCard = Math.max(holdCard, ms - (stamps[stamps.length - 1] ?? ms)); eprev = c[4] } } holdHead = Math.max(holdHead, run); const from = all.findIndex(t => /[\u1780-\u17FF]/.test(t)); const seen = from < 0 ? all : all.slice(from); const seg = new Intl.Segmenter("km", { granularity: "grapheme" }); const count = t => { let n = 0; for (const g of seg.segment(t)) n++; return n }; const want = label ? count(label) : 0; const sl = document.querySelector("[data-slot=value]"); return { first: all[0] ?? null, label, seen, want, peak, last, sort, ph, holdHead, holdCard, sortLabel: sl ? sl.textContent.trim() : null, off: seen.filter(t => count(t) !== want).length, noise: seen.filter(t => t !== label).length } })()')
     // One heading's cycle, asserted four ways: it must cycle (≥3 frames that are not the word), it must
     // land on the word (`ទិញតាមប្រភេទ` — proof the row re-resolved in place rather than
     // waiting for a refetch), the FIRST frame already in the new language must not be the word (the wave
@@ -2378,11 +2408,17 @@ const run = async () => {
       && typeof decodeRun.first === 'string' && !/[ក-៿]/.test(decodeRun.first)
       && decodeRun.noise >= 3
       && decodeRun.seen[0] !== decodeRun.label
-      // Nothing sits still mid-decode. The step is 40ms, so a hold past ~140ms is not frame jitter — it
-      // is the frozen-gibberish state: deferring each node's first write left it on one random string
-      // for up to `STAGGER_MS * STAGGER_WRAP` = 336ms before anything moved. The sidebar eyebrow is early
-      // in the wave and the card eyebrow is late, so the two together sample both ends of it.
-      && decodeRun.holdHead <= 140 && decodeRun.holdCard <= 140
+      // Nothing sits still mid-decode. Counted in SAMPLES, not wall-clock: the recorder's cadence
+      // bends under a loaded machine (the locale switch remounts the very page it is watching, and a
+      // single slow frame used to read as a long hold). What the frozen-gibberish state really is, is
+      // one string surviving many samples on the way TO the settle — the runs of the settled word
+      // that fill the tail of the recording are the decode being done, not a hold, so only runs of a
+      // not-yet-final string count. Deferring each node's first write left one random string standing
+      // for up to `STAGGER_MS * STAGGER_WRAP` = 336ms, twenty-odd samples at the recorder's frame
+      // cadence, so the bound is four: a stalled frame can add at most one, and the bug cannot stay
+      // under it. The sidebar eyebrow is early in the wave and the card eyebrow is late, so the two
+      // together sample both ends of it.
+      && decodeRun.holdHead <= 4 && decodeRun.holdCard <= 140
       && decodeRun.seen[decodeRun.seen.length - 1] === decodeRun.label
       && decodeRun.off === 0 && decodeRun.want >= 2, { decodeRun })
     // The page-wide half, which is the claim the single element cannot make: at the peak, many text

@@ -304,14 +304,20 @@ Two details in there are contracts rather than style:
   contact panel uses — so "one open surface" means one *shape* of surface, and the phone's bottom
   sheet is the only other shape there is. The share surface's rows live once, in `ProductShareBody`,
   because a second implementation of the Copy row and the destination pills is how the two shapes
-  drift apart. The swap is sequenced through the outgoing panel's leave: that slot IS the page's
+  drift apart. The one row that could break the match — the manual fallback, revealed after a failed
+  copy — keeps its space (`invisible`, not `v-if`'d away) while the share panel is open, so both
+  panels occupy the same slot footprint and either reveal aims at the same place. The swap is
+  sequenced through the outgoing panel's leave: that slot IS the page's
   scrollable height on the fixture (scrollHeight 1438 with the contact panel, 900 without, viewport
   900), and an emptied slot clamps `scrollY` in one frame — the 302px jump the frame recorder caught
-  when a panel was simply unmounted. Where the page settles can legitimately differ across a swap
-  (the panels are different heights, and the reveal's aim may exceed the shorter document, so the
-  browser clamps the glide to its bottom); what must not differ is the motion — the harness records
-  `scrollY` per frame, bounds the largest single-frame step, asserts exactly one panel in the DOM at
-  a time, and that the incoming panel is fully visible.
+  when a panel was simply unmounted. A swap scrolls nothing: the slot changes hands at the position
+  both panels share — no return to the reveal's origin and no fresh reveal, which would be motion
+  without a journey — and the outgoing panel leaves its height behind on the slot (a `min-height` the
+  next ordinary close clears), because a shorter incoming panel would otherwise shrink the document
+  under the viewport and the browser would clamp the scroll up "a bit" in the single frame the panels
+  change places — a jump no scroll call causes, so none prevents. The harness records `scrollY` per
+  frame and asserts not one pixel of uncommanded travel, that exactly one panel is in the DOM at a
+  time, and that the incoming panel begins on screen.
 - **The sticky bar is below the lightbox by stacking, not by knowledge.** It is `z-50`; the
   lightbox is `z-[70]`; nothing in the feature reads or owns gallery state, and the harness proves
   the ordering with `elementFromPoint` over the bar's own centre while the lightbox is open.

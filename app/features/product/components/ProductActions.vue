@@ -96,11 +96,13 @@ let returning = false
 // slot IS the page's scrollable height: unmounting a panel while the viewport is parked in its own
 // space clamps `scrollY` to the new maximum in one frame — the page jump this file exists to prevent.
 let queued: 'sheet' | 'panel' | null = null
-// Set by a consumed swap for exactly one open: the incoming panel inherits the slot's return
-// target (`revealFrom`) instead of claiming its own, because the page is still riding the outgoing
-// panel's return scroll when the slot changes hands, and where that glide happens to be at the
-// moment is nobody's idea of "where the page stood".
+// Set by a consumed swap for exactly one open: the incoming panel inherits the slot's reveal pair
+// instead of opening its own — it does not aim the page anywhere, and the eventual close still owes
+// its return to the outgoing panel's origin (see the watch below).
 let chained = false
+// The host a swap leaves holding its height (see `onPanelLeave`), so the shorter incoming panel
+// cannot shrink the document under the viewport. The next ordinary close clears it.
+let heldHost: HTMLElement | null = null
 const toggle = () => {
   const opening = !isOpen.value
   if (opening && isSheetOpen.value) {
@@ -144,7 +146,10 @@ watch(() => isOpen.value || isSheetOpen.value, (anyOpen) => {
     // leave runs 240ms, so the document is still tall enough to be scrolled to). Unpinning first — which
     // is what this used to do — shrinks the column by the panel's height under a scrolled viewport, the
     // browser clamps `scrollY`, and the page snaps up in one frame. That clamp is the "forceful" return.
-    if (Math.abs(window.scrollY - revealTo) < RETURN_OWNERSHIP_PX) {
+    // Leave it to the incoming panel's own close: a swap hands the slot over at the position both
+    // panels share — no tour up to the reveal's origin and back down, which is motion without a
+    // journey. The pair stays as the outgoing panel left it, because the return is still owed.
+    if (!queued && Math.abs(window.scrollY - revealTo) < RETURN_OWNERSHIP_PX) {
       returning = true
       window.scrollTo({ top: revealFrom, behavior: reduced.value ? 'auto' : 'smooth' })
     }
@@ -153,6 +158,9 @@ watch(() => isOpen.value || isSheetOpen.value, (anyOpen) => {
   // A re-open that interrupts a queued swap cancels it: the leave that would have consumed the
   // flag was cancelled with the closure, so nothing else would ever clear it.
   queued = null
+  // The open half of a swap aims the page nowhere: the slot was handed over at the current scroll,
+  // and the inherited pair (still the outgoing's) is what the eventual close returns against.
+  if (chained) { chained = false; return }
   void nextTick(() => {
     const panel = panelEl.value
     if (!panel) return
@@ -163,8 +171,7 @@ watch(() => isOpen.value || isSheetOpen.value, (anyOpen) => {
     if (!host) return
     const headerH = document.querySelector('[data-detail-header]')?.getBoundingClientRect().height ?? 0
     const target = Math.max(0, host.getBoundingClientRect().top + window.scrollY + panel.offsetTop - headerH - REVEAL_GAP)
-    if (!chained) revealFrom = window.scrollY
-    chained = false
+    revealFrom = window.scrollY
     // The return needs the destination the page ACTUALLY took, not the aim: the aim can exceed the
     // document (a short panel on a page that ends under it), and the browser clamps the glide to the
     // bottom. Recorded raw, the close's ownership test would read that clamp's gap as "the visitor
@@ -189,6 +196,7 @@ const onPanelAfterLeave = () => {
   chained = next !== null
   if (next === 'sheet') isSheetOpen.value = true
   else if (next === 'panel') isOpen.value = true
+  else if (heldHost) { heldHost.style.minHeight = ''; heldHost = null }
 }
 
 onBeforeUnmount(unpinColumn)
@@ -245,12 +253,33 @@ const panelOrigin = (el: Element) => {
   return `${Math.round(br.left + br.width / 2 - pr.left)}px ${Math.round(br.top + br.height / 2 - pr.top)}px`
 }
 
+// The arrow that names which button a panel belongs to. It is rendered BEFORE the panel in the same
+// stacking context, so the panel's own background covers the diamond's lower half and only its upper
+// triangle shows above the panel's top border — the standard tooltip caret, with no z-index tricks
+// and nothing to clip it (the panels scroll internally, so a caret inside one would scroll away with
+// the content and be clipped at the edge). Its x is the trigger's centre in the panel's own
+// coordinates — the panel is column-wide and its button is not — read on the settled layout exactly
+// like `panelOrigin`; its y is the panel's `offsetTop`, which already speaks the root's coordinate
+// space because the root is the element both the panel and this caret position against. The phone
+// shapes get none: the sticky panel rises out of the bar directly above it, and the bottom sheet is
+// anchored to the viewport rather than to a button.
+const caret = ref<{ x: number, y: number } | null>(null)
+const placeCaret = (p: HTMLElement) => {
+  const trigger = p.hasAttribute('data-contact-panel') ? ctaEl.value : shareEl.value
+  if (!trigger) { caret.value = null; return }
+  const pr = p.getBoundingClientRect()
+  const tr = trigger.getBoundingClientRect()
+  caret.value = { x: Math.round(tr.left + tr.width / 2 - pr.left), y: p.offsetTop }
+}
+
 const onPanelEnter = (el: Element, done: () => void) => {
   const p = el as HTMLElement
   // Pin before the first measurement so the reveal scroll aims at a stable destination.
   if (!props.compact) pinColumnStatic(p)
   settleForMeasurement(p)
   p.style.transformOrigin = panelOrigin(p)
+  // The caret is placed on the same settled layout the bloom is measured on.
+  if (!props.compact) placeCaret(p)
   // Promote for the length of the pop only: without this the panel is rasterised on the first
   // animated frame, which is the hitch at the start of the bloom. Cleared in `onPanelAfterEnter`.
   p.style.willChange = 'transform, opacity'
@@ -276,7 +305,8 @@ const onPanelAfterEnter = (el: Element) => {
 // So the leave holds the element until the viewport stops moving. It is at opacity 0 by then, so what
 // is being held is an invisible spacer, and the hold is bounded (40 frames) so a scroll that never
 // settles can never strand it. The phone mount never sets `returning` — it has no reveal to undo — and
-// neither does a close where the visitor had already scrolled away.
+// neither does a close where the visitor had already scrolled away, or a swap, which hands the slot
+// over at the position both panels share.
 const waitForReturn = (done: () => void) => {
   if (!returning) { done(); return }
   let last = -1
@@ -298,9 +328,21 @@ const waitForReturn = (done: () => void) => {
 
 const onPanelLeave = (el: Element, done: () => void) => {
   const p = el as HTMLElement
+  // The arrow belongs to the panel, not the slot: it goes the moment the panel starts to collapse,
+  // and a swap's incoming panel places its own on enter.
+  caret.value = null
   // Settle first, then shrink: the exit starts from the same rest box the entry landed on, so a close
   // that interrupts an open retargets cleanly instead of compounding transforms.
   settleForMeasurement(p)
+  // A swap leaves the slot the outgoing panel's height: the incoming panel is shorter, and the frame
+  // its space leaves the flow is the frame the browser clamps `scrollY` to the new maximum — the
+  // "scrolls up a bit" when Share is pressed with the contact panel open. No scroll call causes it,
+  // so no scroll call prevents it; only the document's height can. An ordinary close does not hold,
+  // because its return scroll has already brought the page back by the time the space goes away.
+  if (queued) {
+    const host = p.closest('[data-product-actions]') as HTMLElement | null
+    if (host) { heldHost = host; host.style.minHeight = `${host.offsetHeight}px` }
+  }
   p.style.transformOrigin = panelOrigin(p)
   p.style.willChange = 'transform, opacity' // the element unmounts when this finishes
   const red = reduced.value
@@ -405,8 +447,11 @@ const channelName = platformLabel
          existed only inside the message field, behind a closed panel. Read-only, selected on focus,
          and labelled so the accessible name is "Product link" rather than an anonymous field. While
          the share panel is open it carries its own copy of this fallback — that is the surface the
-         visitor was just asked to copy from — so this row steps aside on the row's own `v-if`. -->
-    <div v-if="revealLink && !isSheetOpen" class="mt-2 flex min-w-0 items-center">
+         visitor was just asked to copy from — so this row steps aside, but keeps its space
+         (`invisible`, not `v-if`): the two panels are one slot, and a row that left the flow would
+         sit the share panel its own height higher, aim its reveal that much shorter, and make the
+         swap between the panels visibly adjust the page. -->
+    <div v-if="revealLink" class="mt-2 flex min-w-0 items-center" :class="isSheetOpen ? 'invisible' : ''">
       <input
         readonly
         type="text"
@@ -418,6 +463,21 @@ const channelName = platformLabel
         @focus="selectOnFocus"
       />
     </div>
+
+    <!-- The arrow that names which button the open panel grew out of. It paints BEHIND the panel — the
+         desktop panels are `relative` and later in the DOM, so they cover the diamond's lower half and
+         only its upper triangle shows above the top border — which is why it can sit in the root's
+         padding gap instead of inside a panel: both panels scroll internally, and a caret inside one
+         would drift with the content and be clipped at the edge. `placeCaret` puts it on the trigger's
+         centre; it is `aria-hidden` and takes no pointer events because it describes a shape, not a
+         control. -->
+    <div
+      v-if="caret"
+      data-panel-caret
+      aria-hidden="true"
+      class="pointer-events-none absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rotate-45 border-l border-t border-zinc-200/80 bg-white dark:border-zinc-800/80 dark:bg-zinc-900"
+      :style="{ left: `${caret.x}px`, top: `${caret.y}px` }"
+    />
 
     <!-- Anchored above itself in the sticky variant (the bar sits at the viewport edge, so the
          panel has nowhere to go but up) and in normal flow inline. `max-h` + `overflow-y-auto`
@@ -459,7 +519,7 @@ const channelName = platformLabel
         :aria-label="ctaLabel"
         tabindex="0"
         class="min-w-0 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200/80 p-4 shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:focus-visible:ring-white"
-        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'mt-3 max-h-[70vh] bg-white shadow-xl dark:bg-zinc-900'"
+        :class="compact ? 'absolute inset-x-0 bottom-full mb-2 max-h-[55vh] bg-white shadow-lg dark:bg-zinc-900' : 'relative mt-3 max-h-[70vh] bg-white shadow-xl dark:bg-zinc-900'"
       >
         <!-- The message is shown, not hidden: the visitor sees exactly what the shop will receive, and
              a browser that refuses the clipboard still leaves them something to select. The field
@@ -549,7 +609,7 @@ const channelName = platformLabel
         role="group"
         :aria-label="t('shareSheetLabel', { name: share.title })"
         tabindex="0"
-        class="mt-3 max-h-[70vh] min-w-0 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white p-3 text-zinc-950 shadow-xl outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white dark:focus-visible:ring-white"
+        class="relative mt-3 max-h-[70vh] min-w-0 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white p-3 text-zinc-950 shadow-xl outline-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white dark:focus-visible:ring-white"
       >
         <ProductShareBody
           :payload="share"

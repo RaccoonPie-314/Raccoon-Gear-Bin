@@ -38,7 +38,7 @@ Phase F added tactile motion without touching either engine: buttons are `<motio
   the scroll-collapse morph animates *this element's own* `width` in place. It also supplies both
   endpoints of the launcher flight (last on-screen rect = collapse origin; live rect = restore
   landing). Rename or move the element **in the same commit** as the change, never across two.
-- **The product feature's `data-*` surface** — `[data-share-cta]`, `[data-share-sheet]`,
+- **The product feature's `data-*` surface** — `[data-share-cta]`, `[data-share-sheet]`, `[data-panel-caret]`,
   `[data-share-backdrop]`, `[data-share-copy-link]`, `[data-share-copy-message]`,
   `[data-share-destination]`, `[data-share-close-bottom]`, `[data-share-drag]`,
   `[data-share-feedback]`, `[data-lightbox-main]`, `[data-lightbox-close]`,
