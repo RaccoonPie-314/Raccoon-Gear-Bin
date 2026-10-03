@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProductShareDestination, ProductSharePayload } from '../composables/useProductShare'
-import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'motion-v'
+import { AnimatePresence, animate, motion, useDragControls, useReducedMotion } from 'motion-v'
 import { press, sheet } from '~/utils/motion'
 
 /**
@@ -12,8 +12,14 @@ import { press, sheet } from '~/utils/motion'
  * to expand downward under its button, in the page's flow, exactly as the contact panel does; a
  * fixed popover hanging over the page could never be that. Both shapes wear the same rows from
  * `ProductShareBody`; this file owns only what is true of a phone: the teleport (a `position:
- * fixed` panel must not inherit the sticky bar's `backdrop-blur` containing block), the backdrop,
- * the slide, the drag, and the thumb-reach close row.
+ * fixed` panel must not inherit a filtered ancestor's containing block), the backdrop — a **sibling**
+ * of the sheet, never its wrapper, and deliberately **flat** (a full-viewport `backdrop-filter`
+ * fading with the sheet re-runs that blur per frame; the coupling `ProductConversion.vue` hoisted
+ * the bar's frost out of) — the **slide, which is an imperative `animate()` on its own host**
+ * (`data-share-slide`), the shape the contact panel's pop uses: a declarative `y` is not on
+ * Motion's accelerated list and animates through its JS frameloop, writing inline style every
+ * frame, which no amount of layer promotion made smooth on the phone — the drag, and the
+ * thumb-reach close row.
  *
  * Presentational by construction: the payload, the destinations and the confirmation all arrive as
  * props and the three things a visitor can do leave as events. No query, no clipboard write, and no
@@ -60,13 +66,49 @@ const onHandlePointerDown = (event: PointerEvent) => {
 }
 
 // Releasing past either gate closes the sheet; AnimatePresence plays the exit from wherever the
-// finger lifted, so the dismiss is velocity-continuous rather than teleporting to the top of a
-// keyframe. Below both gates we leave it open and the dragConstraints spring returns it home on
-// its own.
+// finger lifted rather than teleporting to the top of a keyframe. Below both gates we leave it open
+// and the dragConstraints return it home on its own.
 const onDragEnd = (_event: PointerEvent, info: { offset: { y: number }, velocity: { y: number } }) => {
   const dismissed = info.offset.y > SHEET_SWIPE_MIN_PX
     || (info.offset.y > SHEET_SWIPE_FLICK_PX && info.velocity.y > SHEET_SWIPE_MIN_VEL)
   if (dismissed) close()
+}
+
+// ---- the slide: imperative, so it is a WAAPI animation and never the JS frameloop ----
+// A declarative `y` was the whole problem: it is not on Motion's accelerated list, so Motion drove
+// it through its frameloop and wrote inline style every frame — and even with the layer promoted
+// the phone read that as choppy. `animate()` on the literal `transform` key takes the accelerated
+// path (the same one the contact panel's pop uses), so the compositor moves the host and the main
+// thread stays idle. The drag host inside keeps owning its own transform for the finger.
+let running: { stop(): void } | null = null
+const settleSlide = (p: HTMLElement) => {
+  running?.stop()
+  running = null
+  p.style.transform = ''
+  p.style.opacity = ''
+}
+const onSheetEnter = (el: Element, done: () => void) => {
+  const p = el as HTMLElement
+  settleSlide(p)
+  const red = reduced.value
+  const fade = animate(p, { opacity: [0, 1] }, red ? { duration: 0.18 } : sheet.transition)
+  const slide = red ? null : animate(p, { transform: ['translateY(100%)', 'translateY(0%)'] }, sheet.transition)
+  running = slide
+  void (slide || fade).finished.then(done)
+}
+const onSheetAfterEnter = (el: Element) => {
+  const p = el as HTMLElement
+  p.style.transform = ''
+  p.style.opacity = ''
+}
+const onSheetLeave = (el: Element, done: () => void) => {
+  const p = el as HTMLElement
+  settleSlide(p)
+  const red = reduced.value
+  const fade = animate(p, { opacity: [1, 0] }, red ? { duration: 0.18 } : sheet.transition)
+  const slide = red ? null : animate(p, { transform: ['translateY(0%)', 'translateY(100%)'] }, sheet.transition)
+  running = slide
+  void (slide || fade).finished.then(done)
 }
 
 const close = (returnFocus = true) => {
@@ -90,29 +132,50 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 <template>
   <Teleport to="body">
     <AnimatePresence>
+      <!-- The scrim is a FLAT dim — no `backdrop-filter` — and a sibling of the sheet, never its
+           wrapper: a full-viewport blur whose opacity fades with the sheet re-runs that blur on
+           every frame of the fade (the coupling the bar's frost was hoisted out of), and it was
+           what the phone still felt as low fps. Its `@click.self` answers every tap outside the
+           sheet. -->
       <motion.div
         v-if="open"
         key="share-backdrop"
         data-share-backdrop
-        class="fixed inset-0 z-[60] bg-zinc-950/45 outline-none backdrop-blur-md backdrop-saturate-150 dark:bg-zinc-950/65"
+        class="fixed inset-0 z-[60] bg-zinc-950/45 outline-none dark:bg-zinc-950/65"
         :initial="{ opacity: 0 }"
         :animate="{ opacity: 1 }"
         :exit="{ opacity: 0 }"
         :transition="{ duration: reduced ? 0.12 : 0.22 }"
         @click.self="close(false)"
+      />
+    </AnimatePresence>
+    <!-- The slide is its own host and an imperative `animate()` pushes it — the same shape as the
+         contact panel's pop. That is the whole point: a declarative `y` is not on Motion's
+         accelerated list, so it animates through Motion's JS frameloop and writes inline style
+         every frame (probed mid-slide: an inline `translateY(28.67%)` and no WAAPI animation),
+         and the phone reads even the promoted version of that as choppy. The literal `transform`
+         key IS accelerated, so these two animations — transform and opacity — run on the
+         compositor and the main thread is never touched while the sheet moves. The host carries
+         the promotion statically (`will-change: transform`), mounts and unmounts with the sheet,
+         and so leaves no layer behind while closed. The drag host inside it (the visible chrome,
+         `data-share-sheet`) keeps its own transform for the finger: one writer per element. -->
+    <Transition
+      @enter="onSheetEnter"
+      @after-enter="onSheetAfterEnter"
+      @leave="onSheetLeave"
+    >
+      <div
+        v-if="open"
+        data-share-slide
+        class="fixed inset-x-0 bottom-0 z-[60] will-change-transform"
       >
         <motion.div
-          key="share-sheet"
           data-share-sheet
           role="dialog"
           aria-modal="true"
           :aria-label="t('shareSheetLabel', { name: payload.title })"
           tabindex="-1"
-          class="fixed inset-x-0 bottom-0 flex max-h-[85dvh] w-full max-w-lg min-w-0 flex-col overflow-y-auto overscroll-contain rounded-t-3xl border border-zinc-200/80 bg-white pb-[max(1rem,env(safe-area-inset-bottom))] text-zinc-950 shadow-xl outline-none dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white"
-          :initial="reduced ? { opacity: 0 } : { opacity: 0, y: '100%' }"
-          :animate="{ opacity: 1, y: 0 }"
-          :exit="reduced ? { opacity: 0 } : { opacity: 0, y: '100%' }"
-          :transition="reduced ? { duration: 0.18 } : sheet.transition"
+          class="flex max-h-[85dvh] w-full max-w-lg min-w-0 flex-col overflow-y-auto overscroll-contain rounded-t-3xl border border-zinc-200/80 bg-white pb-[max(1rem,env(safe-area-inset-bottom))] text-zinc-950 shadow-xl outline-none dark:border-zinc-800/80 dark:bg-zinc-900 dark:text-white"
           :drag="'y'"
           :drag-controls="dragControls"
           :drag-listener="false"
@@ -149,7 +212,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             {{ t('close') }}
           </motion.button>
         </motion.div>
-      </motion.div>
-    </AnimatePresence>
+      </div>
+    </Transition>
   </Teleport>
 </template>

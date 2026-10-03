@@ -209,9 +209,10 @@ onBeforeUnmount(unpinColumn)
 // bottom for the sticky bar (rises up out of the bar). Enter rides the `applePop` spring; exit is a
 // short sharp ease-in shrink. Under reduced motion both become brief eased durations.
 // The phone mount blooms too, on the mirrored `above` pair: its panel rises out of the sticky bar, so
-// it grows from `center bottom`. The one cost of that shape there — a scale inside the bar's
-// `backdrop-filter` re-runs the filter pass every frame — was measured and accepted (see `applePop`),
-// because a phone whose panel only fades no longer reads as the same surface as the desktop's.
+// it grows from `center bottom` — and its enter is the one bezier here (`applePop.phone`): iOS runs a
+// compiled spring easing off the compositor, which is the low fps the phone reported on this pop
+// while its own bezier exit was smooth. The bar's frost is a `-z-10` layer beside this panel instead
+// of an ancestor of it (see ProductConversion.vue), so a scale never re-runs a `backdrop-filter`.
 let running: { stop(): void } | null = null
 // The bloom's rest value is the identity, but the box must be measured at rest before it is animated.
 // Stopping a running animation and clearing its transform, then forcing the reflow that commits the
@@ -299,7 +300,7 @@ const onPanelEnter = (el: Element, done: () => void) => {
   // Opacity rides its own fast clean curve, transform rides the spring — split so the text is legible
   // on the shrunk first frames and the bloom stays interruptible.
   animate(p, { opacity: [0, 1] }, red ? { duration: 0.16, ease: 'easeOut' } : applePop.opacity.in)
-  const a = animate(p, { transform: [popPair().from, applePop.rest] }, red ? { duration: 0.2, ease: 'easeOut' } : applePop.transition)
+  const a = animate(p, { transform: [popPair().from, applePop.rest] }, red ? { duration: 0.2, ease: 'easeOut' } : (props.compact ? applePop.phone : applePop.transition))
   running = a
   void a.finished.then(() => { if (running === a) running = null; done() })
 }

@@ -51,13 +51,23 @@ export const panel = {
 } as const
 
 /**
- * `sheet` — the phone bottom sheet (the Share Sheet's mobile shape). Its whole vertical life — enter
- * from `100%`, the drag-follow, the snap-back and the dismiss-exit — rides this one spring on a single
- * `y`, so the panel `transform` has exactly one owner (Phase C.2). Damped just past critical: a sheet
- * that overshoots upward off the bottom edge reads as broken, not physical.
+ * `sheet` — the phone bottom sheet (the Share Sheet's mobile shape). Enter and dismiss ride this
+ * bezier through an **imperative `animate()` on the slide host** (`data-share-slide`) — the same
+ * shape `applePop` gives the contact panel — and that is the point: a declarative `y` is not on
+ * Motion's accelerated list, so it animates through its JS frameloop and writes inline style every
+ * frame (probed mid-slide: an inline `translateY(28.67%)`, no WAAPI animation — and the phone read
+ * even the layer-promoted version as choppy). `animate()` on the literal `transform` key takes the
+ * accelerated path, so the slide is a compositor move with the main thread idle. It is a bezier
+ * rather than the spring it used to be for `applePop.phone`'s reason — a Motion spring compiles to
+ * a WAAPI `linear(...)` easing, which iOS runs off the compositor — and the curve keeps the
+ * spring's arrival (90% of the slide at ~170ms, settled by ~450ms) and its no-overshoot rule: a
+ * sheet that bounces up off the bottom edge reads as broken. The drag host inside keeps one owner
+ * of its own transform: 1:1 follow while the finger is down, the below-gate snap-back is the
+ * drag's own transition, and a dismiss plays from wherever the finger lifted (the finger's offset
+ * on the inner host and the slide on the outer one simply add).
  */
 export const sheet = {
-  transition: { type: 'spring', stiffness: 300, damping: 34 }
+  transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] }
 } as const
 
 /**
@@ -155,15 +165,15 @@ export const copyPop = {
  * harness's frame sampler is the cross-check — the popover's recorded bloom now runs
  * `0.932 → 0.959` over its first five frames, where the old spring was already at `0.949 → 0.982`.
  *
- * Two surfaces read it: the Contact-to-Order panel (`ProductActions`) and the Share Sheet's desktop
- * popover (`ProductShareSheet`). Both are menus opening from a control, so both get the same numbers
- * from the same place — that is the point of the preset. The sticky bar's panel reads the mirrored
- * `above` pair: it rises out of the bar, so it blooms from `center bottom` on the same spring. The
- * one thing that shape costs there — a scale inside the bar's `backdrop-filter` re-runs the filter
- * pass each frame, measured at 4× CPU throttle as ~2.5ms a play over a scale-free travel — is paid
- * deliberately, because a phone whose panel fades instead of blooming no longer reads as the same
- * surface as the desktop's. The phone share sheet stays on `sheet`: it is a dragged gesture surface,
- * so its spring has to carry release velocity.
+ * One consumer reads it now: the panel slot in `ProductActions` — the contact panel on both mounts
+ * and, on a desktop, the share panel that shares the slot. They are menus opening from a control, so
+ * they get the same numbers from the same place — that is the point of the preset. The sticky bar's
+ * panel reads the mirrored `above` pair: it rises out of the bar, so it blooms from `center bottom`
+ * — on `phone` below, the one enter here that is not a spring. And the bar's frost is deliberately
+ * not an ancestor of the panel either (a `-z-10` layer beside the controls, `data-sticky-frost`,
+ * ProductConversion.vue), because a scale inside a `backdrop-filter` element re-runs that element's
+ * filter pass every frame. The phone share sheet reads `sheet`, whose own doc carries the same
+ * bezier reasoning.
  */
 export const applePop = {
   rest: 'scale(1) translateY(0px)',
@@ -189,6 +199,22 @@ export const applePop = {
    */
   collapse: 'scale(0.16, 0.34)',
   transition: { type: 'spring', stiffness: 220, damping: 19, mass: 1 },
+  /**
+   * The phone mount's enter — the one surface in this file whose move is NOT a spring.
+   *
+   * The device report drew the line: on an iPhone this pop read as low fps while its own exit — a
+   * plain bezier — was smooth on the same element in the same session, and the sheet (a spring in
+   * both directions) read low fps both ways. The only difference between the two paths is the easing
+   * Motion hands to WAAPI: a spring compiles to a generated `linear(...)` curve, a tween to a
+   * `cubic-bezier`, and `linear(...)` is the shape WebKit runs off its compositor — so a 55vh,
+   * 3×-DPR text surface re-rasterises on the main thread for the length of the pop.
+   *
+   * The curve is the spring's own profile in bezier form: `[0.22, 1, 0.36, 1]` carries 90% of its
+   * travel at ~37% of its duration, so over 0.45s that is 90% at ~170ms and settled by ~450ms —
+   * `applePop.transition`'s two measured numbers. Desktop keeps the spring: nothing was reported
+   * there, and it has the GPU headroom the phone does not.
+   */
+  phone: { duration: 0.45, ease: [0.22, 1, 0.36, 1] },
   exit: { duration: 0.24, ease: [0.32, 0, 0.67, 0] },
   opacity: { in: { duration: 0.2, ease: 'easeOut' }, out: { duration: 0.18, ease: 'easeIn' } }
 } as const

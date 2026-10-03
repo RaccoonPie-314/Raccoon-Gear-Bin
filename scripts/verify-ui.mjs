@@ -476,7 +476,7 @@ const run = async () => {
   // containing block, whose `backdrop-blur` would otherwise make the bar its viewport — so it is asked
   // about document-wide rather than through a mount. Exactly one mount is painted at a time, so there
   // is never more than one sheet to find.
-  const SHEET = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const c = getComputedStyle(s); const rows = [...s.querySelectorAll("[data-share-destination]")].map(a => { const mark = a.querySelector("svg"); return { platform: a.getAttribute("data-share-destination"), href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-share-prefilled") === "true", svgs: a.querySelectorAll("svg").length, fill: mark ? mark.getAttribute("fill") : null } }); const fb = s.querySelector("[data-share-feedback]"); const link = s.querySelector("[data-share-sheet-link]"); return { label: s.getAttribute("aria-label"), text: (s.textContent || "").trim(), position: c.position, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height), radius: c.borderTopLeftRadius, pb: c.paddingBottom, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, vh: innerHeight, hasCopyLink: !!s.querySelector("[data-share-copy-link]"), hasCopyMessage: !!s.querySelector("[data-share-copy-message]"), copyLinkText: (s.querySelector("[data-share-copy-link]") || {}).textContent ? (s.querySelector("[data-share-copy-link]").textContent || "").trim() : null, copyMessageText: (s.querySelector("[data-share-copy-message]") || {}).textContent ? (s.querySelector("[data-share-copy-message]").textContent || "").trim() : null, viaText: [...s.querySelectorAll("p")].map(p => (p.textContent || "").trim()).filter(Boolean).join(" | "), hasClose: !!s.querySelector("[data-share-close]"), hasCloseBottom: !!s.querySelector("[data-share-close-bottom]"), link: link ? link.value : null, readonly: link ? link.getAttribute("readonly") !== null : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, rows } })()'
+  const SHEET = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return null; const r = s.getBoundingClientRect(); const c = getComputedStyle(s); const rows = [...s.querySelectorAll("[data-share-destination]")].map(a => { const mark = a.querySelector("svg"); return { platform: a.getAttribute("data-share-destination"), href: a.getAttribute("href"), text: (a.textContent || "").trim(), target: a.getAttribute("target"), rel: a.getAttribute("rel"), prefilled: a.getAttribute("data-share-prefilled") === "true", svgs: a.querySelectorAll("svg").length, fill: mark ? mark.getAttribute("fill") : null } }); const fb = s.querySelector("[data-share-feedback]"); const link = s.querySelector("[data-share-sheet-link]"); return { label: s.getAttribute("aria-label"), text: (s.textContent || "").trim(), position: getComputedStyle(document.querySelector("[data-share-slide]") || s).position, top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), height: Math.round(r.height), radius: c.borderTopLeftRadius, pb: c.paddingBottom, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, vh: innerHeight, hasCopyLink: !!s.querySelector("[data-share-copy-link]"), hasCopyMessage: !!s.querySelector("[data-share-copy-message]"), copyLinkText: (s.querySelector("[data-share-copy-link]") || {}).textContent ? (s.querySelector("[data-share-copy-link]").textContent || "").trim() : null, copyMessageText: (s.querySelector("[data-share-copy-message]") || {}).textContent ? (s.querySelector("[data-share-copy-message]").textContent || "").trim() : null, viaText: [...s.querySelectorAll("p")].map(p => (p.textContent || "").trim()).filter(Boolean).join(" | "), hasClose: !!s.querySelector("[data-share-close]"), hasCloseBottom: !!s.querySelector("[data-share-close-bottom]"), link: link ? link.value : null, readonly: link ? link.getAttribute("readonly") !== null : null, feedback: fb ? (fb.textContent || "").trim() : null, live: fb ? fb.getAttribute("aria-live") : null, rows } })()'
   const sheet = async () => await ev(SHEET)
   // The message the page must produce, assembled from the fixture row and the contract in
   // `expectations.conversion` — never read back out of the app.
@@ -1569,6 +1569,24 @@ const run = async () => {
     await sleep(300)
     const lbCloseGeo = await ev('(() => { const b = document.querySelector(\'[data-lightbox-close]\'); if (!b) return null; const r = b.getBoundingClientRect(); return { cx: Math.round(r.left + r.width / 2), top: Math.round(r.top), gapToBottom: Math.round(innerHeight - r.bottom), vw: innerWidth, vh: innerHeight } })()')
     check('the lightbox close sits bottom-centre within thumb reach', !!lbCloseGeo && Math.abs(lbCloseGeo.cx - lbCloseGeo.vw / 2) < 4 && lbCloseGeo.top > lbCloseGeo.vh * 0.75 && lbCloseGeo.gapToBottom < 48, { lbCloseGeo })
+    // The swap's own axis: a leftward flick on the contained photo advances it, a rightward one
+    // takes it back — the gesture the inline photo accepts, in the same direction and on the same
+    // gates. The photo must settle to rest after each, neither flick may read as a zoom, and a
+    // cycle is not an exit — the lightbox stays open.
+    const lbFlick = async (fromX, toX) => {
+      await touch('touchStart', [{ x: fromX, y: 420 }])
+      for (let i = 1; i <= 5; i++) { await touch('touchMove', [{ x: fromX + ((toX - fromX) * i) / 5, y: 420 }]); await sleep(30) }
+      await touch('touchEnd', [])
+    }
+    const beforeCycle = await ev(SEL_IDX)
+    await lbFlick(225, 125)
+    check('a leftward swipe on the enlarged photo advances it', await waitFor(`(${SEL_IDX}) === ${(beforeCycle + 1) % G.manyImages}`, 2500), { from: beforeCycle, idx: await ev(SEL_IDX) })
+    await sleep(320)
+    const cycleRest = await ev('(() => { const lb = document.querySelector(\'[data-lightbox]\'); const i = lb && lb.querySelector(\'[data-lightbox-main]\'); const t = i ? getComputedStyle(i).transform : null; return { open: !!lb, zoomed: !!i && i.getAttribute(\'data-zoomed\') === \'true\', rest: t === null ? null : (t === "none" || Math.abs(new DOMMatrixReadOnly(t).e) <= 1) } })()')
+    check('the cycle leaves the photo at rest, unzoomed, inside the open lightbox', cycleRest.open === true && cycleRest.zoomed === false && cycleRest.rest === true, { cycleRest })
+    await lbFlick(165, 265)
+    check('a rightward swipe on the enlarged photo takes it back', await waitFor(`(${SEL_IDX}) === ${beforeCycle}`, 2500), { idx: await ev(SEL_IDX) })
+    await sleep(320)
     const swipeFrom = { x: 195, y: 420 }
     await touch('touchStart', [swipeFrom])
     for (let i = 1; i <= 3; i++) { await touch('touchMove', [{ x: swipeFrom.x, y: swipeFrom.y + i * 12 }]); await sleep(80) }
@@ -1992,9 +2010,11 @@ const run = async () => {
     const shareText = [shareRow.name, shareRow.short_description, canonical(G.manyId)].join('\n')
     const expectSheetFeedback = value => '((document.querySelector("[data-share-feedback]") || {}).textContent || "").trim() === ' + value
     const sheetOpen = '!!document.querySelector("[data-share-sheet]")'
-    // The enter transition moves the panel by its own height, so a rect read on the first frame is
-    // the sheet mid-slide — off the bottom of the viewport. Every geometry read waits for it to rest.
-    const sheetAtRest = '(() => { const s = document.querySelector("[data-share-sheet]"); if (!s) return false; const t = getComputedStyle(s).transform; const settled = t === "none" || (() => { const m = new DOMMatrixReadOnly(t); return Math.abs(m.a - 1) < 0.02 && Math.abs(m.d - 1) < 0.02 && Math.abs(m.e) < 2 && Math.abs(m.f) < 2 })(); const running = s.getAnimations().some(a => a.playState === "running"); return settled && !running })()'
+    // The enter transition moves the painted sheet by its own height, so a rect read on the first
+    // frame is the sheet mid-slide — off the bottom of the viewport. Every geometry read waits for
+    // it to rest: the phone's slide is the host's (`data-share-slide`) with the drag host read
+    // beside it, while the desktop popover animates on the sheet element itself.
+    const sheetAtRest = '(() => { const s = document.querySelector("[data-share-slide]") || document.querySelector("[data-share-sheet]"); if (!s) return false; const settled = el => { const t = getComputedStyle(el).transform; return t === "none" || (() => { const m = new DOMMatrixReadOnly(t); return Math.abs(m.a - 1) < 0.02 && Math.abs(m.d - 1) < 0.02 && Math.abs(m.e) < 2 && Math.abs(m.f) < 2 })() }; const still = el => settled(el) && !el.getAnimations().some(a => a.playState === "running"); const p = document.querySelector("[data-share-sheet]"); return still(s) && (!p || p === s || still(p)) })()'
     const openSheet = async () => { await clickSelector('[data-share-cta]', sheetOpen); await waitFor(sheetAtRest); return await waitScrollStill() }
     const closeSheet = async () => { await press('Escape', 'Escape', 27); return await waitFor('!document.querySelector(\'[data-share-sheet]\')') }
 
@@ -2280,6 +2300,10 @@ const run = async () => {
     // Adding Share to the phone row must not cost the primary action its wording: Share takes the
     // room its own label needs, so "Contact to order" still reads whole at a common phone width.
     check('the sticky row fits both actions and keeps the primary label unclipped', geo.overflow <= 1 && geo.shrTop >= 0 && geo.ctlW + geo.shrW + 2 * geo.insetLeft + 8 <= geo.vw && geo.ctlClip <= 0, { geo })
+    // iOS answers a double tap with a viewport zoom unless the page opts out. `touch-action:
+    // manipulation` on the root drops that one browser gesture and keeps pan and pinch; every
+    // storefront touch surface already sets a stronger value of its own, so none of them change.
+    check('a double tap cannot zoom the phone viewport', await ev('getComputedStyle(document.documentElement).touchAction === "manipulation"'))
 
     // ---- the Share Sheet on a phone -----------------------------------------------------------
     // Bottom-anchored, full-bleed, safe-area aware, and dismissed by the backdrop — the shape a
@@ -2288,7 +2312,28 @@ const run = async () => {
     await armShareTrap()
     await armClipboard('ok')
     const stickyShare = '[data-sticky-cta] [data-share-cta]'
+    // The sheet's enter must clear the same bar the panel's does: a bezier, not a spring, and —
+    // the deeper half — it must be a WAAPI animation at all: a declarative `y` is not on Motion's
+    // accelerated list and animates through its JS frameloop, which is what the phone kept reading
+    // as choppy. Captured on the first tick that finds the slide host, where its animations are
+    // still in flight, rather than after it has settled.
+    const START_SHEET_ANIMS = '(() => { window.__SA = null; const t0 = performance.now(); const tick = () => { const s = document.querySelector("[data-share-slide]"); if (s && !window.__SA) { for (const a of document.getAnimations()) { if (a.effect && a.effect.target === s) { window.__SA = String(a.effect.getComputedTiming().easing); break } } } if (window.__SA || performance.now() - t0 > 1200) return; requestAnimationFrame(tick) }; requestAnimationFrame(tick); return true })()'
+    await ev(START_SHEET_ANIMS)
     await clickSelector(stickyShare, sheetOpen)
+    await waitFor('window.__SA !== null', 2000)
+    const sheetEase = await ev('window.__SA')
+    check('the sheet enters on a bezier the compositor takes, not a generated spring curve', typeof sheetEase === 'string' && sheetEase.length > 0 && !sheetEase.startsWith('linear('), { sheetEase })
+    // The scrim is a flat dim and the sheet is its SIBLING, never its child: a full-viewport
+    // `backdrop-filter` on the scrim whose opacity fades with the sheet was the phone's last
+    // low-fps surface — and a descendant sliding inside a filtered ancestor re-runs that filter
+    // anyway (the coupling the bar's frost was hoisted out of).
+    const sheetSiblings = await ev('(() => { const b = document.querySelector("[data-share-backdrop]"); const s = document.querySelector("[data-share-sheet]"); return { both: !!b && !!s, nested: !!b && !!s && b.contains(s), scrimFlat: !!b && getComputedStyle(b).backdropFilter === "none" } })()')
+    check('the sheet slides beside a flat scrim, never inside a blurred one', sheetSiblings.both && !sheetSiblings.nested && sheetSiblings.scrimFlat, { sheetSiblings })
+    // The slide host is promoted while it exists (it mounts and unmounts with the sheet, so no
+    // layer is left behind), and the two animations on it are WAAPI — transform and opacity on the
+    // bezier, never a generated spring curve.
+    const sheetWillChange = await ev('getComputedStyle(document.querySelector("[data-share-slide]")).willChange')
+    check('the sheet slide is its own compositor layer while it is open', sheetWillChange === 'transform', { sheetWillChange })
     await waitFor(sheetAtRest)
     const mSheet = await sheet()
     check('the mobile Share button opens a bottom sheet, not a centred dialog', !!mSheet && mSheet.position === 'fixed' && Math.abs(mSheet.bottom - mSheet.vh) <= 1 && mSheet.left >= 0 && mSheet.right <= mSheet.vw + 1 && mSheet.width <= mSheet.vw, { mSheet })
@@ -2303,6 +2348,27 @@ const run = async () => {
     await clickAt(195, 60)
     check('the backdrop closes the mobile sheet', await waitFor('!document.querySelector(\'[data-share-sheet]\')'))
     check('the sheet never reached the platform share API on mobile', (await shareCalls()).length === 0, { calls: await shareCalls() })
+
+    // ---- the decode must not move the sticky header (phone) --------------------------------------
+    // A decoded label changes width every 40ms step, and the header's first row is a `flex-wrap` row:
+    // at 390px the Khmer label puts it a line taller. Before the pinned box, that line stayed until
+    // the last cluster settled and the whole header then jumped ~44px — the reported flicker. The pin
+    // holds the row at its FINAL width from the first decoded frame, so the one reflow happens with
+    // the language change and nothing moves after. Sampled per frame because "it settled eventually" is
+    // exactly what the broken build does.
+    await ev('(() => { const p = document.querySelector(\'[data-detail-header] [data-language-switcher] a:nth-of-type(2)\'); if (p) p.focus(); return true })()')
+    await press('Enter', 'Enter', 13)
+    await waitFor('location.pathname.startsWith("/km/products")', 4000)
+    await sleep(1600)
+    await ev('(() => { window.__H = []; window.__Hdone = false; const tick = () => { const h = document.querySelector("[data-detail-header]"); window.__H.push(h ? Math.round(h.getBoundingClientRect().height) : -1); if (window.__H.length < 60) requestAnimationFrame(tick); else window.__Hdone = true }; requestAnimationFrame(tick); return true })()')
+    await ev('(() => { const p = document.querySelector(\'[data-detail-header] [data-language-switcher] a:nth-of-type(1)\'); if (p) p.focus(); return true })()')
+    await press('Enter', 'Enter', 13)
+    await waitFor('window.__Hdone', 5000)
+    const headerHeights = await ev('window.__H') || []
+    const lastH = headerHeights.at(-1) ?? -1
+    check('the header reaches its final row before the words finish decoding', headerHeights.length > 20 && [...new Set(headerHeights)].length <= 2 && lastH > 0 && headerHeights.slice(10).every(h => h === lastH), { headerHeights: headerHeights.slice(0, 45), lastH })
+    await waitFor('location.pathname.startsWith("/products")', 4000)
+    await sleep(600)
 
     // The widths this project has already had an overflow defect at, asked of the open sheet rather
     // than of the page: a bottom panel with two pills inside it is exactly where a 320px screen starts
@@ -2602,20 +2668,27 @@ const run = async () => {
     await armClipboard('ok')
     // The phone mount must read as the same surface as the desktop one, so it blooms on the same
     // preset, mirrored: it hangs off the bottom edge of the sticky bar, so it grows from `center
-    // bottom` on `applePop.above`. A travel-only shape once stood in for it — a scale inside the
+    // bottom` on `applePop.above` — while its transition is `applePop.phone`, a bezier, because the
+    // spring's generated easing is the shape iOS runs off its compositor (the device report: this
+    // enter low fps, its own bezier exit smooth, the spring-driven sheet low fps both ways). The
+    // frost trace below is history with a structural answer: the bar's material is a sibling layer
+    // under the controls (`data-sticky-frost`), so the panel never animates inside a
+    // `backdrop-filter` element. A travel-only shape once stood in for the bloom — a scale inside the
     // bar's `backdrop-blur-xl` re-runs the filter pass every frame (traced at 390x844 @3x with a 4x
     // CPU throttle: 28.9ms of main-thread Layout+Paint+PrePaint over four plays, against 19.0-20.7ms
-    // for any shape that dropped either half) — and it is no longer worth the mismatch, so the lock
-    // is the OPPOSITE of the one it replaces: the bloom must run (a frame uniform-scaled below 1),
-    // with the travel and the fade riding along. Sampled frame by frame rather than at rest, because
-    // a settled panel reports the identity matrix whatever curve got it there.
-    const START_STICKY_FRAMES = '(() => { window.__KF = []; window.__KFdone = false; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (p) { const c = getComputedStyle(p); const m = new DOMMatrixReadOnly(c.transform); window.__KF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +c.opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__KFdone = true }; requestAnimationFrame(tick); return true })()'
+    // for any shape that dropped either half) — and is not coming back. The lock is the OPPOSITE of
+    // the one it replaces: the bloom must run (a frame uniform-scaled below 1), with the travel and
+    // the fade riding along. Sampled frame by frame rather than at rest, because a settled panel
+    // reports the identity matrix whatever curve got it there.
+    const START_STICKY_FRAMES = '(() => { window.__KF = []; window.__KFdone = false; window.__KA = null; const t0 = performance.now(); const tick = function () { const p = document.querySelector("[data-sticky-cta] [data-contact-panel]"); if (p) { if (!window.__KA) { for (const a of document.getAnimations()) { if (a.effect && a.effect.target === p) { window.__KA = String(a.effect.getComputedTiming().easing); break } } } const c = getComputedStyle(p); const m = new DOMMatrixReadOnly(c.transform); window.__KF.push({ a: +m.a.toFixed(3), d: +m.d.toFixed(3), f: +m.f.toFixed(1), o: +c.opacity }) } if (performance.now() - t0 < 700) requestAnimationFrame(tick); else window.__KFdone = true }; requestAnimationFrame(tick); return true })()'
     await ev(START_STICKY_FRAMES)
     await clickSelector('[data-sticky-cta] [data-contact-cta]', '!!document.querySelector("[data-sticky-cta] [data-contact-panel]")')
     await waitFor('!!window.__KFdone', 4000)
     const kframes = await ev('window.__KF || []')
     const kBloom = kframes.filter(f => f.a > 0.5 && f.a < 0.995)
     check('the mobile panel blooms out of the bar on the shared preset: uniform scale, travel, its own fade', kframes.length > 3 && kBloom.length > 0 && kBloom.every(f => Math.abs(f.a - f.d) <= 0.01) && kframes.some(f => Math.abs(f.f) >= 2) && kframes.some(f => f.o > 0.02 && f.o < 0.98), { frames: kframes.slice(0, 5) })
+    const kEase = await ev('window.__KA')
+    check('the panel enters on a bezier the compositor takes, not a generated spring curve', typeof kEase === 'string' && kEase.length > 0 && !kEase.startsWith('linear('), { kEase })
     // And the leave has to actually retract: the phone panel dismisses with the same genie the desktop
     // one uses, collapsing into the CTA that sits in the bar right under it. Before this lock the
     // phone exit was the preset's own `.to` shrink — 4% — which under a 240ms fade read as the panel
@@ -2638,6 +2711,12 @@ const run = async () => {
     // desktop panels give, hung at the other end because the geometry is upside down there.
     const stickyCaret = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); if (!bar) return null; const c = bar.querySelector("[data-panel-caret]"); const p = bar.querySelector("[data-contact-panel]"); const b = bar.querySelector("[data-contact-cta]"); if (!c || !p || !b) return null; const cr = c.getBoundingClientRect(), pr = p.getBoundingClientRect(), br = b.getBoundingClientRect(); return { dx: Math.round(cr.left + cr.width / 2 - (br.left + br.width / 2)), onEdge: Math.round(cr.top + cr.height / 2 - pr.bottom) } })()')
     check('the mobile panel hangs its arrow off its bottom edge, aimed at the bar\u2019s CTA', !!stickyCaret && Math.abs(stickyCaret.dx) <= 2 && Math.abs(stickyCaret.onEdge) <= 2, { stickyCaret })
+    // The frost is a sibling layer, never an ancestor of the controls: an animated descendant of a
+    // `backdrop-filter` element re-runs that filter pass every frame, the shape the phone pop exists
+    // to avoid. The layer must also still cover the bar's exact box, or the material has quietly
+    // stopped being the bar's skin.
+    const frostShape = await ev('(() => { const bar = document.querySelector("[data-sticky-cta]"); const f = document.querySelector("[data-sticky-frost]"); if (!bar || !f) return null; const b = bar.getBoundingClientRect(), r = f.getBoundingClientRect(); return { bars: Math.round(Math.abs(b.width - r.width) + Math.abs(b.height - r.height) + Math.abs(b.top - r.top)), inside: !!f.querySelector("[data-contact-cta], [data-contact-panel], [data-panel-caret]"), barFilter: getComputedStyle(bar).backdropFilter, frostFilter: getComputedStyle(f).backdropFilter } })()')
+    check('the bar\u2019s frost is a sibling layer under the controls, never their ancestor', !!frostShape && frostShape.bars <= 2 && !frostShape.inside && frostShape.barFilter === 'none' && frostShape.frostFilter !== 'none', { frostShape })
     const beforeStickyCopy = (await copies()).length
     const expectStickyFeedback = value => '((document.querySelector("[data-sticky-cta] [data-contact-feedback]") || {}).textContent || "").trim() === ' + value
     await clickSelector('[data-sticky-cta] [data-copy-message]', expectStickyFeedback(JSON.stringify(C.feedback.copied)))
@@ -2708,7 +2787,7 @@ const run = async () => {
         // The CTA question is asked of whichever mount the breakpoint paints: below `lg` that is
         // the bar's, at `lg` and above the inline block's — the hidden one has no rect and would
         // read as a 0px control if it were measured blindly.
-        const r = await ev('(() => { const dark = document.documentElement.classList.contains("dark"); const bar = document.querySelector("[data-sticky-cta]"); const cta = (bar && bar.getClientRects().length && bar.querySelector("[data-contact-cta]")) || [...document.querySelectorAll("[data-contact-cta]")].find(el => el.getClientRects().length) || null; const share = document.querySelector("[data-share-cta]"); const cr = cta ? cta.getBoundingClientRect() : null; const cc = cta ? getComputedStyle(cta) : null; const sc = share ? getComputedStyle(share) : null; const bc = bar ? getComputedStyle(bar) : null; const br = bar ? bar.getBoundingClientRect() : null; return { dark, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, ctaShown: !!cta && cta.getClientRects().length > 0, ctaH: cr ? Math.round(cr.height) : 0, ctaW: cr ? Math.round(cr.width) : 0, ctaBg: cc ? cc.backgroundColor : null, ctaFg: cc ? cc.color : null, shareBg: sc ? sc.backgroundColor : null, barShown: !!bar && br.width > 0 && bc.display !== "none", barBg: bc ? bc.backgroundColor : null, pageBg: getComputedStyle(document.body).backgroundColor, ctaText: cta ? (cta.textContent || "").trim() : null } })()')
+        const r = await ev('(() => { const dark = document.documentElement.classList.contains("dark"); const bar = document.querySelector("[data-sticky-cta]"); const cta = (bar && bar.getClientRects().length && bar.querySelector("[data-contact-cta]")) || [...document.querySelectorAll("[data-contact-cta]")].find(el => el.getClientRects().length) || null; const share = document.querySelector("[data-share-cta]"); const cr = cta ? cta.getBoundingClientRect() : null; const cc = cta ? getComputedStyle(cta) : null; const sc = share ? getComputedStyle(share) : null; const bc = bar ? getComputedStyle(bar) : null; const bf = document.querySelector("[data-sticky-frost]"); const bfc = bf ? getComputedStyle(bf) : null; const br = bar ? bar.getBoundingClientRect() : null; return { dark, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, vw: innerWidth, ctaShown: !!cta && cta.getClientRects().length > 0, ctaH: cr ? Math.round(cr.height) : 0, ctaW: cr ? Math.round(cr.width) : 0, ctaBg: cc ? cc.backgroundColor : null, ctaFg: cc ? cc.color : null, shareBg: sc ? sc.backgroundColor : null, barShown: !!bar && br.width > 0 && bc.display !== "none", barBg: bfc ? bfc.backgroundColor : null, pageBg: getComputedStyle(document.body).backgroundColor, ctaText: cta ? (cta.textContent || "").trim() : null } })()')
         if (!surfaces[scheme]) surfaces[scheme] = { bar: r.barBg, cta: r.ctaBg, share: r.shareBg, page: r.pageBg }
         const faults = []
         if (r.overflow > 1) faults.push(`${r.overflow}px of horizontal overflow`)
@@ -2719,7 +2798,9 @@ const run = async () => {
         if (r.ctaBg === r.ctaFg) faults.push('the primary action is invisible: fill equals its own text colour')
         if (r.barShown !== (w < 1024)) faults.push(`the sticky bar is ${r.barShown ? 'shown' : 'hidden'} at ${w}px`)
         // The two-rung rule: a bar that sits on the page may not be the page's own colour, or in
-        // dark mode it is a hairline with a button floating in nowhere.
+        // dark mode it is a hairline with a button floating in nowhere. The colour is read off the
+        // bar's frost layer — since the material moved to `[data-sticky-frost]`, the wrapper itself
+        // is a transparent box and reading it would compare nothing with nothing.
         if (r.barShown && r.barBg === r.pageBg) faults.push('the sticky bar is the same surface as the page it sits on')
         if ((scheme === 'dark') !== r.dark) faults.push(`a ${scheme} colour scheme did not reach the theme`)
         check(`the conversion UI fits, keeps its hierarchy and obeys its breakpoint @${w} ${scheme}`, faults.length === 0, faults.length ? faults : { ctaH: r.ctaH, ctaW: r.ctaW, barShown: r.barShown })
@@ -2803,7 +2884,7 @@ const run = async () => {
     await nav(detailUrl(G.manyId))
     await waitFor('!!document.querySelector(\'[data-sticky-cta]\')')
     await sleep(600)
-    const unfrosted = await ev('(() => { const alpha = c => { const m = /rgba\\(([^)]+)\\)/.exec(c); return m ? parseFloat(m[1].split(",")[3]) : 1 }; const bar = document.querySelector("[data-sticky-cta]"); const head = document.querySelector("[data-detail-header]"); const bc = bar && getComputedStyle(bar); const hc = head && getComputedStyle(head); return { barFilter: bc ? (bc.backdropFilter || bc.webkitBackdropFilter) : null, barAlpha: bc ? alpha(bc.backgroundColor) : 0, headFilter: hc ? (hc.backdropFilter || hc.webkitBackdropFilter) : null, headAlpha: hc ? alpha(hc.backgroundColor) : 0 } })()')
+    const unfrosted = await ev('(() => { const alpha = c => { const m = /rgba\\(([^)]+)\\)/.exec(c); return m ? parseFloat(m[1].split(",")[3]) : 1 }; const bar = document.querySelector("[data-sticky-frost]"); const head = document.querySelector("[data-detail-header]"); const bc = bar && getComputedStyle(bar); const hc = head && getComputedStyle(head); return { barFilter: bc ? (bc.backdropFilter || bc.webkitBackdropFilter) : null, barAlpha: bc ? alpha(bc.backgroundColor) : 0, headFilter: hc ? (hc.backdropFilter || hc.webkitBackdropFilter) : null, headAlpha: hc ? alpha(hc.backgroundColor) : 0 } })()')
     check('reduced transparency leaves the frosted storefront surfaces opaque and unfrosted', unfrosted.barFilter === 'none' && unfrosted.barAlpha === 1 && unfrosted.headFilter === 'none' && unfrosted.headAlpha === 1, unfrosted)
     await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }] })
     await metrics(1440, 900, false)
@@ -3126,6 +3207,11 @@ const run = async () => {
     await clickSelector('[data-admin-tab="categories"]', 'location.pathname === "/admin/categories"')
     await clickSelector('div[data-language-switcher] a[href^="/km/"]', 'location.pathname === "/km/admin/categories"')
     await waitFor('!!document.querySelector(' + JSON.stringify(CAT_FORM) + ')')
+    // The decode is still cycling when this sweep first lands, and the noise is Greek, Cyrillic,
+    // Hanzi — not Khmer — so the count of nodes actually carrying a Khmer run drops below the floor
+    // that proves the sweep looked at anything (`seen: 2`, twice, on otherwise green runs). Wait the
+    // window out: the pins release with the last settle and `MAX_WINDOW_MS` caps the whole thing.
+    await sleep(1400)
     const kmCatWide = await latinSpacedKhmer()
     check('no Khmer run in the category editor is letter-spaced like Latin', kmCatWide.bad.length === 0 && kmCatWide.seen > 5, { kmCatWide })
     const kmCatClipped = await clippedInk()

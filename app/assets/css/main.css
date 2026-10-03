@@ -16,6 +16,11 @@
 
 html {
   scroll-behavior: smooth;
+  /* A double tap anywhere on the storefront is two taps, not the browser's viewport zoom.
+     `manipulation` drops exactly that one gesture and keeps pan and pinch — the phone's own touch
+     surfaces (the gallery's `pan-y`, the share handle's `none`) intersect it with their stronger
+     values, so none of them change. */
+  touch-action: manipulation;
 }
 
 body {
@@ -277,7 +282,7 @@ body {
    utility, which is what lets one line here beat nine `bg-white/80` classes in the markup. */
 @media (prefers-reduced-transparency: reduce) {
   [data-detail-header],
-  [data-sticky-cta],
+  [data-sticky-frost],
   [data-site-dock],
   [data-contact-panel],
   [data-share-sheet],
@@ -296,7 +301,7 @@ body {
 
   [data-contact-panel],
   [data-share-sheet],
-  [data-sticky-cta] {
+  [data-sticky-frost] {
     background-color: var(--ui-bg);
   }
 

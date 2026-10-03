@@ -240,11 +240,12 @@ const zoomStyle = computed(() => isZoomed.value
   : undefined)
 
 // One style binding for the enlarged photo: the magnified transform owns it while zoomed, the
-// swipe offset owns it while contained. The two gestures are mutually exclusive by construction
-// (a swipe starts only from the contained view), so they never compete for the same property.
+// swipe offset owns it while contained — one axis closes (vertical), the other cycles (horizontal).
+// The two gestures are mutually exclusive by construction (a swipe starts only from the contained
+// view), so they never compete for the same property.
 const lightboxImgStyle = computed(() => isZoomed.value
   ? zoomStyle.value
-  : (swipeY.value ? { transform: `translateY(${swipeY.value}px)` } : undefined))
+  : (swipeX.value || swipeY.value ? { transform: `translate(${swipeX.value}px, ${swipeY.value}px)` } : undefined))
 
 // Drag-to-pan, mouse and touch through one Pointer Events path. Reduced motion is honoured by the
 // stylesheet (the zoom entry loses its transition) — the drag itself stays available under that flag,
@@ -259,29 +260,40 @@ let startX = 0
 let startY = 0
 const dragged = { value: false }
 
-// ---- swipe-to-close (contained view) ----
-// The same overlay that pans while magnified is the swipe surface while contained: a vertical
-// finger drag follows the pointer with a pure `translateY` on the `<img>` (never on the dialog —
-// the zoom maths reads untransformed rects and a scaled or translated ancestor would corrupt the
-// focal geometry mid-flight), and a release past the distance or velocity threshold closes the
-// lightbox in the swipe's own direction. A mostly-horizontal drag is abandoned to the browser:
-// left/right is the photo swap's axis, not an exit gesture. Mouse drags are never swipes — on a
-// desktop the press is the zoom, and an old drag must not start moving the photo.
+// ---- swipe (contained view): vertical closes, horizontal cycles ----
+// The same overlay that pans while magnified is the swipe surface while contained: the finger
+// follows the pointer with one `translate()` on the `<img>` (never on the dialog — the zoom maths
+// reads untransformed rects and a scaled or translated ancestor would corrupt the focal geometry
+// mid-flight). A vertical release past the distance or velocity threshold closes the lightbox in
+// the swipe's own direction; horizontal is the photo swap's axis, and with a second photo it drives
+// the same cycle the inline photo accepts (`step(∓1)` — leftwards advances, the direction the swap
+// reads) on the same release gates. A single-photo product keeps the old abandon, since there is
+// nothing to swap to. Mouse drags are never swipes — on a desktop the press is the zoom, and an old
+// drag must not start moving the photo.
 const SWIPE_CLOSE_MIN_PX = 72
 const SWIPE_CLOSE_MIN_VEL = 0.45 // px/ms on the last sample — a flick closes where a slow pull does not
 const SWIPE_CLOSE_MIN_TRAVEL = 12 // a flick must have actually moved the photo to count
+// The cycle's release gates, shared with the inline photo below so the two surfaces cannot drift.
+const SWIPE_CYCLE_MIN_PX = 44
+const SWIPE_CYCLE_MIN_VEL = 0.45 // px/ms on the last sample — a flick cycles where a slow drag does not
+const SWIPE_CYCLE_MIN_TRAVEL = 10 // a flick must have actually moved the photo to count
+const swipeX = ref(0)
 const swipeY = ref(0)
 let swipeId: number | null = null
 let swipeStartX = 0
 let swipeStartY = 0
+let swipeLastX = 0
 let swipeLastY = 0
 let swipeLastT = 0
+let swipeVelX = 0
 let swipeVel = 0
+let swipeAxis: 'x' | 'y' | null = null
 let swipeLocked = false
 
 const endSwipe = () => {
   swipeId = null
   swipeLocked = false
+  swipeAxis = null
 }
 
 const onSwipePointerDown = (event: PointerEvent) => {
@@ -289,10 +301,14 @@ const onSwipePointerDown = (event: PointerEvent) => {
   swipeId = event.pointerId
   swipeStartX = event.clientX
   swipeStartY = event.clientY
+  swipeLastX = event.clientX
   swipeLastY = event.clientY
   swipeLastT = event.timeStamp
+  swipeVelX = 0
   swipeVel = 0
+  swipeAxis = null
   swipeLocked = false
+  swipeX.value = 0
   swipeY.value = 0
   try { (event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId) } catch { /* the pointer is already released */ }
 }
@@ -302,27 +318,66 @@ const onSwipePointerMove = (event: PointerEvent) => {
   const dx = event.clientX - swipeStartX
   const dy = event.clientY - swipeStartY
   const dt = event.timeStamp - swipeLastT
-  if (dt > 0) swipeVel = (event.clientY - swipeLastY) / dt
+  if (dt > 0) {
+    swipeVelX = (event.clientX - swipeLastX) / dt
+    swipeVel = (event.clientY - swipeLastY) / dt
+  }
+  swipeLastX = event.clientX
   swipeLastY = event.clientY
   swipeLastT = event.timeStamp
   if (!swipeLocked) {
-    // Axis lock at the same 4px the pan uses: commit to the swipe only once the move is
-    // unmistakably vertical. A mostly-horizontal drag is abandoned — left/right belongs to the
-    // photo swap, and a crooked tap must keep its zoom meaning.
+    // Axis lock at the same 4px the pan uses: commit only once the move is unmistakably one axis.
+    // Horizontal is the photo swap's axis — the cycle gesture when a second photo exists, and the
+    // abandon it has always been when one does not. A crooked tap under the lock keeps its zoom
+    // meaning.
     if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return
-    if (Math.abs(dx) > Math.abs(dy)) { endSwipe(); return }
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (imageCount.value < 2) { endSwipe(); return }
+      swipeAxis = 'x'
+    } else {
+      swipeAxis = 'y'
+    }
     swipeLocked = true
   }
-  swipeY.value = dy
+  if (swipeAxis === 'x') swipeX.value = dx
+  else swipeY.value = dy
 }
 
 const onSwipePointerUp = (event: PointerEvent) => {
   if (swipeId === null || event.pointerId !== swipeId) return
-  if (!swipeLocked) { endSwipe(); return }
+  if (!swipeLocked || swipeAxis === null) { endSwipe(); return }
+  // Whatever click trails a real drag is the end of a gesture, not an intent to zoom.
+  dragged.value = true
+  const img = lightboxImgEl.value
+  if (swipeAxis === 'x') {
+    const offset = swipeX.value
+    const travel = Math.abs(offset)
+    const flick = travel > SWIPE_CYCLE_MIN_TRAVEL && Math.abs(swipeVelX) > SWIPE_CYCLE_MIN_VEL
+    if (travel > SWIPE_CYCLE_MIN_PX || flick) {
+      // Hand the offset to the swap: the leaving photo keeps this inline transform as the start the
+      // keyed `<Transition>` animates out of, so the release reads as one push. Clearing the refs in
+      // the same breath is what lets the incoming photo mount at rest — an inline transform
+      // outlives the enter classes, and one left set would strand the new photo at the finger's
+      // offset.
+      swipeX.value = 0
+      swipeY.value = 0
+      endSwipe()
+      step(offset < 0 ? 1 : -1) // leftwards advances, the direction the swap and the inline photo read
+      return
+    }
+    // Snap back on the swap's axis, exactly like the close gesture's below-threshold return.
+    if (img && offset !== 0) {
+      img.animate(
+        [{ transform: `translateX(${offset}px)` }, { transform: 'translateX(0px)' }],
+        { duration: 180, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
+      )
+    }
+    swipeX.value = 0
+    endSwipe()
+    return
+  }
   const travel = swipeY.value
   const flick = Math.abs(travel) > SWIPE_CLOSE_MIN_TRAVEL && Math.abs(swipeVel) > SWIPE_CLOSE_MIN_VEL
-  dragged.value = true // whatever click trails this gesture is the end of a swipe, not a zoom
-  const img = lightboxImgEl.value
   if (Math.abs(travel) > SWIPE_CLOSE_MIN_PX || flick) {
     const dir = travel > 0 ? 1 : -1
     if (img) {
@@ -381,20 +436,18 @@ const openLightbox = () => { isLightboxOpen.value = true }
 
 // ---- swipe to cycle (inline main photo, touch only) ----
 // The arrows, the filmstrip and the keyboard already own the selection; this is the gesture a phone
-// visitor reaches for first. It follows the same three rules the lightbox swipe established: a 4px
-// axis lock before committing, distance OR flick velocity to fire (a fast short swipe cycles where a
-// slow long pull does not), and a mostly-vertical drag abandoned to the page — `touch-action: pan-y`
-// is what lets the browser keep that axis, and it cancels our pointer when it does. A mouse press is
-// never a swipe: on a desktop the press is the click-to-enlarge affordance.
+// visitor reaches for first, and the lightbox's contained photo accepts the same one — the
+// `SWIPE_CYCLE_*` gates above are the single owner of both. Three rules: a 4px axis lock before
+// committing, distance OR flick velocity to fire (a fast short swipe cycles where a slow long pull
+// does not), and a mostly-vertical drag abandoned to the page — `touch-action: pan-y` is what lets
+// the browser keep that axis, and it cancels our pointer when it does. A mouse press is never a
+// swipe: on a desktop the press is the click-to-enlarge affordance.
 //
 // The offset is written to the BUTTON, never to the `<motion.img>` inside it. Motion owns that
 // element's transform for the directional swap, and a second writer on the same property is the
 // jitter this repo has already paid for once — one transform, one owner. Releasing hands the return
 // trip to the same `animate()` the filmstrip advance uses, with an explicit start value so nothing is
 // read back out of a transform another writer owns.
-const SWIPE_CYCLE_MIN_PX = 44
-const SWIPE_CYCLE_MIN_VEL = 0.45 // px/ms on the last sample — a flick cycles where a slow drag does not
-const SWIPE_CYCLE_MIN_TRAVEL = 10 // a flick must have actually moved the photo to count
 let cycleId: number | null = null
 let cycleStartX = 0
 let cycleStartY = 0

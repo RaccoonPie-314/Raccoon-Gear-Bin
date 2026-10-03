@@ -117,12 +117,24 @@ const handleCopyShareMessage = async () => {
        exists: it carries Share as well as Contact, and Share does not wait for the shop to configure
        a channel. The dark surface is `zinc-900`, not the page's own `zinc-950`: the storefront has
        exactly two dark rungs and a bar that sits *on* the page belongs to the upper one, or in dark
-       mode it is a hairline with a button floating in nowhere. -->
+       mode it is a hairline with a button floating in nowhere.
+
+       The frost is its own layer under the controls (`-z-10`), not the bar's own skin: the contact
+       panel blooms open inside this bar, and an animated descendant of a `backdrop-filter` element
+       re-runs that filter pass every frame of the animation — the shape a phone reads as a
+       stuttering pop. The layer spans the bar's padding box, so the material covers exactly the box
+       it always did and the look is unchanged; only the invalidation path moved. `data-sticky-frost`
+       is the contract `main.css`'s reduced-transparency block and the harness aim at. -->
   <Teleport to="body">
     <div
       data-sticky-cta
-      class="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200/80 bg-white/90 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-xl backdrop-saturate-150 lg:hidden dark:border-zinc-800/80 dark:bg-zinc-900/85"
+      class="fixed inset-x-0 bottom-0 z-50 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden"
     >
+      <div
+        data-sticky-frost
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-0 -z-10 border-t border-zinc-200/80 bg-white/90 backdrop-blur-xl backdrop-saturate-150 dark:border-zinc-800/80 dark:bg-zinc-900/85"
+      />
       <ProductActions
         compact
         :state="stock"
