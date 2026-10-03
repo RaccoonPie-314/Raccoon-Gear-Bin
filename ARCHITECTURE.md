@@ -731,9 +731,10 @@ Four traps when extending it, all paid for once already:
 `app/app.config.ts` is the single owner of pill shape and elevation for buttons, inputs and
 selects — restyle there, not per call site. All single-line controls in the storefront are
 **44px** tall, and the search pill's left edge is the product grid's left edge at every
-breakpoint. Note: `app.config.ts` currently emits 3 pre-existing `tsc` errors (its `base`
-key belongs under `slots.base` in Nuxt UI 4) — known, unfixed, do not "fix" it as a
-drive-by; verify the pill styling still measures correctly if you touch it.
+breakpoint. Note: the pill classes live under `slots.base` — the typed Nuxt UI 4 form (a
+top-level `base` is tailwind-variants' legacy key: it merges into the same slot at runtime but
+fails the app.config type; moved 2026-10-03, pill styling re-measured green). Verify the pill
+styling still measures correctly if you touch this file.
 
 The dark surface scale has exactly two rungs, and they are not interchangeable. `zinc-950`
 (`#09090b` — `main.css`'s `.dark body`, and the field the dark emblem artwork is drawn on) is

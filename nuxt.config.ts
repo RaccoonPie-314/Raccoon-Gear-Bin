@@ -94,11 +94,9 @@ export default defineNuxtConfig({
     // uploaded bundle — so leaving it unset still ships the key whenever `.env` has one. `''` is
     // what actually stops it: defu skips `undefined`, so only a set value overrides the default.
     secretKey: '',
-    cookieOptions: {
-      name: 'raccoon-admin-auth',
-      lifetime: 60 * 60 * 8,
-      sameSite: 'lax'
-    }
+    // No `cookieOptions` here: the module's defaults (maxAge 8h, sameSite lax, secure) are
+    // exactly what this shop wants, and the auth cookie's name comes from `cookiePrefix`
+    // (v2 overwrites any `cookieOptions.name`, and `lifetime` is not a v2 option).
   },
   ui: {
     theme: {

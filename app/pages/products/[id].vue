@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ResolvableMeta } from '@unhead/vue'
 import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
 import { hasKhmerText } from '~/utils/locale-script'
 
@@ -93,7 +94,9 @@ useHead(() => {
   const current = product.value
   const summary = current?.shortDescription || current?.description || ''
   const photo = current?.images[0]
-  const tags: Array<{ name?: string, property?: string, content: string }> = [
+  // `ResolvableMeta` is a discriminated union: every entry must carry its discriminator
+  // (`name`, `property`, …). A hand-written shape with both optional matches no member.
+  const tags: ResolvableMeta[] = [
     { property: 'og:type', content: 'product' },
     { property: 'og:site_name', content: t('appName') },
     { property: 'og:title', content: current?.name || t('products') },

@@ -77,9 +77,9 @@ bun run typecheck                                              # vue-tsc via `nu
 `build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
 compiled, not that it works, and there is no test suite. `bun run typecheck` (vue-tsc) does
 mechanically check template bindings — a mistyped prop or missing variable in a `.vue` template
-fails on it. It is NOT in CI and currently exits non-zero on a handful of pre-existing script-side
-typing errors (`app.config.ts` slot classes, `useHead` meta in `[id].vue`, `nuxt.config.ts` cookie
-options); treat new template-binding errors it reports as real. `tsc` alone cannot parse `.vue`,
+fails on it. It is NOT in CI (it adds wall time); it exits 0 since 2026-10-03 (the `app.config.ts`
+slot classes, the `useHead` meta in `[id].vue` and the dead `nuxt.config.ts` cookie options were
+root-caused and fixed), so treat any error it reports as real. `tsc` alone cannot parse `.vue`,
 so the remaining backstops for what typecheck misses are `verify`'s painted-geometry asserts and
 the IDE language server. What each command actually proves, the harness's coverage and
 the CDP measurement traps are in [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md).
