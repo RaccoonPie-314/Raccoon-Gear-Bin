@@ -1,0 +1,565 @@
+{
+  "_comment": "The live test catalog (exported from Supabase 2026-10-05) — the dev + harness seed for Neon via scripts/db-seed.mjs. Published products and active categories only: that is what an anon read could see, and it is what the shop displayed.",
+  "exportedFrom": "https://gpfhesizcaluvvhxlqox.supabase.co",
+  "categories": [
+    {
+      "id": "afead265-4c36-4af0-8cac-36acc2afcc03",
+      "slug": "controllers",
+      "sort_order": 1,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Controllers",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "dc17d960-9bc4-4d86-97b5-53f6882528ab",
+      "slug": "keyboards",
+      "sort_order": 2,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Keyboards",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "60efdece-962d-425b-b73f-c1e5b532c056",
+      "slug": "mice",
+      "sort_order": 3,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Mice",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "ea7e91c4-167e-4126-aeaa-2e8d41170c2e",
+      "slug": "headphones",
+      "sort_order": 4,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Headphones",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "33d984d2-64ae-49c8-93dc-f52daca38921",
+      "slug": "earphones",
+      "sort_order": 5,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Earphones",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "478e45bb-68eb-4fc7-a989-8f3917ec7bd0",
+      "slug": "cooling",
+      "sort_order": 6,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "ABC",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "e5276984-c2f2-4c03-9c21-7807dc9bf206",
+      "slug": "desktop",
+      "sort_order": 7,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "123",
+          "locale": "en"
+        }
+      ]
+    },
+    {
+      "id": "d486657e-754c-40ec-b2d8-64549636259e",
+      "slug": "laptop",
+      "sort_order": 8,
+      "is_active": true,
+      "category_translations": [
+        {
+          "name": "Test",
+          "locale": "en"
+        }
+      ]
+    }
+  ],
+  "products": [
+    {
+      "id": "1b97be06-0108-4ffe-88aa-a0e214b1f5fb",
+      "category_id": "afead265-4c36-4af0-8cac-36acc2afcc03",
+      "slug": "xbox",
+      "sku": "RGB-xbox",
+      "price": 30,
+      "currency": "USD",
+      "stock_quantity": 5,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-22T08:08:40.371586+00:00",
+      "product_translations": [
+        {
+          "name": "xbox",
+          "locale": "en",
+          "description": "box",
+          "specifications": [
+            {
+              "label": "works",
+              "value": ""
+            }
+          ],
+          "short_description": "toll"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/1b97be06-0108-4ffe-88aa-a0e214b1f5fb/a74e5448-7fd5-4d48-8473-35e4832ce46d-4.jpg"
+        }
+      ]
+    },
+    {
+      "id": "6fef2452-c40e-42ba-9701-bc73f77e82b0",
+      "category_id": "dc17d960-9bc4-4d86-97b5-53f6882528ab",
+      "slug": "rgb-key1",
+      "sku": "RGB- key1",
+      "price": 25,
+      "currency": "USD",
+      "stock_quantity": 4,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-24T13:44:51.691726+00:00",
+      "product_translations": [
+        {
+          "name": "test1",
+          "locale": "en",
+          "description": "asf",
+          "specifications": [
+            {
+              "label": "sdf",
+              "value": ""
+            }
+          ],
+          "short_description": "assf"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/6fef2452-c40e-42ba-9701-bc73f77e82b0/788a494d-99bd-46f3-b3dd-2456c1ae5bf1-5015M Diagram.png"
+        }
+      ]
+    },
+    {
+      "id": "96edc2a3-d9d6-4088-83f0-c7a62b6e52af",
+      "category_id": "ea7e91c4-167e-4126-aeaa-2e8d41170c2e",
+      "slug": "fdsf",
+      "sku": "wqw",
+      "price": 2,
+      "currency": "USD",
+      "stock_quantity": 2,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-24T13:48:19.414684+00:00",
+      "product_translations": [
+        {
+          "name": "xxx",
+          "locale": "en",
+          "description": "andi",
+          "specifications": [
+            {
+              "label": "adsa",
+              "value": ""
+            }
+          ],
+          "short_description": "fsadfsv"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/96edc2a3-d9d6-4088-83f0-c7a62b6e52af/90dc3e05-2ef4-4ef5-833c-2100b94febc6-pin referring.png"
+        }
+      ]
+    },
+    {
+      "id": "e4476c83-ecfa-4c5f-96b5-f272eb3b6b84",
+      "category_id": "33d984d2-64ae-49c8-93dc-f52daca38921",
+      "slug": "2r2csf",
+      "sku": "2r2csf",
+      "price": 4,
+      "currency": "USD",
+      "stock_quantity": 4,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-24T13:48:57.619981+00:00",
+      "product_translations": [
+        {
+          "name": "xxvx",
+          "locale": "en",
+          "description": "c24",
+          "specifications": [
+            {
+              "label": "c24",
+              "value": ""
+            }
+          ],
+          "short_description": "2c"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/e4476c83-ecfa-4c5f-96b5-f272eb3b6b84/7f0ff8d4-dfd2-4ffa-b4db-94482200fae6-3.jpg"
+        }
+      ]
+    },
+    {
+      "id": "9b5f392d-4ebd-4a62-9e0a-3071394e6dcb",
+      "category_id": "afead265-4c36-4af0-8cac-36acc2afcc03",
+      "slug": "sfdsc",
+      "sku": "sfas",
+      "price": 2,
+      "currency": "USD",
+      "stock_quantity": 2,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-24T13:49:12.806119+00:00",
+      "product_translations": [
+        {
+          "name": "scscc",
+          "locale": "en",
+          "description": "vsdav",
+          "specifications": [
+            {
+              "label": "dvdv",
+              "value": ""
+            }
+          ],
+          "short_description": "sf s"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/9b5f392d-4ebd-4a62-9e0a-3071394e6dcb/a7767390-ff06-467f-b11c-6d4ae32b1301-2.jpg"
+        }
+      ]
+    },
+    {
+      "id": "76c28bb8-9ff4-42bf-963f-0f4547207ce8",
+      "category_id": "dc17d960-9bc4-4d86-97b5-53f6882528ab",
+      "slug": "s2e2",
+      "sku": "s2e2",
+      "price": 22,
+      "currency": "USD",
+      "stock_quantity": 242,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-24T13:49:32.104419+00:00",
+      "product_translations": [
+        {
+          "name": "cvcxvx",
+          "locale": "en",
+          "description": "fsfa",
+          "specifications": [
+            {
+              "label": "vsdav",
+              "value": ""
+            }
+          ],
+          "short_description": "wef q"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/76c28bb8-9ff4-42bf-963f-0f4547207ce8/fdf07d58-77c7-46a2-8aa9-b315bc37b995-5.jpg"
+        }
+      ]
+    },
+    {
+      "id": "04f4af5c-574d-4cc4-9569-bcba7d9cdc2c",
+      "category_id": "60efdece-962d-425b-b73f-c1e5b532c056",
+      "slug": "rgb-q9081",
+      "sku": "RGB-q9081",
+      "price": 100,
+      "currency": "USD",
+      "stock_quantity": 3,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": 94.85,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": "2026-09-30T23:32:00+00:00",
+      "promo_ends_at": null,
+      "created_at": "2026-09-26T06:44:33.51077+00:00",
+      "product_translations": [
+        {
+          "name": "superlight",
+          "locale": "en",
+          "description": "lkasfosfsf",
+          "specifications": [
+            {
+              "label": "akjsfbjks",
+              "value": ""
+            }
+          ],
+          "short_description": "Mouse exp"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/04f4af5c-574d-4cc4-9569-bcba7d9cdc2c/a4d83cb9-b671-44d9-a1bf-77c5a48ed708-mouse test.avif"
+        }
+      ]
+    },
+    {
+      "id": "344629cd-206a-411c-8c17-6a1b16d2b33a",
+      "category_id": "dc17d960-9bc4-4d86-97b5-53f6882528ab",
+      "slug": "sadds",
+      "sku": "sadds",
+      "price": 213,
+      "currency": "USD",
+      "stock_quantity": 21,
+      "status": "published",
+      "is_featured": false,
+      "promo_price": 1,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2026-09-27T11:27:51.017297+00:00",
+      "product_translations": [
+        {
+          "name": "adadad",
+          "locale": "en",
+          "description": "sad",
+          "specifications": [
+            {
+              "label": "asd",
+              "value": ""
+            }
+          ],
+          "short_description": "aad"
+        }
+      ],
+      "product_images": [
+        {
+          "alt_text": null,
+          "is_primary": true,
+          "sort_order": 0,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/251fd77d-1d55-4c18-a828-c8280167347a-1702 measurement 02.jpeg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 1,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/eb7185ff-2d1e-477c-a417-d2d5f98d6310-1702 measurement.jpeg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 2,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/8cef1953-e5a3-46e0-85a8-49610a154b94-1.png"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 3,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/698336a4-6be4-4edc-bb21-f96b8a058c94-2.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 4,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/3d9a53ff-184e-4eba-b4ce-3904223a798e-3.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 5,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/17b93554-6139-42de-a9ff-50488b332b52-4.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 6,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/75fa6b66-f56f-405a-b324-d151dfea0a4b-1.png"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 7,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/8efb2ba8-03eb-469b-aeda-cdce4398010e-2.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 8,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/81263fc3-341a-450d-b505-af2b2356a4e5-3.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 9,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/bd47fcae-18dc-4ec3-89ea-d34c3f8b294c-4.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 10,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/7f9865f6-7bab-4571-bf09-32dbd574e655-5.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 11,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/5d01da60-03c4-4e6b-b4c8-571821c84018-17 vs pro.jpg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 12,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/1fe36240-593e-4c05-b840-3c6e457498cf-5015M Diagram.png"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 13,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/92c0f992-ce93-4a54-a7f8-2b57383c7a5d-5026-plate diagram.jpeg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 14,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/bcaf2762-d90f-4966-9487-056f45273d0c-newexca.jpeg"
+        },
+        {
+          "alt_text": null,
+          "is_primary": false,
+          "sort_order": 15,
+          "storage_path": "products/344629cd-206a-411c-8c17-6a1b16d2b33a/bd42c9dd-6dd7-437c-b445-abd189aec076-spare parts email.png"
+        }
+      ]
+    }
+  ],
+  "siteSettings": {
+    "id": 1,
+    "phone": "+855 123456789",
+    "location_url": "https://maps.app.goo.gl/wfHU9GmyPKmVRqY6A",
+    "location_translations": [
+      {
+        "label": "TAKHMAO, Kendal",
+        "locale": "en"
+      },
+      {
+        "label": "ក្រុងតាខ្មៅ, ខេត្តកណ្ដាល",
+        "locale": "km"
+      }
+    ],
+    "social_links": [
+      {
+        "url": "https://t.me/AAAWPER",
+        "enabled": true,
+        "platform": "telegram",
+        "sort_order": 0,
+        "contact_enabled": true
+      },
+      {
+        "url": "https://web.facebook.com/?_rdc=1&_rdr#",
+        "enabled": true,
+        "platform": "whatsapp",
+        "sort_order": 1,
+        "contact_enabled": true
+      },
+      {
+        "url": "https://web.facebook.com/?_rdc=1&_rdr#",
+        "enabled": true,
+        "platform": "facebook",
+        "sort_order": 2,
+        "contact_enabled": true
+      },
+      {
+        "url": "https://www.tiktok.com/en/",
+        "enabled": true,
+        "platform": "instagram",
+        "sort_order": 3,
+        "contact_enabled": false
+      },
+      {
+        "url": "https://www.tiktok.com/en/",
+        "enabled": true,
+        "platform": "tiktok",
+        "sort_order": 4,
+        "contact_enabled": false
+      },
+      {
+        "url": "https://www.tiktok.com/en/",
+        "enabled": true,
+        "platform": "youtube",
+        "sort_order": 5,
+        "contact_enabled": false
+      }
+    ]
+  }
+}

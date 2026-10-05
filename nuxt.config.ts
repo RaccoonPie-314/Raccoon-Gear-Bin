@@ -36,7 +36,7 @@ export default defineNuxtConfig({
       ]
     }
   },
-  modules: ['@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase', 'motion-v/nuxt'],
+  modules: ['@clerk/nuxt', '@nuxt/eslint', '@nuxt/ui', '@nuxtjs/color-mode', '@nuxtjs/i18n', '@nuxtjs/supabase', 'motion-v/nuxt'],
   // @nuxt/ui auto-registers @nuxt/fonts, whose default provider fetches fonts.googleapis.com at
   // build time. The CI runner cannot reach it, and the fetch fails silently. Empty providers = no
   // network step. Latin UI text needs no webfont at all: the theme stack is the native system UI
@@ -76,10 +76,19 @@ export default defineNuxtConfig({
     ]
   },
   imports: { dirs: ['~/features/admin/composables', '~/features/product/composables'] },
-  // No service-role key anywhere in the runtime config, and that is deliberate: `nuxt build` inlines
-  // whatever is read here straight into the uploaded Worker bundle, so a key that bypasses RLS would
-  // live in the deploy artifact. Authorisation is RLS in Postgres and the browser holds the anon key.
+  // The service-role key appears here ONLY as an empty-string default for the confined auth tier
+  // (`/api/auth/**` + the Telegram webhook); phase 4 payments will reuse the same pattern. No
+  // `process.env` read is allowed in this file — `nuxt build` inlines whatever is read here
+  // straight into the uploaded Worker bundle, and authorisation stays RLS in Postgres with the
+  // browser holding only the anon key. The real values arrive as Worker runtime secrets.
   runtimeConfig: {
+    // Declared empty; Nuxt maps the NUXT_* env bindings over them at request time (and
+    // `useRuntimeConfig` must take the event on Workers or the bindings are not read at all).
+    supabaseServiceRoleKey: '',
+    telegramWebhookSecret: '',
+    // Neon connection (P2 of plans/005). Env override: NUXT_DATABASE_URL (the migrator script
+    // reads plain DATABASE_URL from .env — two names for the same URL, scripts vs runtime).
+    databaseUrl: '',
     public: {
       supabaseUrl: process.env.NUXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co',
       supabaseKey: process.env.NUXT_PUBLIC_SUPABASE_ANON_KEY || 'demo-anon-key'
@@ -94,9 +103,14 @@ export default defineNuxtConfig({
     // uploaded bundle — so leaving it unset still ships the key whenever `.env` has one. `''` is
     // what actually stops it: defu skips `undefined`, so only a set value overrides the default.
     secretKey: '',
-    // No `cookieOptions` here: the module's defaults (maxAge 8h, sameSite lax, secure) are
-    // exactly what this shop wants, and the auth cookie's name comes from `cookiePrefix`
-    // (v2 overwrites any `cookieOptions.name`, and `lifetime` is not a v2 option).
+    // No `cookieOptions` here, and after reading the installed sources during the identity v2
+    // work that is a verified fact rather than a preference: @supabase/ssr rewrites the auth
+    // cookie's write maxAge to its own 400-day DEFAULT_COOKIE_OPTIONS on every set, so a maxAge
+    // here would never bind the session cookie (the sessions guide says the same — let Auth
+    // control token validity). Real session lifetime is server-side and indefinite by default;
+    // a hard ceiling would be the Auth settings' time-box/inactivity controls, not this file.
+    // The cookie's name comes from `cookiePrefix` (v2 overwrites any `cookieOptions.name`, and
+    // `lifetime` is not a v2 option).
   },
   ui: {
     theme: {

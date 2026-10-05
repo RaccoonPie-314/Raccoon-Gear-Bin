@@ -1,15 +1,22 @@
-import type { Database } from '~/types/database'
+import type { CategoryRow as CategoryBase, CategoryTranslationRow, Database, ProductImageRow, ProductRow as ProductBase, ProductTranslationRow } from '~/types/database'
 import type { CatalogCategory, CatalogCategoryDraft, CatalogProduct, CatalogSpecification } from '~/types/catalog'
 
-// The select strings have to stay inline literals: supabase-js infers the result type by
-// parsing the query text, so building one at runtime (join/concat/template) degrades every
-// row to `any`.
-const PRODUCT_SELECT = 'id, category_id, slug, sku, price, currency, stock_quantity, status, promo_price, promo_label, promo_quantity, promo_starts_at, promo_ends_at, product_translations(id, locale, name, short_description, description, specifications), product_images(id, storage_path, alt_text, sort_order), categories(id, slug, category_translations(id, locale, name))'
-const CATEGORY_SELECT = 'id, slug, category_translations(id, locale, name)'
-// The admin's second view of the same table: inactive rows are included (the shop has to be able to
-// bring one back, and RLS is what decides that this visitor may read them), and no locale is picked
-// away, because the editor writes both names at once.
-const CATEGORY_DRAFT_SELECT = 'id, slug, sort_order, is_active, category_translations(locale, name)'
+// The shapes `/api/catalog/**` answers with (server/utils/catalog-queries.ts owns the SQL; the two
+// must move together). They mirror the PostgREST embeds this file used to derive from its select
+// strings — the mappers below were written against exactly this shape and are untouched.
+type ProductRow = Pick<ProductBase, 'id' | 'category_id' | 'slug' | 'sku' | 'price' | 'currency' | 'stock_quantity' | 'status' | 'promo_price' | 'promo_label' | 'promo_quantity' | 'promo_starts_at' | 'promo_ends_at'> & {
+  product_translations: Pick<ProductTranslationRow, 'id' | 'locale' | 'name' | 'short_description' | 'description' | 'specifications'>[]
+  product_images: Pick<ProductImageRow, 'id' | 'storage_path' | 'alt_text' | 'sort_order'>[]
+  categories: (Pick<CategoryBase, 'id' | 'slug'> & {
+    category_translations: Pick<CategoryTranslationRow, 'id' | 'locale' | 'name'>[]
+  }) | null
+}
+type CategoryRow = Pick<CategoryBase, 'id' | 'slug'> & {
+  category_translations: Pick<CategoryTranslationRow, 'id' | 'locale' | 'name'>[]
+}
+type CategoryDraftRow = Pick<CategoryBase, 'id' | 'slug' | 'sort_order' | 'is_active'> & {
+  category_translations: Pick<CategoryTranslationRow, 'locale' | 'name'>[]
+}
 
 const FALLBACK_LOCALE = 'en'
 
@@ -43,19 +50,10 @@ const DISPLAY_WIDTH = 1600
 const THUMB_WIDTH = 800
 
 export const useCatalog = () => {
+  // Storage URLs only — the rows come from `/api/catalog/**` now. Until the R2 flip (P3 of
+  // plans/005) the public URL builder stays on the Supabase storage client, exactly as it shipped.
   const supabase = useSupabaseClient<Database>()
   const { locale } = useI18n()
-
-  const productsQuery = () => supabase.from('products').select(PRODUCT_SELECT)
-  const categoriesQuery = () => supabase.from('categories').select(CATEGORY_SELECT)
-  const categoryDraftsQuery = () => supabase.from('categories').select(CATEGORY_DRAFT_SELECT)
-
-  // Row types are derived from the queries themselves rather than hand-written, so removing
-  // a column from a select breaks the mapper at compile time instead of handing the view an
-  // `undefined` that happens to be unread today.
-  type ProductRow = Exclude<Awaited<ReturnType<typeof productsQuery>>['data'], null>[number]
-  type CategoryRow = Exclude<Awaited<ReturnType<typeof categoriesQuery>>['data'], null>[number]
-  type CategoryDraftRow = Exclude<Awaited<ReturnType<typeof categoryDraftsQuery>>['data'], null>[number]
 
   // One owner for every product-photo URL (boundary rule 1), asked for by width. An absolute
   // path is not in our bucket, so there is nothing to transform: it is returned for both widths.
@@ -165,7 +163,7 @@ export const useCatalog = () => {
     return specLinesToPairs(raw).filter((item) => item.label || item.value)
   }
 
-  // The loaded rows are kept, not flattened away. `PRODUCT_SELECT` already embeds *every* locale
+  // The loaded rows are kept, not flattened away. The product payload already embeds *every* locale
   // (`product_translations(… locale …)`), so a language switch has nothing to fetch: it has to
   // re-RESOLVE, and that is what these three computeds do — they read `locale.value` through
   // `pickTranslation`, so changing locale re-runs the mappers over the rows already in memory.
@@ -183,9 +181,7 @@ export const useCatalog = () => {
   const product = computed(() => (rawProduct.value ? mapProduct(rawProduct.value) : null))
 
   const fetchProducts = async () => {
-    const { data, error } = await productsQuery().eq('status', 'published').order('created_at', { ascending: false })
-    if (error) throw error
-    rawProducts.value = data || []
+    rawProducts.value = (await $fetch<ProductRow[]>('/api/catalog/products')) || []
     return products.value
   }
 
@@ -194,16 +190,12 @@ export const useCatalog = () => {
   // the new row is in flight — the skeleton is the answer, and clearing is what produces it.
   const fetchProduct = async (id: string) => {
     rawProduct.value = null
-    const { data, error } = await productsQuery().eq('id', id).eq('status', 'published').maybeSingle()
-    if (error) throw error
-    rawProduct.value = data ?? null
+    rawProduct.value = await $fetch<ProductRow | null>('/api/catalog/products', { query: { id } })
     return product.value
   }
 
   const fetchCategories = async (): Promise<CatalogCategory[]> => {
-    const { data, error } = await categoriesQuery().eq('is_active', true).order('sort_order')
-    if (error) throw error
-    rawCategories.value = data || []
+    rawCategories.value = (await $fetch<CategoryRow[]>('/api/catalog/categories')) || []
     return categories.value
   }
 
@@ -213,8 +205,7 @@ export const useCatalog = () => {
    * `fetchCategories`, which is the same table's public view.
    */
   const fetchCategoryDrafts = async (): Promise<CatalogCategoryDraft[]> => {
-    const { data, error } = await categoryDraftsQuery().order('sort_order')
-    if (error) throw error
+    const data = await $fetch<CategoryDraftRow[]>('/api/catalog/category-drafts')
     return (data || []).map(mapCategoryDraft)
   }
 

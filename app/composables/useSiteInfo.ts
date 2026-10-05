@@ -1,9 +1,10 @@
-import type { Database, Json } from '~/types/database'
+import type { Json, SiteSettingsRow } from '~/types/database'
 import type { SiteInfo, SiteInfoDraft, SiteLocationLabel, SiteSocialLink } from '~/types/site-info'
 
-// The select string must stay an inline literal: supabase-js infers the result type by parsing
-// the query text (same rule as PRODUCT_SELECT in useCatalog).
-const SITE_INFO_SELECT = 'id, phone, location_url, location_translations, social_links'
+// The row `/api/site-info` answers with — the same five columns `SITE_INFO_SELECT` used to ask
+// PostgREST for, hand-written now that the query lives on the server (server/api/site-info.get.ts;
+// the two must move together).
+type SiteInfoRow = Pick<SiteSettingsRow, 'id' | 'phone' | 'location_url' | 'location_translations' | 'social_links'>
 
 type JsonObject = { [key: string]: Json | undefined }
 
@@ -38,14 +39,7 @@ const httpUrl = (value: string): string | null => {
  *   round-trip the stored row without silently dropping what it does not render.
  */
 export const useSiteInfo = () => {
-  const supabase = useSupabaseClient<Database>()
   const { pickTranslation } = useCatalog()
-
-  const siteInfoQuery = () => supabase.from('site_settings').select(SITE_INFO_SELECT).maybeSingle()
-
-  // Row type derived from the query itself, exactly like useCatalog's rows: dropping a column
-  // from the select breaks the mappers at compile time instead of handing a view `undefined`.
-  type SiteInfoRow = Exclude<Awaited<ReturnType<typeof siteInfoQuery>>['data'], null>
 
   const parseLocationLabels = (value: SiteInfoRow['location_translations']): SiteLocationLabel[] => {
     if (!Array.isArray(value)) return []
@@ -116,15 +110,13 @@ export const useSiteInfo = () => {
   const siteInfo = computed(() => (rawSiteRow.value ? mapSiteInfo(rawSiteRow.value) : null))
 
   const fetchSiteInfo = async (): Promise<SiteInfo | null> => {
-    const { data, error } = await siteInfoQuery()
-    if (error) throw error
+    const data = await $fetch<SiteInfoRow | null>('/api/site-info')
     rawSiteRow.value = data ?? null
     return siteInfo.value
   }
 
   const fetchSiteInfoDraft = async (): Promise<SiteInfoDraft | null> => {
-    const { data, error } = await siteInfoQuery()
-    if (error) throw error
+    const data = await $fetch<SiteInfoRow | null>('/api/site-info')
     return data ? mapSiteInfoDraft(data) : null
   }
 

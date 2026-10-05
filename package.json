@@ -10,10 +10,13 @@
     "deploy": "NITRO_PRESET=cloudflare_module nuxt build && bunx wrangler deploy",
     "lint": "eslint app",
     "verify": "node scripts/verify-ui.mjs",
+    "test": "bun test tests",
     "typecheck": "nuxt typecheck",
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
+    "@clerk/nuxt": "^3.1.9",
+    "@neondatabase/serverless": "^1.2.0",
     "@nuxt/ui": "^4.11.1",
     "@nuxtjs/color-mode": "^4.0.1",
     "@nuxtjs/i18n": "^10.6.0",
