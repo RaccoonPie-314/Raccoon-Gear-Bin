@@ -26,6 +26,18 @@ additional_redirect_urls = ["http://localhost:3000"]
 
 [auth.email]
 auth_provider = "email"
+# v1 decision, now declared so `supabase config push` carries it to hosted (which defaults it
+# ON): the seller's delivery call is the real verification, and a confirmation email here would
+# only sit behind the project's rate-limited default SMTP where nobody can receive it.
+enable_confirmations = false
+
+[auth.sms]
+# Phone signup, identity v2 (SPEC-identity.md amendment): accounts are phone+password, created
+# pre-confirmed by /api/auth/phone/signup — no SMS is ever sent from this project, so no provider
+# is configured. The flag exists so `supabase config push` can enable the provider on the hosted
+# project, whose dashboard otherwise hides phone auth behind an SMS-provider wizard this shop
+# deliberately does not need.
+enable_signup = true
 
 [analytics]
 enabled = false
