@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { CatalogCategory } from '~/types/catalog'
 import type { CategoryItem } from '~/composables/useCategoryItems'
-import { motion, animate, useReducedMotion } from 'motion-v'
-import { press, iconPop } from '~/utils/motion'
+import { motion, useReducedMotion } from 'motion-v'
+import { press, iconPop, pulseScale } from '~/utils/motion'
 import { hasKhmerText } from '~/utils/locale-script'
 
 const props = withDefaults(
@@ -28,12 +28,11 @@ const { computedItems, isItemActive, activeIndex, nextSelection } = useCategoryI
 const { t } = useI18n()
 const reduced = useReducedMotion()
 
-// One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it, so a
-// stalled spring is only "no pop". The button element carries the icon svg.
+// One-shot spring on the newly-active icon (Phase F). Pure decoration — nothing awaits it.
 const popActiveIcon = () => {
   if (reduced.value) return
   const icon = desktopItemRefs.value[activeIndex.value]?.querySelector('svg')?.parentElement
-  if (icon) animate(icon, { scale: [...iconPop.keyframes] }, iconPop.transition)
+  if (icon) pulseScale(icon, iconPop.keyframes, iconPop.ms)
 }
 
 const handleSelect = (item: CategoryItem) => {

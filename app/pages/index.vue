@@ -14,6 +14,15 @@ const { locale, t } = useI18n()
 // hop that depends on a cookie being present; `localePath` states the route it means.
 const localePath = useLocalePath()
 
+// The control itself (badge included) lives in `CartControl.vue` — the same entry the product
+// detail header mounts. The count comes from the one cart composable.
+const { count: cartCount } = useCart()
+
+// The masthead's two per-account reads — the Orders badge's pending queue (admin) and unseen
+// updates (buyer). Both scoped and both inert when signed out.
+const { fetchUnseenCount } = useCustomerOrders()
+const { fetchPendingCount } = useAdminOrders()
+
 // A locale switch is the same page in another language, so it must not rebuild this component: the
 // key drops the locale prefix (the visitor keeps their scroll, their search text and their loaded
 // catalog) and `scrollToTop` declines for that navigation alone. Both rules are one function in
@@ -67,6 +76,26 @@ const loadSiteInfo = async () => {
 const refreshAdminMode = async () => { isAdminMode.value = await isAdmin() }
 const logout = async () => { isSigningOut.value = true; try { await signOut(); isAdminMode.value = false } finally { isSigningOut.value = false } }
 
+// The Orders pill's badge — one number with two meanings by audience. An admin's is the desk's
+// pending queue (a work list, self-clearing as it is worked); a buyer's is "orders whose latest
+// lifecycle stamp is newer than your last look at the orders area". Both reads are the owning
+// composables'; a failed read is a quiet zero, because a badge is not worth an error banner.
+// Known transient: on an admin's first paint `isAdminMode` may not have resolved yet, so the
+// buyer branch can run once before the pending count replaces it.
+const orderNotices = ref(0)
+const refreshOrderNotices = async () => {
+  try {
+    if (isAdminMode.value) orderNotices.value = await fetchPendingCount()
+    else orderNotices.value = user.value ? await fetchUnseenCount() : 0
+  } catch {
+    orderNotices.value = 0
+  }
+}
+// `immediate`, or a client-side remount never recomputes: on a fresh page load the watcher fires
+// when the async user state lands, but an SPA navigation back to the storefront mounts with the
+// user already set — nothing changes, nothing fires, and a stale badge would sit there forever.
+watch([user, isAdminMode], () => { void refreshOrderNotices() }, { immediate: true })
+
 // The editor UI — both modals, its banner and its writes — lives in the admin feature. The page
 // reaches it through the two names its own template already used, and hands over what the feature
 // must not own: the catalog lists it renders but never fetches, and the reload that refreshes them.
@@ -99,6 +128,35 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
             <div class="flex items-center gap-2 sm:gap-3">
               <ColorModeToggle />
               <LanguageSwitcher />
+              <CartControl :count="cartCount" />
+              <!-- The account entry, for everyone (the admin controls below are mode-gated). A text
+                   pill rather than an icon: "Sign in" has to be findable on sight. -->
+              <NuxtLink
+                :to="localePath(user ? '/account' : '/login')"
+                class="inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
+                :class="locale === 'km' ? '' : 'tracking-wider'"
+              >
+                {{ user ? t('myAccount') : t('signIn') }}
+              </NuxtLink>
+              <!-- Orders, signed in only: there is nothing to list otherwise, and the account
+                   pill above already carries the sign-in path. An admin's points at the desk —
+                   their own account has no purchases to read — everyone else's at their own
+                   history. Same pill shape as the account entry. -->
+              <NuxtLink
+                v-if="user"
+                :to="isAdminMode ? '/admin/orders' : localePath('/account/orders')"
+                class="relative inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
+                :class="locale === 'km' ? '' : 'tracking-wider'"
+              >
+                {{ t('orders') }}
+                <span
+                  v-if="orderNotices > 0"
+                  data-orders-badge
+                  class="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-950 px-1 text-[9px] font-bold tabular-nums text-white dark:bg-white dark:text-zinc-950"
+                >
+                  {{ orderNotices }}
+                </span>
+              </NuxtLink>
               <span
                 v-if="isAdminMode"
                 class="hidden items-center gap-2 rounded-full border border-zinc-200/80 bg-zinc-100/70 px-3 py-1 text-[10px] font-bold uppercase text-zinc-600 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/70 dark:text-zinc-400"
@@ -289,5 +347,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
     <!-- The standing contact entry, desktop-only and teleported by its own component. It reads the
          site info this page already loaded — no second query, no new table. -->
     <ContactDock :site-info="siteInfo" />
+
+    <StoreFooter />
   </main>
 </template>

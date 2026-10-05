@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { CatalogCategory } from '~/types/catalog'
 import type { CategoryItem } from '~/composables/useCategoryItems'
-import { motion, animate, useReducedMotion } from 'motion-v'
-import { press, iconPop, dock } from '~/utils/motion'
+import { motion, useReducedMotion } from 'motion-v'
+import { press, iconPop, dock, pulseScale } from '~/utils/motion'
 import { hasKhmerText } from '~/utils/locale-script'
 
 const props = withDefaults(
@@ -32,7 +32,7 @@ const reduced = useReducedMotion()
 const popActiveIcon = () => {
   if (reduced.value) return
   const icon = mobileItemRefs.value[activeIndex.value]?.querySelector('svg')?.parentElement
-  if (icon) animate(icon, { scale: [...iconPop.keyframes] }, iconPop.transition)
+  if (icon) pulseScale(icon, iconPop.keyframes, iconPop.ms)
 }
 
 const handleSelect = (item: CategoryItem) => {

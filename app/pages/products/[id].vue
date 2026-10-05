@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ResolvableMeta } from '@unhead/vue'
 import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
+import { flyToCart } from '~/utils/fly-to-cart'
 import { hasKhmerText } from '~/utils/locale-script'
+import { getProductStockState } from '~/utils/product-stock'
 
 const route = useRoute()
 const { fetchProduct, fetchProducts, parseSpecificationPairs, product, products } = useCatalog()
@@ -64,6 +66,29 @@ watch(() => route.params.id, () => { void loadProduct() })
 // The specifications value arrives in whatever shape the editor stored, and only the catalog
 // data layer knows how to read it; this page just renders the pairs it is handed.
 const parsedSpecs = computed(() => parseSpecificationPairs(product.value?.specifications))
+
+// The cart entry for this product. It writes the cart and nothing else — no network, no contact
+// logic — and the out-of-stock band comes from the shared stock rule, never from an inline
+// comparison. The notice is one ref + a timer, cleared on unmount.
+const { addLine, count: cartCount } = useCart()
+const addedNotice = ref(false)
+let addedTimer: ReturnType<typeof setTimeout> | null = null
+const isOutOfStock = computed(() => (product.value ? getProductStockState(product.value.stockQuantity) === 'out' : true))
+const handleAddToCart = async (event: MouseEvent) => {
+  if (!product.value || isOutOfStock.value) return
+  addLine(product.value.id, 1)
+  addedNotice.value = true
+  if (addedTimer) clearTimeout(addedTimer)
+  addedTimer = setTimeout(() => { addedNotice.value = false }, 2400)
+  // The badge is `v-if`'d on a non-zero count, so it does not exist at click time — one tick
+  // wait, then measure it. A missing target (or reduced motion) flies nothing; the count and
+  // the notice already confirmed the add. `currentTarget` is only valid during dispatch, so the
+  // button is captured before the await.
+  const from = event.currentTarget as Element | null
+  await nextTick()
+  flyToCart(from, document.querySelector('[data-cart-badge]'))
+}
+onUnmounted(() => { if (addedTimer) clearTimeout(addedTimer) })
 
 // Site info is what tells the product feature which channels the shop actually runs. It is read
 // after mount, not from the product's setup-await path, for the reason the home page already
@@ -141,6 +166,7 @@ useHead(() => {
         <div class="ml-auto flex items-center gap-3 sm:gap-4">
           <ColorModeToggle />
           <LanguageSwitcher />
+          <CartControl :count="cartCount" />
           <NuxtLink
             :to="localePath('/')"
             class="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-zinc-500 hover:text-zinc-950 dark:hover:text-white transition-colors"
@@ -253,6 +279,24 @@ useHead(() => {
                share code exists in this file. `ProductConversion` mounts the inline block here and
                teleports the mobile sticky bar itself, which is why this page needs no knowledge of
                either. -->
+          <!-- The cart entry sits above the conversion cluster, disabled at the out band. -->
+          <div v-if="product" class="mt-10">
+            <UButton
+              color="neutral"
+              class="h-11 w-full justify-center rounded-full px-6 font-semibold text-sm shadow-xs cursor-pointer sm:w-auto"
+              :disabled="isOutOfStock"
+              data-add-to-cart
+              @click="handleAddToCart"
+            >
+              {{ isOutOfStock ? t('outOfStock') : t('addToCart') }}
+            </UButton>
+            <Transition name="reveal">
+              <p v-if="addedNotice" class="mt-3 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                {{ t('addedToCart') }}
+              </p>
+            </Transition>
+          </div>
+
           <div class="mt-10">
             <ProductConversion :product="product" :site-info="siteInfo" />
           </div>

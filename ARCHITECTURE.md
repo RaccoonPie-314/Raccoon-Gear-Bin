@@ -26,14 +26,20 @@ app/
 │   ├── index.vue     catalog home: grid, sidebar, control row, header site info, the editor's host
 │   ├── products/[id].vue   detail page: useCatalog + useSiteInfo, the head, and the product feature
 │   ├── products/index.vue  redirect shim to /  (note: NOT app/pages/index.vue)
+│   ├── cart.vue / checkout/index.vue / checkout/success.vue
+│   │                   the storefront flow — checkout is the folder's index.vue (nesting trap, below)
+│   ├── account/…     buyer pages: profile, orders list, order detail
 │   └── admin/
 │       ├── login.vue
 │       ├── site-info.vue   Site Info admin page (uses useAdminSiteInfoEditor)
-│       └── categories.vue  Categories admin page (uses useAdminCategoryEditor)
+│       ├── categories.vue  Categories admin page (uses useAdminCategoryEditor)
+│       └── orders.vue      the order desk (uses features/admin's AdminOrdersPanel)
 ├── features/         a feature owns its UI *and* the logic only that UI uses
 │   ├── admin/
 │   │   ├── components/AdminProductEditor.vue   the product editor's modals + error banner
-│   │   └── composables/useAdminProductEditor.ts  its form, save, upload, delete (Phase 5)
+│   │   ├── components/AdminOrdersPanel.vue     the order desk: search, filter chips, expandable rows, transitions
+│   │   ├── composables/useAdminProductEditor.ts  its form, save, upload, delete (Phase 5)
+│   │   └── composables/useAdminOrders.ts         the desk's reads + set_order_status writes
 │   └── product/
 │       ├── components/ProductConversion.vue    the conversion boundary: inline CTA + mobile sticky bar, one visible per breakpoint
 │       ├── components/ProductActions.vue       presentational row (contact CTA, channels, share) + its panel
@@ -48,6 +54,10 @@ app/
 │   ├── useSiteInfo.ts           the only site_settings read + jsonb conversion
 │   ├── useAdminSiteInfoEditor.ts admin site-info editor: form, link rows, singleton save
 │   ├── useAdminCategoryEditor.ts admin category editor: row list, two-table save, delete
+│   ├── useCustomerAuth.ts       the client's only `profiles` touch (phase 1)
+│   ├── useCart.ts               cart state + per-scope storage; no rules (phase 2)
+│   ├── useCheckout.ts           the checkout flow: drift re-check, create_order, redirect (phase 3)
+│   ├── useCustomerOrders.ts     buyer order reads (phase 3)
 │   └── useAdminAuth.ts          admin identity
 ├── components/       presentational; never import a data composable
 │   ├── AdminTabs.vue  the left rail both admin editor pages carry, in the category sidebar's shape
@@ -65,16 +75,22 @@ app/
 │   ├── product-pricing.ts getProductPricing — the one owner of whether a promotion applies right now
 │   ├── social-prefill.ts  socialPrefillLink — which platforms document a prefill, and the rest
 │   ├── site-contact.ts    getSiteContactChannels — the one owner of the contactable channel list
+│   ├── cart-totals.ts     cartTotals + the storage codec — the cart's whole arithmetic
+│   ├── fly-to-cart.ts     the add's ghost flight — the SearchDock recipe, sampled WAAPI, motion-safe
+│   ├── order-status.ts    the status machine + the label-key / tone vocabulary every order surface reads
+│   ├── orders.ts          mapOrder + ORDER_WITH_ITEMS_SELECT — the one order row → view conversion
+│   ├── safe-redirect.ts   the one judge of a `?redirect=` value
 │   ├── locale-script.ts   hasKhmerText — does this string *render* Khmer (the guard tracking keys off)
 │   ├── locale-route.ts    pageKeyFor + shouldScrollToTop — when two routes are the same page in another language
 │   ├── text-scramble.ts   textClusters + scrambleFrame + scrambleDuration — one frame of the locale
 │   │                      decode, on grapheme clusters, from a font-probed multi-script pool
+│   ├── geolocation.ts     locateDeliveryAddress — the checkout's one geolocation read, as a pin URL
 │   └── clipboard.ts       copyToClipboard — reports only what the Clipboard API really did
 ├── plugins/
 │   └── locale-decode.client.ts  the page-wide decode: every text node a locale switch just rewrote
 └── assets/css/main.css   theme, the system-UI font stack, and the select-morph keyframes
 scripts/
-├── verify-ui.mjs     CDP regression harness: tuned interactions + the whole admin flow
+├── verify-ui.mjs     CDP regression harness: tuned interactions + the storefront and admin flows
 └── fixtures.json     synthetic Supabase-shaped rows the harness serves instead of the project
 ```
 
@@ -105,6 +121,13 @@ shared component silently stops resolving (the build stays green; the page rende
    and `/object/`) and answers from the rig, so widening or narrowing these URLs is a change the
    harness cannot fail to notice only if its `Fetch` patterns keep up — they are in the same commit
    as the widths.
+   **Port status (plans/005 P4, 2026-10-05):** the reads now arrive over `/api/catalog/**` (Nitro
+   routes → Neon via `server/utils/catalog-queries.ts`). `useCatalog` remains the single client-side
+   owner and its mappers are unchanged — the routes answer in the old PostgREST row shapes on
+   purpose. The Supabase client still in this module builds image URLs only (until the R2 flip, P3),
+   and every write path elsewhere is still Supabase until its phase lands. The hand-written row
+   types at the top of `useCatalog.ts` replace the select-derived ones and must move with
+   `catalog-queries.ts` in the same commit. `useSiteInfo` reads `/api/site-info` under the same rule.
 2. **`useCatalogBrowse` owns browsing state and nothing else** — no network, no DOM, no
    refs to components. Search, sort and category selection are one interaction with three
    inputs (`filteredProducts`), not three features.
@@ -454,6 +477,158 @@ page already draws between its catalog and its masthead. The feature consumes bo
 neither request; `app/utils/product-stock.ts` supplies the band the CTA is worded from and
 `app/utils/product-pricing.ts` the price the message quotes.
 
+## Customer accounts and the legal pages (phase 1)
+
+The `identity` module (specs/ecommerce/SPEC-identity.md) adds the first non-admin accounts:
+
+```
+signup/login → useCustomerAuth().signUp()/signIn() → GoTrue session → waitForUser() → redirect
+/account     → useCustomerAuth().fetchProfile()/updateProfile() — the client's only `profiles` touch
+any route    → middleware/customer-auth.global.ts — session-only, /account + /checkout (locale-stripped)
+```
+
+- **`profiles` has no INSERT policy at all.** A trigger on `auth.users` (`handle_new_user`,
+  security-definer, empty `search_path`) writes the row, and deletion cascades from the auth user;
+  the client only reads and updates its own row. The guard is UX, RLS is the boundary — it performs
+  no DB query (unlike the admin guard, which needs its allowlist; a customer has no list to be on).
+- **The guard matches locale-stripped paths** through `routePathWithoutLocale` — `/km/account` must
+  be guarded exactly like `/account` — and `/admin/*` stays the admin guard's territory.
+- **`waitForUser` is load-bearing, not defensive.** The Nuxt module repopulates `useSupabaseUser`
+  asynchronously after SIGNED_IN (its handler awaits the auth server), so navigating into a guarded
+  route in the same tick as signUp/signIn bounces off a still-empty user. The harness caught it as a
+  real defect — signup landed on `/login?redirect=/account` with a live cookie — and `/login` and
+  `/signup` now await the bounded wait before redirecting.
+- **A bare `/login` lands on the storefront once the profile has a nickname** — and on the profile
+  page until then, because that page is the onboarding that sets one. An explicit same-site
+  `?redirect=` (what the guard writes) still wins, and the fallback is spelled through
+  `safeRedirectPath`'s own empty-string form so the judge stays the only copy of the rules; a
+  failed profile read keeps the old landing, where the miss is visible.
+- **Order notices are badge counts, not a feed** (`app/utils/order-notices.ts`). A buyer's Orders
+  pill counts orders whose *latest lifecycle stamp* (the newest of created / confirmed / delivered
+  / cancelled — server clocks only, never the visitor's) is newer than a browser-local seen marker;
+  fetching the orders list or one order raises that marker (inside `useCustomerOrders`), which is
+  why the orders view itself is the notification's body. An admin's pill counts the desk's
+  **pending queue** instead — a work list that clears by being worked, so it needs no marker.
+  The between-devices path is a real push: every new order is POSTed to the shop's Telegram bot
+  by a **deferred constraint trigger** on `orders` (`20261005120000_order_telegram_push.sql` —
+  deferred to commit because `create_order` inserts the row before its items, and a rolled-back
+  order is never announced; the body is exception-wrapped because at commit an unhandled error
+  would roll back the buyer's order). It is inert until the Vault secrets (`telegram_bot_token` /
+  `telegram_chat_id`) exist, and its format — labeled lines, one product link per item — is
+  fixture-pinned inside the migrations. No email:
+  that needs custom SMTP (see the known gaps), and the marker being per-browser means a second
+  device re-notifies once.
+- **Legal pages are `/privacy` and `/terms`** (EN/KM, sectioned `t()` keys; the warranty/returns
+  section is an explicit owner-input placeholder — the pre-deploy gate in SPEC-compliance).
+  The catalog masthead's utility row (the toggles' row) carries the **account pill**
+  (`Sign in` ⇄ `My account`), the **Orders pill** beside it (**signed in only** — signed out there
+  is nothing to list and the account pill already carries the sign-in path; a buyer's goes to
+  `/account/orders`, an admin's to the desk at `/admin/orders`, because an admin's own account
+  has no purchases worth walking to) and the **cart control**
+  with its client-gated badge; `StoreFooter.vue`
+  keeps the legal links and mounts on the catalog page **only**: bottom content on the detail page
+  changes the scrollable height that the tuned panel-swap checks measure exactly (first harness
+  run: three red checks).
+
+## The cart (phase 2)
+
+```
+detail page → useCart().addLine() — ids + quantities only, no network
+/cart       → useCatalog().fetchProducts() + cartTotals(lines, products) — live prices, clamped rows
+mastheads   → useCart().count, badge gated on `cartMounted` (client state, never painted by SSR) —
+              the catalog header and the product detail header both mount `CartControl`
+```
+
+- **`app/utils/cart-totals.ts` is the cart's whole arithmetic** — pure functions: the totals (via
+  `getProductPricing`, never a second price rule), the availability caps (`unavailable` /
+  `over-stock` / `over-promo-cap`) and the versioned storage codec. `bun test` covers it
+  (`tests/unit/cart-totals.test.ts`); `useCart` is only state + persistence.
+- **The add acknowledges itself twice, and both are decoration.** `CartControl` owns a one-shot
+  `iconPop` on the badge when the count rises (played by the shared `pulseScale` WAAPI driver; every
+  mount gets it for free; skipped under reduced motion like every other pop), and
+  `app/utils/fly-to-cart.ts` replays the SearchDock engine's flight as a computed path: the same
+  `sin(t·π)` bow (80px — 0.6 lateral against the travel, 0.5 lift), the same
+  `1 + apex·0.16 − t·0.10` scale and apex bank, the same 500ms — sampled into one WAAPI animation,
+  so the whole curve rides the compositor (the engine's rAF loop and per-frame floating box-shadow
+  do not travel with it; transform/opacity only). The landing plays the engine's own catch — the
+  shared `arrival` recoil, on the badge — and only a real landing: a cancelled flight just removes
+  the ghost. The cart state changed in the same click; a stalled animation can only mean "no
+  flight", never a strand. The ghost measures only after `nextTick`, because the badge
+  is `v-if`'d on a non-zero count and does not exist at click time.
+- **Storage is per-scope and ids-only**: `raccoon-cart:v1:guest` / `…:<user id>`. A sign-in merges
+  the guest lines once — in the `user` watcher when the transition is observed, and at **bind
+  time** when the session predates the cart's first use (the harness caught that gap: signup left
+  the guest key intact because no `useCart` had run on those pages).
+- **The transition watcher lives in a detached `effectScope(true)`.** Registered as a normal
+  `watch` it belongs to whichever page first called `useCart`; the first client-side navigation
+  unmounts that page and silently kills the watcher, while `bound` (already true) blocks every
+  later call from re-registering — the cart then never follows sign-in/out: items sat in `useState`
+  memory and followed the next account (the owner's "items carried across accounts" report), and
+  the guest key was only ever consumed by a full reload. Every earlier cart check used full page
+  loads (which re-bind), so the harness now walks the live path instead: guest add → client-side
+  sign-in on one document → the guest key must be gone and the account key must hold the line.
+- **The page writes the clamp back** (`setQuantity`) so badge, cart page and checkout agree — and
+  keeps the *reason* in a sticky `adjusted` map, because the write-back itself makes the live
+  `over-*` issue vanish on the next render. The notice clears when the shopper touches the line.
+- The checkout CTA on `/cart` routes to `/checkout` (live since phase 3); the order itself is
+  placed by the RPC described in the orders section below.
+
+## Orders and checkout (phase 3)
+
+```
+detail/cart → /checkout → useCheckout().load()   — fresh products (useCatalog) + profile prefill (auxiliary)
+            → submit() → supabase.rpc('create_order') → clear() → /checkout/success?order=<uuid>
+success     → the RPC's returned id only — the page never fetches; "View order" opens the buyer's page
+/account/orders (+ /:id) → useCustomerOrders().fetchOrders()/fetchOrder() — RLS-scoped reads
+/admin/orders → useAdminOrders() (features/admin) → set_order_status → reload — the desk
+```
+
+- **`create_order` is the only order write path.** A SECURITY DEFINER function (`search_path = ''`,
+  fully qualified refs, execute granted to `authenticated` only) that locks the product rows
+  `order by id for update`, charges `effective_unit_price`, rejects instead of repricing
+  (`INSUFFICIENT_STOCK`/`PROMO_LIMIT` carry the remainder), writes `orders` + `order_items`
+  snapshots and decrements `stock_quantity` / `promo_quantity` in one transaction. The browser holds
+  no insert/update policy on either table — RLS default-deny plus select-only policies is the read
+  model, and two deliberate submits are two orders (there is no idempotency key).
+- **Pricing parity is pinned twice, not trusted once.** `public.effective_unit_price` mirrors
+  `app/utils/product-pricing.ts` rule-for-rule; the same four hand-written fixtures are asserted by
+  `tests/unit/pricing-parity.test.ts` (TS) and by a `do $$` block inside the migration (SQL, run on
+  every `db reset`). A promo window or a unit cap must never be compared inline at a call site.
+- **`orders.total = orders.subtotal` is a v1 CHECK, not a happy accident** — shipping is settled by
+  phone at confirmation and stays out of the total; the constraint name (`orders_total_matches_v1`)
+  is the named relaxation point when a fee line arrives.
+- **Deletion keeps the books.** `anonymize_customer` (admin-gated) nulls the delivery PII and must
+  run *before* the auth user is deleted; after the delete `user_id` is null and the rows are no
+  longer findable by user. The compliance runbook sequences it.
+- **`set_order_status` is the transition authority** (`pending → confirmed|cancelled`,
+  `confirmed → delivered|cancelled`, terminal states end there); `app/utils/order-status.ts` mirrors
+  the table for button visibility and carries the label-key/tone vocabulary the buyer list, buyer
+  detail and the admin desk all render. Cancelling restores stock (and the promo cap when the line
+  was charged at the promo price) — restoring a closed window's cap is correct, the cap is a unit count.
+  **Cancelling also carries a reason.** The desk's confirmation asks for an optional note and the
+  RPC's `p_note` stores it on `orders.cancel_note` (whitespace trims to null; other transitions
+  ignore it) — the buyer's order detail renders it, the desk's expanded row shows it, and
+  `anonymize_customer` clears it with the rest of the PII because free text can hold personal
+  detail. The signature change rode a drop-and-recreate, not `create or replace`: a defaulted third
+  parameter beside the old two-argument function would make every existing call ambiguous.
+- **One row→view mapper, one select string.** `app/utils/orders.ts`'s `mapOrder` serves both readers,
+  and `ORDER_WITH_ITEMS_SELECT` sits beside the row type it must produce: the select's literal type
+  flows into `mapOrder`'s parameter, so dropping a column fails typecheck in both composables
+  (verified with a negative control, not assumed).
+- **RLS decides access; the buyer page asks only for its own.** The orders SELECT policy grants
+  admins every row because the desk needs it — and the shop owner's own account is an admin, so with
+  no filter "My account → Orders" listed the whole shop as if orders were carried across accounts
+  (the owner's second bug report). `useCustomerOrders` now scopes both reads
+  (`.eq('user_id', …)`), and the harness asserts the list request carries `user_id=eq.<id>`.
+- **`checkout/index.vue`, not `checkout.vue`, is load-bearing.** A page file plus a same-named folder
+  nest as parent and child routes; a parent that renders no `<NuxtPage/>` swallows `/checkout/success`
+  — the URL changes while the parent stays on screen after a successful order (the harness caught
+  exactly this on the first guest run). Any future route whose path shares a name with a folder must
+  be that folder's `index.vue`.
+- Buyer cancellation is deliberately absent (COD reality: contact-first); the order detail page's
+  "Contact the shop" rows are built by `getSiteContactChannels` — the same owner the product page
+  and the contact dock use — with a message naming the order reference.
+
 ## Desktop vs mobile: what must stay separate
 
 `CategoryNav.vue` is a thin facade that renders both variants behind breakpoint classes.
@@ -512,7 +687,8 @@ and none of them are visible to the compiler or to `build`.
 | Mobile drag scale / axis-lock thresholds | `1.5 + stretch`; `\|dx\|>6`, `\|dy\|>10` bail. The bar is `touch-pan-y`, so the browser never pans it horizontally — dragging into a horizontal edge (`EDGE_ZONE = 40`, capped `MAX_EDGE_STEP = 34` per `touchmove`) pans it via `scrollLeft`, which is how an off-screen category becomes reachable now that the list is the shop's to grow. This is the drag-select engine's only addition; the indicator maths and axis-lock are unchanged (measured: `after 69 > before 0`). **The pill has exactly one writer at a time: while `isTouchDragging` holds, `updateMobileIndicator` stands down** (the `scroll` listener, `resize`, the `ResizeObserver` and `fonts.ready` all route through it). Edge-panning writes `scrollLeft`, which fires `scroll`, which used to re-measure the *active* item's box — so as soon as a drag reached the end of the list the pill alternated at touch frequency between the finger and the active item: frame-sampled as a **264px retreat in one frame on a transform still scaled 1.6 by the drag** (`e: 4, 4, 4` across the pan frames). That is the reported "icons flicker at the last category", and the guard fixed it to `worstPillDropPx: 0` with the pill advancing with the pan (`e: 302 → 369 → 405` over `sl: 1 → 35 → 69`). `handleTouchEnd` re-aims the pill on release and `watch(activeIndex)` keeps it there, so nothing waits on the skipped frames — **harness-locked as `the dragged pill does not snap back while the bar pans`** (sampled only until the finger lifts: the settle after a release *is* allowed to travel back). The root carries `touch-action: manipulation` (`main.css`), so a double tap anywhere on the storefront is two taps and never a viewport zoom — pinch zoom stays, and every gesture surface above intersects it with its own stronger value | `CategoryMobile.vue` |
 | Select panel morph | in 300ms from `scaleY(0.24)`, out 200ms ease-in | `main.css` |
 | Lightbox zoom | one step, `ZOOM_SCALE = 2.5`, 220ms entry (dropped under reduced motion), **anchored on the point that was clicked**: `transform-origin` is that point and the photo carries no other translation, so the clicked detail stays under the pointer instead of sliding to the centre. Pan is clamped per axis to the picture's own edges under that origin (a picture shorter than the frame after the scale is held centred, not given invented travel), and the zoom resets on photo change and on close. No standalone zoom control — the enlarged photo *is* the control. The dialog itself enters and leaves through a **Motion `<AnimatePresence>` opacity fade** on the fixed container (the `lightbox` preset in `app/utils/motion.ts`; Phase D) — opacity only, never a transform on an ancestor of the `<img>`, or the focal maths would measure a mid-animation rect | `ProductGallery.vue` (mirrored as `expectations.gallery.zoomScale` in the harness) |
-| Gallery presentation motion | Phase D moved only the **presentation layer** to Motion, leaving the **Direct-Manipulation Layer** (zoom, pan, focal maths, swipe) untouched: the lightbox dialog fades on `<AnimatePresence>` (opacity-only, above); the filmstrip advance slides on a single `motion-v animate` `x` (was a lone WAAPI `strip.animate` — same ±one-slot travel, 240ms / 170ms-reduced); the **inline** main photo slides directionally via `<AnimatePresence>` + `<motion.img>` (`absolute inset-0`, x `±100%` → `0`, **no opacity** — see the swipe row: two fully opaque layers exactly one photo box apart read as one surface crossing the frame, where the old `±18% + cross-fade` read as the picture dissolving into the next one; `swapDuration` 220ms / 150ms-reduced is shared with the swipe's parent return so the composite stays monotonic). The `<AnimatePresence>` is `:initial="false"`, so the **first** photo renders at rest and does not slide in — that slide relied on its enter animation to undo `initial={x:'100%'}`, and when no frames were produced (SPA navigation into the page, an interrupted/backgrounded tab) the photo stayed a full width right, clipped by the frame's `overflow-hidden`, until a reload. Selection changes still animate. The **enlarged lightbox `<img>`** (`[data-lightbox-main]` / `[data-zoomed]`) and its CSS `.gallery-*` swap are deliberately **not** Motion — that element's `transform` belongs to the zoom engine alone, so a second writer (or a wrapped ancestor) would jitter the focal tracking. One transform, one owner | `ProductGallery.vue` |
+| Gallery presentation motion | Phase D moved only the **presentation layer** to Motion, leaving the **Direct-Manipulation Layer** (zoom, pan, focal maths, swipe) untouched: the lightbox dialog fades on `<AnimatePresence>` (opacity-only, above); the filmstrip advance slides on a lone WAAPI `strip.animate` (restored 2026-10-05 — Phase D had moved it onto motion-v's imperative `animate()`, a measured no-op on plain elements whose shadow was the flaky "the filmstrip slide actually runs" check; same ±one-slot travel, 240ms / 170ms-reduced, and the swipe's thumb return rides the same WAAPI trip, clearing the finger's inline offset when it lands); the **inline** main photo slides directionally via `<AnimatePresence>` + `<motion.img>` (`absolute inset-0`, x `±100%` → `0`, **no opacity** — see the swipe row: two fully opaque layers exactly one photo box apart read as one surface crossing the frame, where the old `±18% + cross-fade` read as the picture dissolving into the next one; `swapDuration` 220ms / 150ms-reduced is shared with the swipe's parent return so the composite stays monotonic). The `<AnimatePresence>` is `:initial="false"`, so the **first** photo renders at rest and does not slide in — that slide relied on its enter animation to undo `initial={x:'100%'}`, and when no frames were produced (SPA navigation into the page, an interrupted/backgrounded tab) the photo stayed a full width right, clipped by the frame's `overflow-hidden`, until a reload. Selection changes still animate. The **enlarged lightbox `<img>`** (`[data-lightbox-main]` / `[data-zoomed]`) and its CSS `.gallery-*` swap are deliberately **not** Motion — that element's `transform` belongs to the zoom engine alone, so a second writer (or a wrapped ancestor) would jitter the focal tracking. One transform, one owner | `ProductGallery.vue` |
+| Imperative one-shot pulses (`iconPop` / `copyPop`) | **WAAPI via `pulseScale` (`app/utils/motion.ts`) — not motion-v's imperative shorthand keys.** Measured 2026-10-05: `animate()` with the `x`/`y`/`scale` shorthands does not advance at all — no WAAPI animation, no computed transform, keyframes or tween — in dev **and** the built output, while the **literal `transform` key** demonstrably plays (the panel bloom and the phone sheet ride it, harness-framed); SearchDock's field was stranded by the shorthand path in its dev/HMR era, and the harness's filmstrip check flaked on its shadow. The rule: imperative keyframe work uses literal `transform` (or declarative motion components); the shorthands are not to be trusted. `pulseScale` drives the pops on raw WAAPI — off the main thread, no spring-vs-three-keyframes caveat, no fill (the element returns to its own styles). Consumers: both category docks' icons, the cart badge on a count rise, the success-page tick, and both copy buttons. Known remaining instance: `SearchDock.vue`'s `arrival` catch recoil still calls the shorthand path (a silent no-op since Phase E.2) — that file is fenced by TOUCH_RESTRICTIONS and the fix needs its own measurement pass. | `motion.ts` |
 | Inline photo: swipe to cycle | A horizontal touch drag on `[data-gallery-zoom]` follows the finger and, past `44px` **or** a flick (`>10px` travel at `>0.45px/ms`), calls the same `step(±1)` the arrows use — so wrapping, the directional swap and the filmstrip window all come free. Dragging left advances. Rules the lightbox swipe established and both now share: a 4px axis lock, a mostly-vertical drag abandoned to the page (`touch-action: pan-y` is what keeps the page scrollable *and* hands the browser the right to cancel us — `pointercancel` is wired to the same release path), and a mouse press is never a swipe. The lightbox's contained photo accepts the same cycle on the same `SWIPE_CYCLE_*` gates — its two axes: vertical closes, horizontal cycles. **The offset is written to the button, never to the `<motion.img>`: Motion owns that element's transform for the swap, so one transform has one owner.** The return trip is the same `animate(el, { x: [offset, 0] })` the filmstrip advance uses, with an explicit start value so nothing is read back out of a transform another writer holds. The click that trails a real drag is swallowed by `cycleSwiped`, and **every `pointerdown` clears that flag first** — Chrome drops the click after a long drag, so a flag left set would eat the next tap and silently kill click-to-enlarge (it did, on the first version of this). **The release is not a snap-back:** the parent eases from the finger's offset to rest on `swapDuration` — the *same* clock and curve the child swap runs on — so `old(t) = offset·(1−t) − W·t` and `new(t) = (1−t)·(offset + W)` are both monotonic in the swipe direction for any `|offset| < W`, and the two layers stay exactly `W` apart the whole way. Give either clock its own value and the photo visibly reverses. | `ProductGallery.vue` |
 | Lightbox exits | close button sits **bottom-centre under the photo** (thumb reach), not the top corner; a vertical touch drag on the contained photo follows the finger as a `translateY` on the `<img>` itself (never on the dialog — see the fade rule above) and closes on release past `72px` or a flick (`>12px` at `>0.45px/ms`), snapping back below either. Horizontal drags are **not** an exit gesture there — the lightbox spends that axis on the photo swap: a horizontal swipe on the contained photo cycles it (`step(∓1)`, leftwards advances — the same gesture, gates and direction as the inline photo), while the zoom pan owns both axes once magnified | `ProductGallery.vue` |
 | Contact panel enter / leave | **An Apple popover bloom, not a FLIP** (Phase H). Phase C's FLIP scaled the whole panel onto the CTA's footprint (`translate(Δ) scale(ctaW/panelW, ctaH/panelH)`, `transform-origin: top left`), which stretched the textarea and channel pills mid-flight. The panel now **blooms in place on a uniform scale** via Vue `<Transition>` JS hooks + Motion, reading every number from `applePop` (see the Share Sheet row below): `transform-origin` is `top left` (inline — the CTA row's primary button sits at its left, so that is the corner it grows from *and* collapses back into; a popover anchors to its control, only modals keep `center`) or `center bottom` (sticky, rises up out of the bar), and the enter runs `applePop.below/above.from` (`scale(0.93) translateY(-8px)` / `scale(0.94) translateY(10px)`) → `applePop.rest` on `applePop.transition` (spring **220/19/1** — see the Share Sheet row for why that number and not `400/26/0.8`), while the exit **collapses onto its own trigger** on desktop (`collapseTransform(p, ctaEl)` — the panel's scale is measured as `ctaW/panelW × ctaH/panelH`, so it lands on the button; `applePop.collapse` is only the no-rect fallback. See the Contact dock row) or the phone's own CTA, which sits in the bar directly under that panel — the same genie, because the phone exit used to be the preset's own `.to` shrink (4%), which under a 240ms fade read as the panel simply switching off: it popped out but never popped in — all on `applePop.exit` (**240ms**). Opacity rides its own curve (`applePop.opacity.in` **0.2** / `.out` **0.18**), never the spring. `will-change: transform, opacity` is applied in the enter/leave hooks and cleared in `after-enter`, so the layer is promoted for the length of the pop only and never left resident. **`settleForMeasurement` stops the running animation and clears the in-flight transform first** in both hooks, so an interrupted enter→leave retargets from the live value instead of compounding transforms. Opening the desktop panel still **reveals** it (column pinned `static` in the enter hook, smooth-scroll to `12px` under `[data-detail-header]`), but the `scrollTo` is now deferred one `requestAnimationFrame` so the first bloom frame paints before the viewport moves. **Closing returns the way it came: `revealFrom` is captured before the reveal, the close smooth-scrolls back to it while the panel is still in the DOM (its 240ms leave keeps the document tall enough to be scrolled to), and only `@after-leave` unpins.** Unpinning on close — the old order — shrank the column by the panel's height under a scrolled viewport, so the browser clamped `scrollY` and the page jumped up in one frame; that same clamp is what pushed the Share button near the viewport bottom and made its popover flip upward. Two guards on the return: it is skipped when the viewport is more than `RETURN_OWNERSHIP_PX` (160) away from where the reveal left it (the visitor scrolled on their own; yanking them back would be worse than the jump), and the case that used to need a third guard — Share opened out of an open panel — is gone because **on desktop Share no longer closes the panel** (`openSheet` closes it only on the `compact` mount, where the sheet is a modal bottom sheet that covers it anyway). The reveal parks the viewport *inside the panel's own height*, so removing the panel makes the document shorter than the current offset and the browser clamps `scrollY` to the top in one measured frame (`y 358 → 0` with `scrollHeight 1258 → 900`); leaving the panel standing keeps that space, the page does not move, and the popover floats above the surface it came from. That is also why `place()` needs no hint about which side to use: the button it measures has stopped moving. Escape still answers the topmost surface only, so the first press dismisses the popover and the second closes the panel. `onBeforeUnmount` still unpins, for a product swap or a navigation mid-flight. **Harness: `closing the panel returns the page to where it stood` asserts the reveal moved it (>40px) *and* that it landed back within 8px; `a Share opened out of an open contact panel hangs below its button and leaves the page where it was` asserts the popover's resolved `transform-origin` is `0px 0px` (= `top left` = below) *and* that neither `scrollY` nor `documentElement.scrollHeight` moved by more than 4px — the height is what distinguishes "it stayed" from "it went and came back"; and `the first Escape dismisses the popover and leaves the panel standing` locks the two-step dismissal.** Reduced motion keeps the bloom (a short contained move) with eased durations (200ms in / 160ms out). **The sticky-bar (phone) mount blooms too, on the mirrored pair (`applePop.above`, `scale(0.94 → 1)` with `translateY(10px → 0)`, `transform-origin: center bottom`)**: it hangs off the bar's bottom edge, so it grows from that edge the way the inline panel grows from its `top left`, and a phone whose panel only faded no longer read as the same surface as the desktop's. The frost cost that shape used to carry is answered structurally: the bar's `backdrop-blur-xl backdrop-saturate-150` material is a sibling `-z-10` layer (`[data-sticky-frost]`), so the bloom never animates inside a `backdrop-filter` element (the trace that priced the old shape stands as the reason: a scale inside the bar cost 28.9ms of main-thread `Layout`+`Paint`+`PrePaint` over four plays against 19.0–20.7ms for any shape that dropped either half). What the phone's enter gives up instead is the spring itself: Motion compiles a spring to a WAAPI `linear(...)` easing, and the device report lined up exactly — this pop choppy while its own bezier exit was smooth, the spring-driven sheet low fps in both directions — so the phone mount reads `applePop.phone` (`[0.22, 1, 0.36, 1]` over 0.45s, the spring's own profile: 90% of the travel at ~170ms, settled by ~450ms) and only the desktop keeps `applePop.transition`. The mount differences that remain are `transform-origin`, which preset side (`below`/`above`) the bloom reads, and that one bezier. The forced reflow in `settleForMeasurement` is likewise desktop-only: it exists so the reveal-scroll can aim at settled geometry, and the phone mount reads only the caret's placement after the pop — a read that forces its own layout. **Harness: the old "panel lands on the CTA rect / scale<0.75" FLIP assertions were retargeted to `bloomed` (some frame `scaleX<0.98`, settles to identity) — the pop genuinely does not collapse onto the button — and the phone mount carries the matching locks (`blooms out of the bar on the shared preset: uniform scale, travel, its own fade` on enter; `collapses into its CTA on leave, not just a fade` — some frame under 0.8 with the two axes more than 0.2 apart, a mid-fade frame beside it; the bound is the phone's own CTA-to-panel ratio, not the desktop's 0.75; and `the panel enters on a bezier the compositor takes, not a generated spring curve`, which stops a spring from creeping back onto the phone's enter). `bloomed` reads m11 only, so the desktop leave carries its own lock (`collapsedIntoTrigger`: some frame with m11 < 0.75 **and** `|m22 − m11| > 0.05`) — a uniform shrink is correct on enter and the defect on a leave.** | `ProductActions.vue`, `app/utils/motion.ts` |
@@ -745,6 +921,13 @@ top-level `base` is tailwind-variants' legacy key: it merges into the same slot 
 fails the app.config type; moved 2026-10-03, pill styling re-measured green). Verify the pill
 styling still measures correctly if you touch this file.
 
+Buttons also carry the storefront's press idiom from the same slot — `0.97` at `150ms ease-out`,
+`motion-safe:` so reduced motion keeps the colour change and drops the scale (the pair
+`CartControl` and the category docks carry; one owner instead of a per-button copy). The harness
+holds the checkout submit down and reads the `scale` Tailwind v4 writes on `:active` — the
+standalone property, never `transform` — then releases outside the button so the probe cannot
+place an order.
+
 The dark surface scale has exactly two rungs, and they are not interchangeable. `zinc-950`
 (`#09090b` — `main.css`'s `.dark body`, and the field the dark emblem artwork is drawn on) is
 the page *and* any panel meant to disappear into it; Nuxt UI's `--ui-bg` (`zinc-900`) is what
@@ -847,6 +1030,19 @@ surface should match the logo.
   columns, not a campaign table: one active promotion per product is what the shop asked for, and a
   `promotions` table with overlap rules and usage counters is worth designing the day a checkout
   exists to need them.
+- Customer account reads and writes → `useCustomerAuth` (the only client-side owner of `profiles`).
+  A `?redirect=` value is judged in exactly one place, `app/utils/safe-redirect.ts`; never inline a
+  second copy in a page.
+- Anything the cart computes → `app/utils/cart-totals.ts` (the rule) or `useCart` (the state); a
+  cart surface hands `ProductPrice`/`StockStatus` the product row and never re-derives a price, a
+  cap or a band locally.
+- An order read → `useCustomerOrders` (buyer) or `useAdminOrders` (the desk); a row→view shape
+  change → `app/utils/orders.ts` (`mapOrder` + `ORDER_WITH_ITEMS_SELECT`, the one select both
+  readers use); a status label, tone or transition → `app/utils/order-status.ts`. No page compares a
+  promo window, a stock cap or a transition table inline. The admin tool follows the `AdminTabs`
+  rule above — Orders is the third entry, and its panel lives in `app/features/admin/`.
+- The checkout flow (drift re-validation, the RPC call, the redirect) → `useCheckout`; the checkout
+  page stays layout + `data-*` hooks.
 - New env var → both `.env.example` and `runtimeConfig` in `nuxt.config.ts`.
 
 ## Deployment
@@ -886,6 +1082,36 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
 
+- **Customer accounts shipped the first bug reports of the phase because the backend was older
+  than the branch.** Email confirmation is **still ON on the linked project** — the phase-1
+  dashboard toggle has not been made (observed 2026-10-04: API signup answers
+  `over_email_send_rate_limit` once the project's tiny email budget is spent), so fresh sign-ups
+  need a confirmed inbox until then. Password reset and receipt email wait for custom SMTP, and
+  recovery is contact-first. The account pill lives in the **catalog** masthead — the Orders pill
+  beside it, signed in only — plus the footer's sign-in link; the cart control lives there **and**
+  in the product detail header (phase 2 follow-up). What the detail header still does not carry is
+  the account pill or the Orders entry — extending it is unplanned work with its own measurement
+  budget. Order notices are in-app badges only — an email or push notice needs custom SMTP, which
+  the project does not have — and the buyer's seen marker is per-browser, so another device
+  re-notifies once.
+- **The phase-1 + phase-3 migrations are applied to the linked project (pushed 2026-10-04).**
+  Before that push every account/order test against it failed as if the app were broken — the
+  owner's first two bug reports: a profile save that could never succeed (`profiles` did not
+  exist remotely) and buyer reads with nothing to read. The push ran the pricing self-check inside
+  the migration and the backfill gave both pre-existing auth users profile rows; REST-level probes
+  verified the signup trigger, the app-shaped PATCH, and `create_order`'s CART_EMPTY refusal. Still
+  not run: the full RLS checklist from SPEC-orders (cross-user selects, deny-by-default writes) —
+  it needs a local stack or a scripted session pair.
+- **Payments: gate NOT cleared — P0–P2 built ahead and parked, inert.** The owner has no merchant
+  gateway account yet; registration is the blocker (sandbox: `sandbox.payway.com.kh/register-sandbox/`
+  — self-serve, keys by email; production: `paywaysales@ababank.com`). Built ahead so that the day
+  the account exists only the routes remain: P0 re-retrieved the PayWay docs and they had moved —
+  the sandbox host is `checkout-sandbox` (not `checkout-uat`), the request hash is a fixed 24-field
+  order pinned by `tests/unit/payway.test.ts` against an independently computed vector, checkouts
+  are a browser form-submit (no returns-a-URL mode), and the callback signature is a sorted-keys
+  scheme in `X-PAYWAY-HMAC-SHA512`. P1 (payments table + `mark_payment_refunded`) is pushed with
+  anon probes recorded — inert until used; P2 (`server/utils/payway.ts` + tests) is green and
+  imported by nothing. P3–P5 (routes, Pay-now UI, sandbox E2E, secret audit) wait on G2.
 - **Admin identity is checked in four places.** The `admin_users` existence query is written
   again in each of `middleware/admin-auth.global.ts`, `useAdminAuth.isAdmin`,
   `useAdminAuth.isSuperAdmin` and `admin/login.vue` — the last of which is also the only page

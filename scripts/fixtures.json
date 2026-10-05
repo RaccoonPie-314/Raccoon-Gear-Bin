@@ -280,6 +280,50 @@
       "category_translations": [{ "id": "ffffffff-0000-4000-8000-000000000305", "locale": "en", "name": "Earphones" }]
     }
   ],
+  "orders": [
+    {
+      "id": "88888888-3333-4000-8000-000000000003",
+      "status": "cancelled",
+      "delivery_name": "Cancelled Buyer",
+      "delivery_phone": "+855 92 000 111",
+      "delivery_address": "Siem Reap",
+      "delivery_location": "https://maps.google.com/?q=13.36170,103.85980",
+      "delivery_note": null,
+      "subtotal": "45.00",
+      "total": "45.00",
+      "currency": "USD",
+      "payment_status": "unpaid",
+      "confirmed_at": null,
+      "delivered_at": null,
+      "cancelled_at": "2026-10-04T03:00:00.000Z",
+      "cancel_note": "Wrong address on the order.",
+      "created_at": "2026-10-04T03:00:00.000Z",
+      "order_items": [
+        { "id": "88888888-4444-4000-8000-000000000004", "product_id": "aaaaaaaa-0000-4000-8000-000000000002", "name_snapshot": "Verify Mouse", "sku_snapshot": "VERIFY-MS-01", "unit_price": "45.00", "unit_price_original": null, "promo_label_snapshot": null, "quantity": 1, "line_total": "45.00" }
+      ]
+    },
+    {
+      "id": "99999999-1111-4000-8000-000000000001",
+      "status": "pending",
+      "delivery_name": "Verify User",
+      "delivery_phone": "+855 12 345 678",
+      "delivery_address": "Phnom Penh",
+      "delivery_location": "https://maps.google.com/?q=11.55640,104.92820",
+      "delivery_note": null,
+      "subtotal": "123.45",
+      "total": "123.45",
+      "currency": "USD",
+      "payment_status": "unpaid",
+      "confirmed_at": null,
+      "delivered_at": null,
+      "cancelled_at": null,
+      "cancel_note": null,
+      "created_at": "2026-10-04T02:00:00.000Z",
+      "order_items": [
+        { "id": "99999999-2222-4000-8000-000000000002", "product_id": "aaaaaaaa-0000-4000-8000-000000000001", "name_snapshot": "Verify Keyboard", "sku_snapshot": "VERIFY-KB-01", "unit_price": "123.45", "unit_price_original": null, "promo_label_snapshot": null, "quantity": 1, "line_total": "123.45" }
+      ]
+    }
+  ],
   "expectations": {
     "_comment": "What the synthetic data must produce, asserted independently of the fixtures so a bad fixture edit fails loudly instead of silently changing the test.",
     "cards": 6,
@@ -354,6 +398,20 @@
       "locationUrl": "https://maps.google.com/?q=Phnom+Penh",
       "socialOrder": ["facebook", "telegram"],
       "hiddenSocialUrl": "raccoongearbin.hidden"
+    },
+    "orders": {
+      "_comment": "The phase-3 written contract: the delivery the checkout prefills from the seeded profile, the exact sentence a PROMO_LIMIT refusal must render, and — in written order, nothing more — the buttons a pending order may offer. The cancelled fixture order is created NEWER than the pending one, so the admin desk's pending-first ordering is what the row order in the run proves; a desk that just echoed the server's newest-first read would fail it.",
+      "delivery": { "name": "Verify User", "phone": "+855 12 345 678", "address": "Phnom Penh" },
+      "location": { "latitude": 11.5564, "longitude": 104.9282 },
+      "cancelledLocation": "https://maps.google.com/?q=13.36170,103.85980",
+      "locationBlockedText": "Location is blocked for this site — allow it from the icon in your browser's address bar, then press this button again.",
+      "invalidDeliveryText": "Check the delivery details — name, phone, address and location link are required.",
+      "requiredAddressText": "Enter the delivery address.",
+      "promoLimitText": "Only 2 left at the sale price.",
+      "pendingActions": [
+        { "action": "confirmed", "text": "Confirm order" },
+        { "action": "cancelled", "text": "Cancel order" }
+      ]
     }
   }
 }

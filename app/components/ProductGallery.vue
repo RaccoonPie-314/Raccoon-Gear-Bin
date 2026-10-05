@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CatalogImage } from '~/types/catalog'
-import { AnimatePresence, animate, motion, useReducedMotion } from 'motion-v'
+import { AnimatePresence, motion, useReducedMotion } from 'motion-v'
 import { lightbox as lightboxPreset } from '~/utils/motion'
 
 const props = defineProps<{ images: CatalogImage[]; name: string }>()
@@ -82,12 +82,18 @@ watch(windowStart, (to, from) => {
     : (first?.getBoundingClientRect().width ?? 0)
   if (!stepPx) return
   const travel = (to > from ? stepPx : -stepPx) * (reduced.value ? 0.66 : 1)
-  // Motion owns this transform now (Phase D): same ±one-slot travel from the freshly rendered
-  // window back to rest, same duration/ease, so the slide reads identically — but it is one motion
-  // engine across the app instead of a lone WAAPI call.
-  animate(strip, { x: [travel, 0] }, reduced.value
-    ? { duration: 0.17, ease: 'easeOut' }
-    : { duration: 0.24, ease: [0.33, 1, 0.68, 1] })
+  // WAAPI, not motion-v's imperative `animate()`: its shorthand `x`/`scale` keys are a measured
+  // no-op in both dev and the built output (see `pulseScale` in `app/utils/motion.ts`) — the slide
+  // silently stopped running when Phase D moved it onto the shorthand, which is exactly what the
+  // harness's "the filmstrip slide actually runs" check kept flaking on. Same ±one-slot travel from
+  // the freshly rendered window back to rest, same durations/ease as the moved version, and no fill,
+  // so the strip returns to its own (untransformed) styles.
+  strip.animate(
+    [{ transform: `translateX(${travel}px)` }, { transform: 'translateX(0px)' }],
+    reduced.value
+      ? { duration: 170, easing: 'ease-out' }
+      : { duration: 240, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' },
+  )
 }, { flush: 'post' })
 
 // Left/right arrows drive the selection while the gallery (or anything in it) has focus.
@@ -515,7 +521,15 @@ const onCyclePointerUp = (event: PointerEvent) => {
   // reverses, and the gesture reads as one continuous push rather than a release, a reset and a fade.
   // Sharing `swapDuration` is what keeps it true; a different clock here reintroduces the jump.
   if (photoBtn.value) {
-    animate(photoBtn.value, { x: [offset, 0] }, { duration: swapDuration.value, ease: [0.33, 1, 0.68, 1] })
+    const thumb = photoBtn.value
+    // WAAPI for the same measured reason as the strip's slide above. The finger's inline offset
+    // was written by the drag, so it is cleared when the trip lands — with no fill, leaving it
+    // would snap the thumb back under the finger.
+    const trip = thumb.animate(
+      [{ transform: `translateX(${offset}px)` }, { transform: 'translateX(0px)' }],
+      { duration: swapDuration.value * 1000, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' },
+    )
+    void trip.finished.then(() => { thumb.style.transform = '' }).catch(() => { thumb.style.transform = '' })
   }
   // Dragging left advances (next), dragging right goes back — the same direction the swap animation
   // reads, so the photo the finger pushed is the one that arrives.

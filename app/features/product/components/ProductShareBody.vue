@@ -2,8 +2,8 @@
 import type { ProductShareDestination, ProductSharePayload } from '../composables/useProductShare'
 import { platformLabel } from '~/utils/social-prefill'
 import { selectOnFocus } from '~/utils/clipboard'
-import { animate, motion, useReducedMotion } from 'motion-v'
-import { copyPop, press } from '~/utils/motion'
+import { motion, useReducedMotion } from 'motion-v'
+import { copyPop, press, pulseScale } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 /**
@@ -43,7 +43,7 @@ const copyLinkBtn = ref<ComponentPublicInstance | null>(null)
 const copyMsgBtn = ref<ComponentPublicInstance | null>(null)
 const popCopy = (inst: ComponentPublicInstance | null) => {
   const el = inst?.$el as HTMLElement | undefined
-  if (el && !reduced.value) animate(el, { scale: [...copyPop.keyframes] }, copyPop.transition)
+  if (el && !reduced.value) pulseScale(el, copyPop.keyframes, copyPop.ms)
 }
 const onCopyLink = () => { emit('copyLink'); popCopy(copyLinkBtn.value) }
 const onCopyMessage = () => { emit('copyMessage'); popCopy(copyMsgBtn.value) }

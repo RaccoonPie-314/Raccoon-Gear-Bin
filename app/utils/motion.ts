@@ -71,22 +71,29 @@ export const lightbox = {
  * small second bounce to 1.05, then rests — the box visibly absorbing a heavier projectile. Kept
  * short (stiffness 420 / damping 18 / mass 0.7) so the whole punctuation clears in well under half
  * a second. Skipped entirely under prefers-reduced-motion.
+ *
+ * Two destinations catch with it: SearchDock's launcher, and — through the shared `pulseScale`
+ * WAAPI driver, which is why the settle is also spelled as `ms` — the cart badge when the
+ * fly-to-cart ghost is swallowed.
  */
 export const arrival = {
   keyframes: [1, 1.28, 0.92, 1.05, 1],
-  transition: { type: 'spring', stiffness: 420, damping: 18, mass: 0.7 }
+  transition: { type: 'spring', stiffness: 420, damping: 18, mass: 0.7 },
+  /** The catch, as the WAAPI driver's duration — inside the "well under half a second" the spring holds. */
+  ms: 450
 } as const
 
 /**
  * `iconPop` — the one-shot spring a category icon plays the moment its category becomes active
- * (Phase F). A single overshoot to 1.16 then rest at 1.0 — the icon acknowledging the selection,
- * not bouncing. Driven imperatively with `animate()` at the call site; it is pure decoration, so
- * nothing in the lifecycle waits on it and a stalled spring can only mean "no pop", never a strand.
- * Skipped entirely under prefers-reduced-motion.
+ * (Phase F), and what the cart badge plays when the count rises. A single overshoot to 1.16 then
+ * rest at 1.0 — the icon acknowledging the selection, not bouncing. Driven by `pulseScale`; it is
+ * pure decoration, so nothing in the lifecycle waits on it and a stalled pulse can only mean
+ * "no pop", never a strand. Skipped entirely under prefers-reduced-motion.
  */
 export const iconPop = {
   keyframes: [1, 1.16, 1],
-  transition: { type: 'spring', stiffness: 500, damping: 16, mass: 0.7 }
+  /** The spring's measured settle, as the WAAPI driver's duration. */
+  ms: 450
 } as const
 
 /**
@@ -108,8 +115,54 @@ export const dock = {
  */
 export const copyPop = {
   keyframes: [1, 1.05, 1],
-  transition: { type: 'spring', stiffness: 500, damping: 18, mass: 0.6 }
+  ms: 240
 } as const
+
+/**
+ * The one-shots' driver, and the reason it is not motion-v's imperative `animate()`.
+ *
+ * That call does not advance for the **shorthand keys** (`x`, `y`, `scale`) in this repo's
+ * environments: measured 2026-10-05, the badge/category/copy pops and the filmstrip's `x` slide
+ * were total no-ops (no WAAPI animation, no computed transform, keyframes or tween) in dev **and**
+ * the built output, while every consumer of the **literal `transform` key** demonstrably plays —
+ * the panel bloom and the phone sheet ride it, harness-framed — and SearchDock's field was
+ * stranded by the shorthand path in its dev/HMR era. So the rule is: imperative keyframe work
+ * uses the literal `transform` key (or declarative motion components, whose `.$el` also animates);
+ * the shorthands are not to be trusted. Raw WAAPI drives the pops — off the main thread, no
+ * spring-vs-three-keyframes caveat, no `fill`, so the element returns to its own styles when the
+ * pulse ends.
+ */
+export function pulseScale(el: HTMLElement | null | undefined, keyframes: readonly number[], durationMs: number): void {
+  if (!el || keyframes.length < 2) return
+  el.animate(
+    keyframes.map((scale, index) => ({ transform: `scale(${scale})`, offset: index / (keyframes.length - 1) })),
+    { duration: durationMs, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
+  )
+}
+
+/**
+ * `shake` — the checkout's refusal nudge: the first field that failed the required-check is
+ * shaken (its caller also scrolls it into view) so the next action is obvious. Pure decoration,
+ * self-guarding — under reduced motion it does nothing, because the message and the scroll (in
+ * `useCheckout`) already carry the fact. Raw WAAPI on the literal `transform` for the same
+ * measured reason every other imperative pulse does; no `fill`, so the field returns to its own
+ * styles. The element is usually a `UFormField` wrapper, hence `Element`, not `HTMLElement`.
+ */
+export function shake(el: Element | null | undefined): void {
+  if (!el) return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  el.animate(
+    [
+      { transform: 'translateX(0)' },
+      { transform: 'translateX(-6px)' },
+      { transform: 'translateX(5px)' },
+      { transform: 'translateX(-3px)' },
+      { transform: 'translateX(2px)' },
+      { transform: 'translateX(0)' }
+    ],
+    { duration: 400, easing: 'ease-out' }
+  )
+}
 
 /**
  * `applePop` — the iOS / macOS menu bloom (Phase H), and the single owner of what that bloom *is*.

@@ -74,6 +74,14 @@ bun run verify                                                # scripts/verify-u
 bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too
 ```
 
+**Budget by cost, not by order.** Measured 2026-10-03 on the M-series dev machine, warm:
+`lint` 2 s · `typecheck` 4 s · `build` 7 s · `verify` **3 m 37 s**. The three fast gates are
+one command line and change nothing about that, so run them after *every* edit; `verify` is
+95 % of the loop and is the gate you run **once**, immediately before you claim something works.
+Its two `--only` slices are independent and each owns a scratch dir under `.nuxt/verify/<slice>`,
+so they can be run at once — worth ~30 s of the 217 s, because the guest slice is
+86 % of the run and `--only` cannot split it further.
+
 `build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
 compiled, not that it works, and there is no test suite. `bun run typecheck` (vue-tsc) does
 mechanically check template bindings — a mistyped prop or missing variable in a `.vue` template

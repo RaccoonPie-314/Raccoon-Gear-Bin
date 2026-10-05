@@ -133,6 +133,7 @@ bun run build
 bun run lint                                  # eslint app; CI fails only on new errors
 bun run verify                                # all checks against the existing .output
 bun run verify --only=guest                   # or --only=admin (fewer checks than the full run)
+bun run verify --only=guest & bun run verify --only=admin & wait   # both at once: independent, own scratch dir each
 node scripts/verify-ui.mjs --build            # build first, in one step
 node scripts/verify-ui.mjs --keep             # leave Chrome + profile running to debug
 node scripts/verify-ui.mjs --url http://127.0.0.1:PORT/   # point at an already-served build
@@ -140,6 +141,20 @@ CHROME_PATH=/path/to/chrome bun run verify    # if no Chrome binary is found (CI
 ```
 
 Build first; use `--only=guest|admin` while iterating.
+
+### What the loop costs
+
+Measured 2026-10-03, M-series dev machine, warm, against one commit: `lint` **2 s** ·
+`typecheck` **4 s** · `build` **7 s** · `verify` **3 m 37 s**. So the three fast gates are free
+enough to run after every edit and `verify` is the gate you run once before claiming anything.
+
+Within `verify`, only ~52 s is literal `sleep()` and the process sits at 6 % CPU — it is
+wait-bound on sequential CDP round-trips, not computing. That is why the two `--only` slices
+run concurrently (`.nuxt/verify/<slice>` keeps each one's Chrome profile, log and upload probe
+apart, and a shared dir meant whichever slice exited first `rmSync`ed the profile the other was
+still using): **3 m 06 s** total wall against **3 m 37 s** for the full run. Take the ~30 s, but
+do not expect half — the guest slice alone is 86 % of the run and `--only` cannot subdivide it,
+which is the remaining lever if this ever needs more than that.
 
 ### Proving a refactor is behaviour-preserving
 
@@ -158,7 +173,7 @@ unmodified build is a broken check, not a regression** — fix the check before 
 
 ## Traps when extending the harness
 
-All seven have already been paid for once:
+All ten have already been paid for once:
 
 1. **The stub exists only in the browser.** Nuxt's SSR fetches run on the server, un-stubbed, so a
    hard reload into a fake session yields a genuine hydration mismatch and unverifiable reads.
@@ -190,6 +205,40 @@ All seven have already been paid for once:
    Any control that must read the *English* branch of a locale-conditional style has to run before the
    Khmer navigation, not after it. (Unprefixed deep paths are fine — that is why the run returns to
    `/products/…` and gets English back.)
+8. **The printed total is not a number to diff.** `N/M checks passed` moves between runs of one
+   unchanged commit, because the `DIAG …` lines are counted as checks and how many appear depends on
+   which widths and decode branches fired (observed 430 / 433 / 435, with the real `PASS`/`FAIL` name
+   set identical and zero failures each time). When proving a refactor preserved behaviour, diff the
+   check **names** with the `  ::  ` detail stripped, not the totals — and never compare a two-slice
+   `--only` sum against a full run: `no exceptions or console errors …` and the Khmer source scan are
+   per-run tail checks, so running both slices reports them twice.
+9. **A rect read mid-smooth-scroll is stale, and the press lands on whatever drifts under it.**
+   `html { scroll-behavior: smooth }` keeps a `scrollIntoView()` + fixed-sleep + read sequence in
+   flight: paid for twice in opposite runs on 2026-10-04, as a press probe reading `scale: none` and
+   as a footer click that silently no-oped while the catalog grid was still landing (content growing
+   under the aim moves the target too). Aim-only scrolls pass `behavior: 'instant'`, the aim is
+   accepted only once `document.elementFromPoint()` at the point returns the element or a descendant,
+   and the post-state is polled (the 0.97 press scale arrives through a 150 ms transition). Wait for
+   async content that changes page height before aiming below it, and assert each departure in a walk
+   — an unasserted miss cascades into failures under names that blame the wrong step. For a
+   navigation link, prefer a programmatic `el.click()`: aiming a real click at the masthead of a
+   freshly-arrived page starts a smooth scroll under the aim's own feet (observed 2026-10-04 as a
+   link click that never navigated — the walk stayed on the arrival page, `accountHop: false`),
+   while a programmatic click is position-independent and the router still handles it.
+10. **The machine's power state is part of the rig.** macOS auto-enables Low Power Mode under ~20%
+   battery, and the throttled renderer doubles the per-frame distances every glide and settle check
+   measures: on 2026-10-04 the share-collapse check's max step flipped from 78 to 135 — identically,
+   across four runs — until the machine was back on AC, while settle reads caught panels mid-enter
+   and aimed clicks landed early. Before debugging a cluster of frame-step or settle-timing failures,
+   check `pmset -g ps`; those checks are measuring the machine as much as the code, and the frame-step
+   thresholds assume a ~60 Hz cadence.
+11. **Never build while the dev server is running — and never overlap a build with a verify.**
+   `bun run build` and `nuxt dev` both rewrite `.nuxt`, and a build racing a live dev server can
+   hand the harness a torn `.output`: on 2026-10-05 a guest slice run that way failed 29 checks
+   from the signup arm down (`auth:[]` — zero stubbed traffic, the stubbed auth flow never
+   reached the page), while a clean rebuild and rerun was 430/430 twice. The failure reads like a
+   dozen unrelated app regressions. Stop the dev server (or at least the build) first; `verify`
+   itself is safe beside a running dev server as long as no build overlaps it.
 
 ## Measure, don't eyeball
 
@@ -237,7 +286,10 @@ however the utility was written.
   that back on purpose. Khmer stays bundled, so the locale with no system fallback is still the one
   measured identically on every runner.
 - If Chrome fails to start with `Operation not permitted`, the command is running inside a
-  restrictive sandbox — run it from a normal terminal.
+  restrictive sandbox — run it from a normal terminal. This is the harness working as designed, not
+  a broken browser or a broken check: an agent's shell is sandboxed the same way (Mach/crashpad calls
+  denied, writes outside the workspace denied), so the response is to re-run with the sandbox lifted,
+  never to "fix" `chromePath()`, the flags or a check because of it.
 - The harness has **no dependencies** (raw CDP over WebSocket; Node 24 for global `WebSocket`) —
   keep it that way, and do not add a test framework to "fix" the missing CI gate without a plan.
 - Prefer the local dev server and this harness for validation. Use Browser Agent against localhost

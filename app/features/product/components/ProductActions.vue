@@ -5,7 +5,7 @@ import type { ProductStockState } from '~/utils/product-stock'
 import { selectOnFocus } from '~/utils/clipboard'
 import { platformLabel } from '~/utils/social-prefill'
 import { animate, motion, useReducedMotion } from 'motion-v'
-import { applePop, collapseTransform, copyPop, press } from '~/utils/motion'
+import { applePop, collapseTransform, copyPop, press, pulseScale } from '~/utils/motion'
 import type { ComponentPublicInstance } from 'vue'
 
 // Presentational, and it lives behind the product feature boundary because nothing but the product
@@ -68,7 +68,7 @@ const copyMsgBtn = ref<ComponentPublicInstance | null>(null)
 const onPanelCopy = () => {
   emit('copy')
   const el = copyMsgBtn.value?.$el as HTMLElement | undefined
-  if (el && !reduced.value) animate(el, { scale: [...copyPop.keyframes] }, copyPop.transition)
+  if (el && !reduced.value) pulseScale(el, copyPop.keyframes, copyPop.ms)
 }
 
 // Out of stock must not read as "buy now": the same action, worded as the question it actually is.
