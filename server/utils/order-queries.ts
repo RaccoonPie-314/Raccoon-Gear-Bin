@@ -15,7 +15,12 @@ select
     select coalesce(json_agg(json_build_object(
       'id', i.id, 'product_id', i.product_id, 'name_snapshot', i.name_snapshot, 'sku_snapshot', i.sku_snapshot,
       'unit_price', i.unit_price, 'unit_price_original', i.unit_price_original, 'promo_label_snapshot', i.promo_label_snapshot,
-      'quantity', i.quantity, 'line_total', i.line_total
+      'quantity', i.quantity, 'line_total', i.line_total,
+      'storage_path', (
+        select pi.storage_path from public.product_images pi
+        where pi.product_id = i.product_id
+        order by pi.is_primary desc, pi.sort_order limit 1
+      )
     )), '[]'::json)
     from public.order_items i
     where i.order_id = o.id

@@ -18,11 +18,18 @@ export type OrderWithItemsRow = Pick<
   | 'subtotal' | 'total' | 'currency' | 'payment_status'
   | 'confirmed_at' | 'delivered_at' | 'cancelled_at' | 'cancel_note' | 'created_at'
 > & {
-  order_items: Pick<
+  order_items: (Pick<
     OrderItemRow,
     'id' | 'product_id' | 'name_snapshot' | 'sku_snapshot' | 'unit_price' | 'unit_price_original'
     | 'promo_label_snapshot' | 'quantity' | 'line_total'
-  >[]
+  > & {
+    /**
+     * The item's product's first image, joined at read time by ORDERS_WITH_ITEMS (a storage path
+     * or an absolute R2 URL — the same two shapes the catalog's `publicImageUrl` accepts). Null
+     * when the product no longer has a visible image (unpublished/deleted) or never had one.
+     */
+    storage_path: string | null
+  })[]
 }
 
 // The JSON these row types describe is produced by the routes in `server/api/orders/**`
@@ -41,6 +48,7 @@ export const mapOrderItem = (item: OrderWithItemsRow['order_items'][number]): Or
   productId: item.product_id,
   name: item.name_snapshot,
   sku: item.sku_snapshot,
+  imagePath: item.storage_path ?? null,
   unitPrice: num(item.unit_price),
   unitPriceOriginal: numOrNull(item.unit_price_original),
   promoLabel: item.promo_label_snapshot,

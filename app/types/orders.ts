@@ -11,6 +11,8 @@ export type OrderItemView = {
   productId: string | null
   name: string
   sku: string
+  /** The product's first image as read now (storage path or absolute URL), or null when none resolves — the item row renders a placeholder tile then. */
+  imagePath: string | null
   unitPrice: number
   /** The pre-promo price when a promotion was applied, else `null`. */
   unitPriceOriginal: number | null

@@ -59,7 +59,11 @@ export const useCatalog = () => {
   // path is not in our bucket, so there is nothing to transform: it is returned for both widths.
   const publicImageUrl = (storagePath: string, width: number) => {
     if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) return storagePath
-    return supabase.storage.from('product-images').getPublicUrl(storagePath, { transform: { width } }).data.publicUrl
+    // `resize: 'contain'` is load-bearing, not styling: without it the render endpoint's default
+    // cover mode answers `width × originalHeight` (measured 2026-10-06: `?width=128` on a
+    // 1200×1600 photo returned 128×1600) — every portrait image arrived squashed 10×+, which at
+    // thumbnail sizes read as a flat colour slice. Contain gives the proportional resize.
+    return supabase.storage.from('product-images').getPublicUrl(storagePath, { transform: { width, resize: 'contain' } }).data.publicUrl
   }
 
   // Current locale → English → first available. Shared by product and category translations
@@ -217,5 +221,5 @@ export const useCatalog = () => {
     return { products: products.value, categories: categories.value }
   }
 
-  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation, products, categories, product }
+  return { fetchCatalog, fetchProducts, fetchProduct, fetchCategoryDrafts, parseSpecifications, parseSpecificationPairs, pickTranslation, products, categories, product, publicImageUrl }
 }
