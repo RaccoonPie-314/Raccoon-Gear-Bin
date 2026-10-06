@@ -3481,12 +3481,26 @@ const run = async () => {
     const toLoginEmpty = await clickByText('footer a', 'Sign in', 'location.pathname === "/login"')
       || await clickByText('footer a', 'Sign in', 'location.pathname === "/login"')
     await waitFor('!!document.querySelector(\'main form input[type="email"]\')')
-    const emptyBoxes = await ev(boxesExpr('main form input'))
+    // Same settle + per-click re-measure as the first walk above. This block's absence of it was
+    // the four-check debt of plans/006 item 17: measured once mid-enter, the second click hit the
+    // drifting gap, `password` stayed empty, the form's own refusal parked the walk on /login —
+    // and the masthead/badge checks downstream red-cascaded from a refusal, not from a bug. The
+    // typed-values check names that failure here instead of three checks later.
+    let settledEmpty = await ev(boxesExpr('main form input'))
+    for (let tries = 0; tries < 8; tries++) {
+      await sleep(150)
+      const next = await ev(boxesExpr('main form input'))
+      if (JSON.stringify(next) === JSON.stringify(settledEmpty)) break
+      settledEmpty = next
+    }
     const emptyValues = ['shopper@example.test', 'password123']
-    for (let i = 0; i < emptyBoxes.length && i < emptyValues.length; i++) {
-      await clickAt(emptyBoxes[i].x, emptyBoxes[i].y)
+    for (let i = 0; i < emptyValues.length; i++) {
+      const fresh = await ev(boxesExpr('main form input'))
+      if (!fresh[i]) break
+      await clickAt(fresh[i].x, fresh[i].y)
       await cdp.send('Input.insertText', { text: emptyValues[i] })
     }
+    check('the no-nickname sign-in typed both fields before submitting', await ev('JSON.stringify([...document.querySelectorAll("main form input")].map(i => i.value))') === JSON.stringify(emptyValues))
     check('a sign-in with no nickname set lands on the profile page', await clickByText('main form button[type="submit"]', 'Sign in', 'location.pathname === "/account"'), { toLogin: toLoginEmpty, url: await ev('location.pathname') })
 
     // The buyer's notice badge, on the same document walk: quiet while nothing has moved, then a

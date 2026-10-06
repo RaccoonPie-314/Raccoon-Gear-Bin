@@ -225,3 +225,10 @@ the findings below are the same classes they hunt.
     Evidence trail: typed values verified present pre-submit via in-page probes; desk sign-in
     works in the same run; guest+admin standalone behave identically (both 426/430). Next
     diagnostic: probe the walk-2 submit result (localStorage/console), same technique as walk 1.
+
+    **Closed (2026-10-06).** Root cause found by staging the failure: the walk-2 typing block never
+    received walk 1's settle + per-click re-measure — measured once mid-enter, the second click
+    hit the drifting gap (probe: `val: ["shopper@example.test", ""]`), the password never typed,
+    the form's own refusal parked the walk on `/login`, and the three badge checks red-cascaded
+    from it. Fixed with the same settle loop and per-click re-measure as walk 1, plus a check that
+    asserts both fields before submitting (names the failure at its source). Guest slice: 431/431.
