@@ -4,30 +4,25 @@ export default defineNuxtRouteMiddleware(async (to) => {
     return
   }
 
-  const user = useSupabaseUser()
-  // On client-side navigation the supabase plugin re-places this state with the JWT
-  // *claims* (its `page:start` hook), and a GoTrue claims payload names the user `sub`,
-  // not `id`. Reading only `id` bounced every SPA navigation to /admin/site-info - the
-  // first route that ever exercised this guard. Both spellings are the same uuid.
-  const identity = user.value as { id?: string; sub?: string } | null
-  const userId = identity?.id || identity?.sub
-  if (!userId) {
-    return navigateTo('/admin/login', { replace: true })
+  // On the server the session is known from the request's Clerk cookies (@clerk/nuxt's Nitro
+  // middleware runs on every request), so a signed-out hard load is a plain 302 — not a
+  // hydration-phase client redirect (which leaves the new page's locale links with stale hrefs).
+  // The allowlist itself is still verified below: membership is a Neon read, not a cookie.
+  if (import.meta.server) {
+    // One boundary cast: app-side event typings don't carry @clerk/nuxt's callable auth.
+    const context = useRequestEvent()?.context as { auth?: () => { userId: string | null } } | undefined
+    if (!context?.auth?.()?.userId) return navigateTo('/admin/login', { replace: true })
+    return
   }
 
-  const client = useSupabaseClient()
-  const { data, error } = await client
-    .from('admin_users')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle()
-
-  if (error) {
-    console.error('Admin authorization lookup failed:', error)
-    return navigateTo('/admin/login', { replace: true })
-  }
-
-  if (!data) {
+  // Client branch: the allowlist question is answered by the server — `/api/admin-check` reads
+  // the session cookie, so no clerk-js state is consulted at all. The old `user.value` pre-check
+  // raced hydration (still empty right after a handshake) and ejected real admins; the fetch's
+  // fail-closed catch is the only judgement, exactly like the Supabase-era lookup it replaced.
+  const admin = await $fetch<{ admin: boolean }>('/api/admin-check')
+    .then(response => response.admin)
+    .catch(() => false)
+  if (!admin) {
     return navigateTo('/admin/login', { replace: true })
   }
 })

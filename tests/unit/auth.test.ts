@@ -1,15 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import {
   LOGIN_CODE_ALPHABET,
-  SYNTHETIC_EMAIL_DOMAIN,
   constantTimeEqual,
   formatLoginCode,
   generateLoginCode,
   generateNonce,
   hashCode,
   normalizeCodeInput,
-  normalizePhone,
-  syntheticEmail
+  normalizePhone
 } from '../../server/utils/auth'
 
 describe('normalizePhone', () => {
@@ -76,13 +74,6 @@ describe('generateNonce', () => {
       seen.add(nonce)
     }
     expect(seen.size).toBe(64)
-  })
-})
-
-describe('syntheticEmail', () => {
-  test('carries the account shape without the plus sign', () => {
-    expect(syntheticEmail('phone', '+85512345678')).toBe(`p85512345678@${SYNTHETIC_EMAIL_DOMAIN}`)
-    expect(syntheticEmail('telegram', '7759554016')).toBe(`tg7759554016@${SYNTHETIC_EMAIL_DOMAIN}`)
   })
 })
 

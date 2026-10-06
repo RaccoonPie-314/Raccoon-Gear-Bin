@@ -76,19 +76,25 @@ export default defineNuxtConfig({
     ]
   },
   imports: { dirs: ['~/features/admin/composables', '~/features/product/composables'] },
-  // The service-role key appears here ONLY as an empty-string default for the confined auth tier
-  // (`/api/auth/**` + the Telegram webhook); phase 4 payments will reuse the same pattern. No
-  // `process.env` read is allowed in this file — `nuxt build` inlines whatever is read here
-  // straight into the uploaded Worker bundle, and authorisation stays RLS in Postgres with the
-  // browser holding only the anon key. The real values arrive as Worker runtime secrets.
+  // Worker runtime secrets only — every value here has an empty-string default and is read with
+  // the event, so the bindings are never inlined into the client bundle. The Supabase service-role
+  // key is gone: the identity tier runs on Clerk + Neon now (plans/005 P6), and Neon's owner
+  // connection IS the service tier.
   runtimeConfig: {
-    // Declared empty; Nuxt maps the NUXT_* env bindings over them at request time (and
-    // `useRuntimeConfig` must take the event on Workers or the bindings are not read at all).
-    supabaseServiceRoleKey: '',
+    // Telegram: the webhook's secret header (inbound) and the bot token + destination chat for
+    // sends (outbound — the order push and the webhook's courtesy replies).
     telegramWebhookSecret: '',
+    telegramBotToken: '',
+    telegramChatId: '',
     // Neon connection (P2 of plans/005). Env override: NUXT_DATABASE_URL (the migrator script
     // reads plain DATABASE_URL from .env — two names for the same URL, scripts vs runtime).
     databaseUrl: '',
+    // PayWay (SPEC-payments P3): the sandbox keys; production swaps the same names via the
+    // paywaysales credentials. `paywayBase` defaults to production in code — the sandbox value
+    // lives in .env/.dev.vars until launch.
+    paywayMerchantId: '',
+    paywayApiKey: '',
+    paywayBase: '',
     public: {
       supabaseUrl: process.env.NUXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co',
       supabaseKey: process.env.NUXT_PUBLIC_SUPABASE_ANON_KEY || 'demo-anon-key'

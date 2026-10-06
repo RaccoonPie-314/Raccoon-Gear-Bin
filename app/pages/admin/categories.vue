@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { CATEGORY_ICON_ITEMS, categoryIconOf } from '~/composables/useCategoryItems'
 
-const user = useSupabaseUser()
+const { user } = useUser()
 const { isAdmin } = useAdminAuth()
 const { locale, t } = useI18n()
 

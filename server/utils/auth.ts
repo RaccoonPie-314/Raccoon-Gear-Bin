@@ -3,8 +3,9 @@
  *
  * Dependency-free on purpose (the payway convention): no `~` imports, no Nuxt globals, so the
  * unit suite imports it relatively and runs under plain `bun test`. Everything that decides what
- * an account IS — phone shape, code shape, nonce, synthetic emails — lives here; the routes only
- * wire it to the database and the GoTrue admin API.
+ * a code or a nonce IS lives here; the routes only wire it to the database and Clerk. The
+ * synthetic-email helpers died with Supabase — Clerk's sign-in tokens need no email, so phone
+ * and Telegram accounts carry nothing but their alias username and the profile row.
  */
 
 /** Crockford-style base32: no I, L, O, U — the letters a human misreads in a code they retype. */
@@ -18,19 +19,10 @@ export const LOGIN_CODE_TTL_MS = 14 * 24 * 60 * 60 * 1000
 /** The deep-link handshake window: long enough to open Telegram, short enough to not linger. */
 export const TELEGRAM_REQUEST_TTL_MS = 10 * 60 * 1000
 
-/** Failed verifications before a code locks (regenerate clears it). */
-export const MAX_LOGIN_CODE_ATTEMPTS = 8
-
-/**
- * The domain phone/Telegram accounts carry a synthetic address on: the session-mint path
- * (`admin.generateLink`) is email-flavored, but these addresses must never receive mail and must
- * derive no display name — `handle_new_user` special-cases them in the identity v2 migration.
- */
-export const SYNTHETIC_EMAIL_DOMAIN = 'users.raccoongearbin.invalid'
-
 /**
  * Cambodia writes the same mobile number five ways. Strip the separators people type, accept the
- * three leadings (`0…`, `855…`, `+855…`), and return E.164 — the only shape Supabase stores.
+ * three leadings (`0…`, `855…`, `+855…`), and return E.164 — the canonical shape the alias
+ * username and `profiles.phone` are derived from.
  * A second leading zero (`+855012…` / `0012…`) is the classic typo: reject rather than guess.
  */
 export function normalizePhone(raw: string): string | null {
@@ -92,12 +84,6 @@ export function generateNonce(): string {
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replace(/=+$/, '')
-}
-
-/** `p855…@` for phone accounts, `tg<id>@` for Telegram ones — see SYNTHETIC_EMAIL_DOMAIN. */
-export function syntheticEmail(kind: 'phone' | 'telegram', id: string): string {
-  const local = kind === 'phone' ? `p${id.replace('+', '')}` : `tg${id}`
-  return `${local}@${SYNTHETIC_EMAIL_DOMAIN}`
 }
 
 /**

@@ -3,7 +3,6 @@ import type { Database, ProductRow, ProductStatus } from '~/types/database'
 import type { CatalogCategory, CatalogProduct } from '~/types/catalog'
 
 const IMAGE_BUCKET = 'product-images'
-const EDITOR_LOCALE = 'en'
 
 /** What the editor holds while it is open. Fields map one-to-one onto the modal's controls. */
 export type AdminProductForm = {
@@ -86,19 +85,20 @@ const promoColumns = (form: AdminProductForm, wasActive: boolean): Partial<Pick<
 }
 
 /**
- * The admin product editor: the form the modal binds to, the multi-table save, the image
- * upload behind it, and the delete confirmation. It owns no catalog read and no identity —
- * `categories` arrives for the default/option list, and `canMutate` is supplied by the caller
- * because authorisation is row-level security in Postgres: this guard only keeps a UI affordance
- * honest, it is not the security boundary.
+ * The admin product editor: the form the modal binds to, the transactional save behind it, the
+ * image upload in front of it, and the delete confirmation. It owns no catalog read and no
+ * identity — `categories` arrives for the default/option list, and `canMutate` is supplied by the
+ * caller because authorization is the claims-path admin policy behind `/api/admin/products`
+ * (whose gate answers first); the editor's own guard only keeps a UI affordance honest.
  *
  * `onMutated` is how the editor's host refreshes after a write. The editor deliberately does not import
  * the catalog loader, so there is still exactly one place that fetches and maps products.
  *
- * Save and delete are one unit here on purpose: the save writes four things (product row,
- * English translation, storage objects, image rows) and the delete's confirmation reuses the
- * same `isSaving`/`actionError` surface, so splitting the form from the writes would leave two
- * modules that can only be used together.
+ * Save and delete are one unit here on purpose: the save writes four things (product row, English
+ * translation, storage objects, image rows) and the delete's confirmation reuses the same
+ * `isSaving`/`actionError` surface, so splitting the form from the writes would leave two
+ * modules that can only be used together. The storage objects still go to the legacy bucket from
+ * the browser — plans/005 P3 moves them to R2; the row writes are the route's transaction.
  */
 export const useAdminProductEditor = (options: {
   categories: MaybeRefOrGetter<CatalogCategory[]>
@@ -147,20 +147,10 @@ export const useAdminProductEditor = (options: {
       if (!editorForm.value.categoryId) throw new Error(t('requiredCategory'))
       if (editorForm.value.promotionEnabled && !promotionIsValid(editorForm.value)) throw new Error(t('promotionInvalid'))
       const productPayload = { category_id: editorForm.value.categoryId, sku: editorForm.value.sku.trim(), slug: editorForm.value.slug.trim(), price: Number(editorForm.value.price), stock_quantity: Number(editorForm.value.stockQuantity), status: editorForm.value.status, ...promoColumns(editorForm.value, promotionWasActive.value) }
-      let productId = editorForm.value.id
-      if (productId) {
-        const { error } = await supabase.from('products').update(productPayload).eq('id', productId)
-        if (error) throw error
-        const { error: translationError } = await supabase.from('product_translations').update({ name: editorForm.value.name.trim(), short_description: editorForm.value.shortDescription.trim(), description: editorForm.value.description.trim(), specifications: parseSpecifications(editorForm.value.specifications) }).eq('product_id', productId).eq('locale', EDITOR_LOCALE)
-        if (translationError) throw translationError
-      } else {
-        const { data, error } = await supabase.from('products').insert(productPayload).select('id').single()
-        if (error) throw error
-        productId = data.id
-        const { error: translationError } = await supabase.from('product_translations').insert({ product_id: productId, locale: EDITOR_LOCALE, name: editorForm.value.name.trim(), short_description: editorForm.value.shortDescription.trim(), description: editorForm.value.description.trim(), specifications: parseSpecifications(editorForm.value.specifications) })
-        if (translationError) throw translationError
-      }
-      if (!productId) throw new Error('The product could not be identified after saving.')
+      // The editor mints the id for a new product, the same way it already mints storage-path
+      // uuids: it is what lets the route run the row writes as one transaction of independent
+      // statements. Uploads go first — a failed upload must not leave a half-saved product.
+      const productId = editorForm.value.id ?? crypto.randomUUID()
       const imagePaths = editorForm.value.imagePaths.split('\n').map((path) => path.trim()).filter(Boolean)
       for (const file of imageFiles.value) {
         const storagePath = `products/${productId}/${crypto.randomUUID()}-${file.name}`
@@ -168,27 +158,39 @@ export const useAdminProductEditor = (options: {
         if (error) throw error
         imagePaths.push(storagePath)
       }
-      const { error: deleteImagesError } = await supabase.from('product_images').delete().eq('product_id', productId)
-      if (deleteImagesError) throw deleteImagesError
-      if (imagePaths.length) {
-        const { error } = await supabase.from('product_images').insert(imagePaths.map((storagePath, index) => ({ product_id: productId, storage_path: storagePath, sort_order: index, is_primary: index === 0 })))
-        if (error) throw error
-      }
+      await $fetch('/api/admin/products', {
+        method: 'POST',
+        body: {
+          id: productId,
+          product: productPayload,
+          translation: {
+            name: editorForm.value.name.trim(),
+            short_description: editorForm.value.shortDescription.trim(),
+            description: editorForm.value.description.trim(),
+            specifications: parseSpecifications(editorForm.value.specifications)
+          },
+          images: imagePaths
+        }
+      })
       editorOpen.value = false
       imageFiles.value = []
       await onMutated()
-    } catch (error: any) { actionError.value = error?.message || t('productSaveError') } finally { isSaving.value = false }
+    } catch (error: any) {
+      const code = String(error?.data?.message ?? '')
+      if (code === 'PROMOTION_INVALID') actionError.value = t('promotionInvalid')
+      else if (error?.data) actionError.value = t('productSaveError')
+      else actionError.value = error?.message || t('productSaveError')
+    } finally { isSaving.value = false }
   }
 
   const confirmDelete = async () => {
     if (!deleteTarget.value || !canMutate()) return
     isSaving.value = true
     try {
-      const { error } = await supabase.from('products').delete().eq('id', deleteTarget.value.id)
-      if (error) throw error
+      await $fetch(`/api/admin/products/${deleteTarget.value.id}`, { method: 'DELETE' })
       deleteTarget.value = null
       await onMutated()
-    } catch (error: any) { actionError.value = error?.message || t('productDeleteError') } finally { isSaving.value = false }
+    } catch { actionError.value = t('productDeleteError') } finally { isSaving.value = false }
   }
 
   return {

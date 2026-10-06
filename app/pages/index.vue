@@ -4,7 +4,7 @@ import { pageKeyFor, shouldScrollToTop } from '~/utils/locale-route'
 import { hasKhmerText } from '~/utils/locale-script'
 import { disintegrateText } from '~/utils/text-disintegrate'
 
-const user = useSupabaseUser()
+const signedIn = useSignedIn()
 const { signOut, isAdmin } = useAdminAuth()
 const { fetchCatalog, products, categories } = useCatalog()
 const { fetchSiteInfo, siteInfo } = useSiteInfo()
@@ -86,7 +86,7 @@ const orderNotices = ref(0)
 const refreshOrderNotices = async () => {
   try {
     if (isAdminMode.value) orderNotices.value = await fetchPendingCount()
-    else orderNotices.value = user.value ? await fetchUnseenCount() : 0
+    else orderNotices.value = signedIn.value ? await fetchUnseenCount() : 0
   } catch {
     orderNotices.value = 0
   }
@@ -94,7 +94,7 @@ const refreshOrderNotices = async () => {
 // `immediate`, or a client-side remount never recomputes: on a fresh page load the watcher fires
 // when the async user state lands, but an SPA navigation back to the storefront mounts with the
 // user already set — nothing changes, nothing fires, and a stale badge would sit there forever.
-watch([user, isAdminMode], () => { void refreshOrderNotices() }, { immediate: true })
+watch([signedIn, isAdminMode], () => { void refreshOrderNotices() }, { immediate: true })
 
 // The editor UI — both modals, its banner and its writes — lives in the admin feature. The page
 // reaches it through the two names its own template already used, and hands over what the feature
@@ -103,7 +103,7 @@ const adminEditor = ref<{ openAddEditor: () => void, openEditEditor: (product: C
 const openAddEditor = () => { adminEditor.value?.openAddEditor() }
 const openEditEditor = (product: CatalogProduct) => { adminEditor.value?.openEditEditor(product) }
 
-watch(user, () => { void refreshAdminMode() }, { immediate: true })
+watch(signedIn, () => { void refreshAdminMode() }, { immediate: true })
 onMounted(() => { void loadCatalog(); void loadSiteInfo() })
 useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
 </script>
@@ -132,18 +132,18 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
               <!-- The account entry, for everyone (the admin controls below are mode-gated). A text
                    pill rather than an icon: "Sign in" has to be findable on sight. -->
               <NuxtLink
-                :to="localePath(user ? '/account' : '/login')"
+                :to="localePath(signedIn ? '/account' : '/login')"
                 class="inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
                 :class="locale === 'km' ? '' : 'tracking-wider'"
               >
-                {{ user ? t('myAccount') : t('signIn') }}
+                {{ signedIn ? t('myAccount') : t('signIn') }}
               </NuxtLink>
               <!-- Orders, signed in only: there is nothing to list otherwise, and the account
                    pill above already carries the sign-in path. An admin's points at the desk —
                    their own account has no purchases to read — everyone else's at their own
                    history. Same pill shape as the account entry. -->
               <NuxtLink
-                v-if="user"
+                v-if="signedIn"
                 :to="isAdminMode ? '/admin/orders' : localePath('/account/orders')"
                 class="relative inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
                 :class="locale === 'km' ? '' : 'tracking-wider'"

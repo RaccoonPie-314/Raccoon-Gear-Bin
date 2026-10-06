@@ -128,6 +128,49 @@ shared component silently stops resolving (the build stays green; the page rende
    and every write path elsewhere is still Supabase until its phase lands. The hand-written row
    types at the top of `useCatalog.ts` replace the select-derived ones and must move with
    `catalog-queries.ts` in the same commit. `useSiteInfo` reads `/api/site-info` under the same rule.
+   **P5 extended the same shape to orders:** `/api/orders*` (server/utils/order-queries.ts) — the
+   buyer trio (`/mine`, `/stamps`, `/:id`) re-filters to the caller explicitly, the desk's bare list
+   is policy-scoped, and the two writes run the RPCs inside `userTx` so `app.current_user_id()`
+   resolves; the desk's fourth read is `/pending`.
+   **P6 (server half, 2026-10-05): identity runs on Clerk + Neon** — `/api/auth/**` (phone alias
+   signup, Telegram handshake, login codes; `server/utils/clerk.ts` owns the alias mapping and the
+   one mint, `createSignInTicket` — the raw sign-in ticket the browser completes in-page via
+   `signIn.create({ strategy: 'ticket' })`, with the `createSignInToken` hosted URL as fallback.
+   2026-10-06: the hosted page's dev-browser hop burned tickets without creating sessions in some
+   browsers; the in-page path is a password sign-in's own mechanism and lands the session here),
+   `/api/telegram/webhook`, `/api/profile` (upsert;
+   migration 0002 added the insert-own policy), `/api/admin-check`. The order push is Worker-side
+   now (`server/utils/telegram.ts`, fixture-parity test).
+   **P6 (client half, 2026-10-05): the browser authenticates via Clerk** — `useCustomerAuth`/
+   `useAdminAuth` wrap @clerk/vue's `useUser`/`useSignIn`/`useClerk`; session-scoped data (cart,
+   orders) keys off the Clerk user id; the Supabase auth client is gone from `app/` — the only
+   remaining `useSupabaseClient` calls are storage (the public URL builder in `useCatalog` and
+   the product editor's image upload), both waiting on the R2 flip (P3).
+   **P7 (2026-10-05): the admin editors write through `/api/admin/**`** — `requireAdmin` answers
+   401/403 first, each save is one `userTx` transaction (claims path), and the RLS policies stay
+   the boundary; migration 0003 added the table grants those policies needed. Two facts worth
+   keeping: the editor mints the uuid for a new row (it is what keeps the transaction's
+   statements independent), and a RESTRICT FK refusal arrives as SQLSTATE **23001**, not 23503 —
+   the delete route translates it to a 409 the way PostgREST used to.
+   **P8 (2026-10-05): the verify harness runs on the new stack** — the browser stub answers the
+   port-era `/api/**` set (catalog, site-info, orders, admin, profile, admin-check) instead of the
+   Supabase trio, and a **scripted clerk-js** (served over CDP Fetch beside the photo generator;
+   its session is one same-origin cookie) makes signed-in flows deterministic with no network.
+   Both slices green at 522/522. The harness's admin-ness is a sessionStorage seed the admin
+   section sets before its login — session-scoped on purpose, so the guest walk's shopper
+   resolves non-admin inside one combined run.
+   **Guard shape is deliberate:** both global guards make the signed-out bounce a server-side 302
+   (`event.context.auth()` from the module's Nitro middleware — the request's Clerk cookies are the
+   only truth the server has). The customer guard's client branch judges by `useSignedIn`
+   (`app/composables/useSignedIn.ts`): the server's answer seeded at load, with clerk-js's live
+   user overlaid once it knows one — so hydration needs no special case, no clerk-js wait is
+   required, and a browser whose client never adopts the session (dev-instance cookies; seen live
+   2026-10-06 as "logged in, then kicked out", then a masthead that read signed-out while the
+   server honoured the session) still shows the truth the server will honour on the next request.
+   Sign-out paths call `markSignedOut` beside `clerk.signOut()` so the seed cannot outlive a real
+   sign-out. The admin guard's client branch asks only `/api/admin-check` (a server-read cookie).
+   Do not move the decision back into clerk-js state, and do not render auth state during
+   hydration without `<ClientOnly>` — the account identifier documents the shipped failure mode.
 2. **`useCatalogBrowse` owns browsing state and nothing else** — no network, no DOM, no
    refs to components. Search, sort and category selection are one interaction with three
    inputs (`filteredProducts`), not three features.
@@ -433,19 +476,13 @@ hides the constraint violation inside the library's `.d.ts`.
    matches every table name and types the relation as `never`. Symptom: `from('no_such_table')`
    compiles cleanly and every `data` is `null`.
 
-Row types handed to the mappers are **derived from the queries themselves**:
-
-```ts
-type ProductRow = Exclude<Awaited<ReturnType<typeof productsQuery>>['data'], null>[number]
-```
-
-Select strings must therefore stay inline literals — building one with `.join()` or a
-template degrades every row to `any`. With the derivation above, dropping a column from a
-select breaks the mapper at compile time instead of handing the view an `undefined`.
-
-`Relationships` in `database.ts` mirrors the real foreign keys from the migration. It is
-what makes embedded selects (`product_translations(…)`) type-resolve; empty relationships
-collapse an embed to `never`.
+The port routes changed the catalog's shape (P4): the rows arrive from `/api/catalog/**` as
+**hand-written types beside the mappers** in `useCatalog.ts`, and those types must move with
+`server/utils/catalog-queries.ts` in the same commit — there is no select string left to derive
+from. The two rules below now bind the legacy storage client and `app/types/database.ts` alone,
+until the R2 flip (P3) retires them: select strings stay inline literals (runtime-built strings
+degrade rows to `any`), and `Relationships` mirrors the migration's foreign keys — it is what makes
+embedded selects (`product_translations(…)`) type-resolve.
 
 ## Data flow (home page)
 
@@ -487,17 +524,21 @@ signup/login → useCustomerAuth().signUp()/signIn() → GoTrue session → wait
 any route    → middleware/customer-auth.global.ts — session-only, /account + /checkout (locale-stripped)
 ```
 
-- **`profiles` has no INSERT policy at all.** A trigger on `auth.users` (`handle_new_user`,
-  security-definer, empty `search_path`) writes the row, and deletion cascades from the auth user;
-  the client only reads and updates its own row. The guard is UX, RLS is the boundary — it performs
+- **`profiles` is app-written on the claims path.** Migration 0002 added the insert-own policy, so
+  `/api/profile`'s upsert can create the caller's row (email accounts get theirs on first save;
+  the phone/Telegram routes upsert at signup). The guard is UX, RLS is the boundary — it performs
   no DB query (unlike the admin guard, which needs its allowlist; a customer has no list to be on).
+- **Admin-ness is one row in `admin_users` keyed by the Clerk user id, and there is no admin UI
+  for it — `scripts/admin-grant.mjs` is the writer path** (`--list` shows current admins; any
+  account becomes admin by being created like any user first, then granted its username). The
+  browser can never self-grant; a future invite flow would own this instead.
 - **The guard matches locale-stripped paths** through `routePathWithoutLocale` — `/km/account` must
   be guarded exactly like `/account` — and `/admin/*` stays the admin guard's territory.
-- **`waitForUser` is load-bearing, not defensive.** The Nuxt module repopulates `useSupabaseUser`
-  asynchronously after SIGNED_IN (its handler awaits the auth server), so navigating into a guarded
-  route in the same tick as signUp/signIn bounces off a still-empty user. The harness caught it as a
-  real defect — signup landed on `/login?redirect=/account` with a live cookie — and `/login` and
-  `/signup` now await the bounded wait before redirecting.
+- **`waitForUser` is load-bearing, not defensive.** clerk-js resolves the session asynchronously
+  after `setActive`, so navigating into a guarded route in the same tick as signUp/signIn bounces
+  off a still-empty user — the harness caught it as a real defect when signup landed on
+  `/login?redirect=/account` with a live session, and `/login`/`/signup` await the bounded wait
+  before redirecting. The route guards carry the same idea in `waitForClerkLoaded`.
 - **A bare `/login` lands on the storefront once the profile has a nickname** — and on the profile
   page until then, because that page is the onboarding that sets one. An explicit same-site
   `?redirect=` (what the guard writes) still wins, and the fallback is spelled through
@@ -577,14 +618,15 @@ mastheads   → useCart().count, badge gated on `cartMounted` (client state, nev
 
 ```
 detail/cart → /checkout → useCheckout().load()   — fresh products (useCatalog) + profile prefill (auxiliary)
-            → submit() → supabase.rpc('create_order') → clear() → /checkout/success?order=<uuid>
+            → submit() → POST /api/orders (create_order via userTx) → clear() → /checkout/success?order=<uuid>
 success     → the RPC's returned id only — the page never fetches; "View order" opens the buyer's page
-/account/orders (+ /:id) → useCustomerOrders().fetchOrders()/fetchOrder() — RLS-scoped reads
-/admin/orders → useAdminOrders() (features/admin) → set_order_status → reload — the desk
+/account/orders (+ /:id) → useCustomerOrders() — the self-scoped trio (/api/orders/mine, /stamps, /:id)
+/admin/orders → useAdminOrders() (features/admin) → POST /api/orders/:id/status → reload — the desk
 ```
 
 - **`create_order` is the only order write path.** A SECURITY DEFINER function (`search_path = ''`,
-  fully qualified refs, execute granted to `authenticated` only) that locks the product rows
+  fully qualified refs, execute granted to `app_authenticated` only) reached through
+  `POST /api/orders`'s `userTx`; it locks the product rows
   `order by id for update`, charges `effective_unit_price`, rejects instead of repricing
   (`INSUFFICIENT_STOCK`/`PROMO_LIMIT` carry the remainder), writes `orders` + `order_items`
   snapshots and decrements `stock_quantity` / `promo_quantity` in one transaction. The browser holds
@@ -863,17 +905,18 @@ least half the 24-unit viewBox. Element existence proves nothing.
 `bun run build` never starts the app, so the tuned numbers above and the admin write path have no
 automated protection. `bun run verify` closes that gap: it serves `.output`, drives headless Chrome
 over raw CDP, and asserts geometry, animation state and the exact `(method, path, query, body)`
-tuple of every Supabase call — including the scroll-collapse morph (the field's in-place width at
-three scroll positions, the launcher's fixed-box flight in both directions, a mid-flight reversal,
-and never more than one interactive search control), the masthead's two levels at five widths
-(emblem height, contact line above the brand row, phone and location on their own margins, socials
-stacked under the utility line, no collision, icon-only socials), login, add, image upload,
-save/update, cancel, delete and logout, the site-info editor (seed, field edits, link
+tuple of every stubbed browser call — including the scroll-collapse morph (the field's in-place
+width at three scroll positions, the launcher's fixed-box flight in both directions, a mid-flight
+reversal, and never more than one interactive search control), the masthead's two levels at five
+widths (emblem height, contact line above the brand row, phone and location on their own margins,
+socials stacked under the utility line, no collision, icon-only socials), login, add, image
+upload, save/update, cancel, delete and logout, the site-info editor (seed, field edits, link
 add/toggle/reorder/remove, the singleton upsert body and the public header reflecting it), which
-it reaches by answering `/rest/v1`, `/auth/v1` and `/storage/v1` from `scripts/fixtures.json`
-inside the browser. **No real project is contacted and nothing can be written.** Fixtures are
-synthetic and shaped exactly like the `PRODUCT_SELECT` / `CATEGORY_SELECT` embeds and the
-`SITE_INFO_SELECT` row, so the harness also fails loudly if a select string changes shape.
+it reaches by answering `/api/**` (catalog, site-info, orders, admin, profile, admin-check), the
+legacy storage upload and a **scripted clerk-js** — its session one same-origin cookie — from
+`scripts/fixtures.json` inside the browser. **No real project is contacted and nothing can be
+written.** Fixtures are synthetic and shaped like the `/api` row shapes, so the harness also fails
+loudly when a shape drifts.
 Promotions are checked in both directions: a row mutated through the stub's own product list paints
 the discounted price with the original crossed out on the card, the detail page and the prepared
 message, a closed window or a spent unit cap paints the original alone, and the admin path is proven
@@ -1060,15 +1103,19 @@ accidents if you don't know they are deliberate:
   all (`Multiple conflicting contents for sourcemap source i18n.config.ts`), and nothing here reads
   production server traces, so no preset gets them.
 
-No Cloudflare secrets are configured: the anon key and project URL are inlined from `.env` at build
-into `runtimeConfig.public`, and every write stays authorised by RLS. Measured against the free-plan
-ceilings: 2.6 MB bundle (64 MiB), 55 assets (20,000), 34 ms startup (1 s), SSR responses ~0.6 s
-wall. The ceiling to watch is **10 ms CPU per request** — this is SSR, so a page that starts doing
-real work per request can hit error 1102 on the free plan and not on paid. Nothing server-side holds
-a key that bypasses RLS: `server/utils/supabase.ts` is deleted, `runtimeConfig` has no service-role
-entry, and `supabase.secretKey` is pinned to `''` because @nuxtjs/supabase's own default reads
-`process.env.SUPABASE_SERVICE_ROLE_KEY` and server runtime config is inlined into the uploaded bundle.
-Prove it after any dependency bump: `grep -cF "<tail of the key>" .output/server -r` must be 0.
+The Supabase project URL + anon key are still inlined from `.env` at build into
+`runtimeConfig.public` for the legacy storage client, and the old bucket's policies remain its
+authority — which the Clerk session cannot satisfy, so the product editor's upload arm is a known
+P3 gap (the row writes still complete; uploads-first ordering means nothing partial). The Neon
+pivot adds server-side secrets the Worker carries at deploy (P9): `DATABASE_URL`,
+`NUXT_CLERK_SECRET_KEY`, the Telegram token/chat id. The owner connection *does* bypass RLS by
+design — `appSql` is confined to system bookkeeping (login codes, handshakes, rate limits, admin
+gate reads) — while everything a user's data touches runs as `userTx` (claims + `set local role`),
+which is the actual security model. The service-role key itself stays absent: no SERVICE_ROLE in
+`runtimeConfig`, and `supabase.secretKey` is pinned to `''` because @nuxtjs/supabase's own default
+reads `process.env.SUPABASE_SERVICE_ROLE_KEY` and server runtime config is inlined into the
+uploaded bundle. Prove it after any dependency bump:
+`grep -cF "<tail of the key>" .output/server -r` must be 0.
 
 **What is cached, and what is not.** Only `/_nuxt/*` is: nitro writes `_headers` with
 `max-age=31536000, immutable` for the content-hashed chunks, and Cloudflare serves them from the
@@ -1076,32 +1123,24 @@ closest cache. Everything else in `public/` keeps a fixed name, so the asset pip
 `max-age=0, must-revalidate` — a returning visitor revalidates it every visit. That is the reason a
 fixed-name file has to be small: `rgb-logo-*.png` are resampled to 512px (the 1254px masters stay in
 `Logo/`), which is 2.5x the tallest place the emblem is ever drawn. Neither the SSR HTML nor the
-Supabase responses are edge-cached, and that is deliberate — the HTML is locale-dependent and the
+`/api` responses are edge-cached, and that is deliberate — the HTML is locale-dependent and the
 catalog carries stock and promo windows the shop edits. Cache the catalog in memory for a session,
 not at the edge, and revisit HTML caching only if a measured TTFB complaint arrives.
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
 
-- **Customer accounts shipped the first bug reports of the phase because the backend was older
-  than the branch.** Email confirmation is **still ON on the linked project** — the phase-1
-  dashboard toggle has not been made (observed 2026-10-04: API signup answers
-  `over_email_send_rate_limit` once the project's tiny email budget is spent), so fresh sign-ups
-  need a confirmed inbox until then. Password reset and receipt email wait for custom SMTP, and
-  recovery is contact-first. The account pill lives in the **catalog** masthead — the Orders pill
-  beside it, signed in only — plus the footer's sign-in link; the cart control lives there **and**
-  in the product detail header (phase 2 follow-up). What the detail header still does not carry is
-  the account pill or the Orders entry — extending it is unplanned work with its own measurement
-  budget. Order notices are in-app badges only — an email or push notice needs custom SMTP, which
-  the project does not have — and the buyer's seen marker is per-browser, so another device
-  re-notifies once.
-- **The phase-1 + phase-3 migrations are applied to the linked project (pushed 2026-10-04).**
-  Before that push every account/order test against it failed as if the app were broken — the
-  owner's first two bug reports: a profile save that could never succeed (`profiles` did not
-  exist remotely) and buyer reads with nothing to read. The push ran the pricing self-check inside
-  the migration and the backfill gave both pre-existing auth users profile rows; REST-level probes
-  verified the signup trigger, the app-shaped PATCH, and `create_order`'s CART_EMPTY refusal. Still
-  not run: the full RLS checklist from SPEC-orders (cross-user selects, deny-by-default writes) —
-  it needs a local stack or a scripted session pair.
+- **The customer surface is Clerk-keyed now (P6).** Phone accounts are alias usernames (`p<e164>`)
+  with the real number in `profiles.phone`; email accounts are real Clerk emails; signup, login
+  modes, guards and sign-out are browser-verified. Absent on purpose: any outbound email
+  (password reset, receipts) — Resend is deferred until an account exists, and recovery stays
+  contact-first. The account pill lives in the **catalog** masthead — the Orders pill beside it,
+  signed in only — plus the footer's sign-in link; the cart control lives there **and** in the
+  product detail header, which still does not carry the account pill. Order notices are in-app
+  badges only and the buyer's seen marker is per-browser, so another device re-notifies once.
+- **The Supabase project is frozen; Neon is the live database.** Customer-surface facts live in
+  the P2–P7 port notes above — reads, writes, identity and the admin editors all run on Neon
+  through `/api/**`. The Supabase project stays untouched as a cold backup until P9 retires it
+  (git history keeps `supabase/`).
 - **Payments: gate NOT cleared — P0–P2 built ahead and parked, inert.** The owner has no merchant
   gateway account yet; registration is the blocker (sandbox: `sandbox.payway.com.kh/register-sandbox/`
   — self-serve, keys by email; production: `paywaysales@ababank.com`). Built ahead so that the day
@@ -1112,17 +1151,11 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   scheme in `X-PAYWAY-HMAC-SHA512`. P1 (payments table + `mark_payment_refunded`) is pushed with
   anon probes recorded — inert until used; P2 (`server/utils/payway.ts` + tests) is green and
   imported by nothing. P3–P5 (routes, Pay-now UI, sandbox E2E, secret audit) wait on G2.
-- **Admin identity is checked in four places.** The `admin_users` existence query is written
-  again in each of `middleware/admin-auth.global.ts`, `useAdminAuth.isAdmin`,
-  `useAdminAuth.isSuperAdmin` and `admin/login.vue` — the last of which is also the only page
-  still holding its own Supabase client. Phase 5 deliberately left this alone: the four copies
-  differ in what they select and how they fail (redirect vs. boolean vs. sign-out), so unifying
-  them is an auth-model change, not a move. One trap was fixed during the site-info phase: the
-  module re-writes `useSupabaseUser()` from the JWT **claims** on every client-side
-  `page:start`, and claims name the user `sub`, not `id` — `/admin/site-info` is the first
-  route to actually exercise the middleware on SPA navigation, which is how the
-  `id || sub` read in it was found. A hard reload (SSR) still populates the state from the
-  server user, where `id` is present.
+- **Admin identity has one gate and one client question.** Server routes call `requireAdmin`
+  (401/403, P7); the client asks `/api/admin-check` from the guard and the admin login page's
+  `isAdmin()` — the same endpoint in both. The verify harness models membership with a
+  sessionStorage seed plus the scripted session, and the stub's answer requires **both** — a
+  signed-out admin mode re-lit after logout until it did ("logout clears admin mode" caught it).
 - **The editor's two entry points are a hand-checked contract.** `index.vue` types its `adminEditor`
   ref with the pair of functions it expects; `tsc` cannot read `.vue`, so nothing in CI proves the
   component still `defineExpose`s names that match. The IDE language server does, and the harness
@@ -1149,15 +1182,12 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   runner's wall clock (Verify UI was 365 s of a 423 s run before this change), and the ~80 remaining
   literal `sleep()` sites — `park` 450 ms, `clickAt` 90 ms, that settle — which guard *measured*
   traps and should be profiled before any one of them is cut.
-- **A missing `.env` is what made a detail-page run look cold.** With no `.env`, `nuxt.config.ts`
-  falls back to `example.supabase.co`; the product-detail page's SSR request then blocks on an
-  unreachable host and the navigation never commits, so `Page.navigate` answers with nothing to
-  observe. Reproduced 2026-09-29 in a clean worktree at the same commit twice over — the old harness
-  died with `Page.navigate timed out`, an unbounded readiness wait died with `never fired within
-  20000ms`, both at check #61 — while every run in a tree that has `.env` passed. CI has no secrets,
-  variables or environments, so the runner builds on that fallback too; it gets through today,
-  which is why the caps above are the shape to keep. **Run `bun run verify` from a tree that has
-  `.env`**, and treat a red detail-page run there as suspect before believing it.
+- **`verify` runs with or without `.env` (both proven 2026-10-05).** The old stack's signature —
+  the detail page's SSR blocking on the `example.supabase.co` fallback — died with the port: a
+  missing `DATABASE_URL` no longer blocks a navigation (measured: the full suite green, 522/522,
+  with `.env` renamed away), and CI carries no secrets and runs the same command. The bounded
+  waits in `nav()` are still the shape to keep — they are what made the old cold run diagnosable —
+  but a red run is no longer the expected no-`.env` signature.
 - **A product with no category, and the admin sweep's one blind spot.** The Khmer editors are reached
   by clicking `LanguageSwitcher`'s own pills (both directions), so the `switchLocalePath` half of
   Boundary rule 4 is now measured rather than held by reading `@nuxtjs/i18n`'s source, and the
@@ -1183,20 +1213,22 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   `phone.replace(/[^\d+]/g, '')`. It was left duplicated on purpose: the masthead's contact line is
   under the harness's inset-and-href invariants and a conversion pass has no business editing it.
   One owner under `app/utils/` is the change a site-info pass should make.
-- **No `server/` tier at all.** There is no Nitro route, no server util and no server-side Supabase
-  client: `eslint` runs over `app` only, and re-adding `server` to that script is the change that
-  says a server tier exists again. All data access is the browser's anon client governed by RLS —
-  which is the actual security model here. The one exception is SSR itself: `[id].vue` awaits
-  `fetchProduct` on the server so a shared link carries `og:title` / `og:image` (measured on the
-  live HTML), which is why the detail page costs ~0.8 s TTFB and why the catalog read must not be
-  moved wholesale into `callOnce` — `verify`'s REST stub is browser-level, so server-side reads
-  would leave the harness talking to the real project.
-- **No test suite; lint is opt-in-tight, typecheck is .ts-only.** CI runs `bun run build`,
-  `bun run lint` and `bun run verify`. `lint` fails only on new hard errors — the pre-existing
-  debt (17 `any` casts, custom-class warnings) is downgraded in `eslint.config.mjs`, and the
+- **The `server/` tier is real now (P2+).** Nitro routes own every data path — `/api/catalog/**`,
+  `/api/site-info`, `/api/orders*`, `/api/admin/**`, `/api/profile`, `/api/admin-check`,
+  `/api/auth/**` and `/api/telegram/webhook` — over the two db contexts in `server/utils/db.ts`
+  (`appSql` for system bookkeeping, `userTx` claims path for anything a user's data touches).
+  `lint` still runs over `app` only; extending it to `server/` is the change that says the whole
+  tree is linted. One SSR note kept: the harness's fetch stub is browser-level, so server-side
+  reads leave it — which is why signed-in flows stay in the SPA (see the P8 note above) and why
+  the green no-`.env` run above is the CI shape to trust.
+- **Tests exist but stay small; typecheck is not in CI.** CI runs `bun run build`, `bun run lint`
+  and `bun run verify`. `bun run test` (Bun's runner, 51 checks) covers the pure rules — pricing
+  parity, order transitions, PayWay hashing — but is not wired into CI. `bun run typecheck`
+  (vue-tsc) mechanically checks .vue templates and exits 0 since 2026-10-03; it is not in CI
+  (wall time). `lint` still scopes to `app/` only and downgrades the pre-existing warnings;
+  extending it over `server/` is the change that says the whole tree is linted. The
   `no-explicit-any` rule being off does not relax the Supabase `as any` prohibition in AGENTS.md,
-  which stays a review rule. There is still no typecheck script: `tsc` covers `.ts` only, so
-  template bindings are unchecked.
+  which stays a review rule.
 - **Generated pages that describe absent capabilities.** `Supabase Integration/Real-time
   Features & Subscriptions.md`, `Testing & Quality Assurance/Testing Framework & Setup.md`,
   `Performance Optimization/Caching Patterns.md` and `Deployment & DevOps/Monitoring &
@@ -1213,10 +1245,10 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   back, and `verify` proves the two cases that used to break: two added categories with unknown slugs
   are two separate tabs (the list is keyed on the row id, not the glyph), and a long dock reaches its
   last item by scrolling inside `data-category-nav-scroll` — eighteen categories made the nav 1204px
-  tall against a 900px viewport, which a `top`-only sticky rail cannot recover. The save is one write
-  per row plus one per locale set (≈ 2N+1 round-trips, validated for duplicates *before* the first
-  write, so a rejected save writes nothing); batch it when a save is visibly slow, and note that the
-  loop is still not a transaction across those statements. The icon picker is the same trade the column
+  tall against a 900px viewport, which a `top`-only sticky rail cannot recover. The save is ONE
+  `POST /api/admin/categories` running every statement in one transaction (P7) — the old
+  row-by-row ≈ 2N+1 write and its non-transactional caveat died there; slugs are validated before
+  the first write either way. The icon picker is the same trade the column
   would have cost, kept in the data instead of the schema: one glyph per slug means **two categories
 cannot wear the same bespoke mark** (only one row can hold `gpu`), and a slug renamed away from a key
   loses its art — which is why the row shows the mark while it is edited. Give it its own column when

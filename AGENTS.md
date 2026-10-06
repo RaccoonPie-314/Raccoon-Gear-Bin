@@ -17,14 +17,14 @@ Detailed instructions live in `docs/rules/`. Open the matching file for the task
 
 | File | Open it when |
 |---|---|
-| [docs/rules/TOUCH_RESTRICTIONS.md](docs/rules/TOUCH_RESTRICTIONS.md) | Editing (or planning to edit) an interaction engine, tuned animation, `app.config.ts`, `supabase/migrations/**`, or anything auto-imported by `nuxt.config.ts` |
+| [docs/rules/TOUCH_RESTRICTIONS.md](docs/rules/TOUCH_RESTRICTIONS.md) | Editing (or planning to edit) an interaction engine, tuned animation, `app.config.ts`, `db/migrations/**`, or anything auto-imported by `nuxt.config.ts` |
 | [docs/rules/TESTING_SPECS.md](docs/rules/TESTING_SPECS.md) | Verifying a change, extending `scripts/verify-ui.mjs`, or making any "it works" claim |
 | [docs/rules/GIT_CONVENTIONS.md](docs/rules/GIT_CONVENTIONS.md) | Committing, tagging, pushing, or touching dependencies |
 
 ## Hard rules (always in force)
 
 - **Public catalog data is fetched and mapped only in `app/composables/useCatalog.ts`.** No page
-  may call `.from('products')` / `.from('categories')`, map a row, or build a storage URL.
+  may fetch `/api/catalog/**` directly, map a row, or build a storage URL.
 - **Browsing state lives in `app/composables/useCatalogBrowse.ts`** — search, sort, category
   selection, `filteredProducts`. No network, no DOM.
 - **`app/components/` stays presentational**: props in, events out, no data composables.
@@ -40,10 +40,13 @@ Detailed instructions live in `docs/rules/`. Open the matching file for the task
   original; the five nullable `promo_*` columns are what `getProductPricing` reads to decide what to
   charge, what to cross out, and which number "Price: low to high" orders by. No page, card or
   message may compare a promo window or a unit cap inline.
-- **Authorisation is row-level security in Postgres.** The browser holds only the anon key. Never
-  add a service-role client to "fix" a permission error — that fix belongs in a migration, and a
-  pushed migration is never edited.
-- **Never add `as any` to a Supabase client or query** (see the typing rules below).
+- **Authorisation is row-level security in Postgres, reached through the claims path.** The
+  browser holds only a Clerk session; server routes write as `userTx` (set claims + `set local
+  role`) and never with the owner client. Never "fix" a permission error with a broader client or
+  an out-of-band grant — the fix belongs in a new numbered migration (a pushed one is never
+  edited), and the `requireAdmin` gate is the clear early answer, not the boundary.
+- **Never add `as any` to a Supabase client or query** (the legacy storage client is the only one
+  left — see the typing rules below).
 - **Every user-facing string goes through `t()`** (en + km). Wide Latin letter-spacing breaks
   Khmer clusters — see the locale-conditional tracking in `index.vue` before adding eyebrows.
 - **Update `ARCHITECTURE.md` in the same change that alters the design.** It is hand-maintained
@@ -51,8 +54,9 @@ Detailed instructions live in `docs/rules/`. Open the matching file for the task
 
 ## Two Supabase typing rules that fail silently
 
-Both produce **no compile error** — `skipLibCheck` hides the constraint violation and every query
-resolves to `never`. They are the reason `as any` existed here.
+They bind the legacy storage client and `app/types/database.ts` until the R2 flip retires them
+(P3). Both produce **no compile error** — `skipLibCheck` hides the constraint violation and every
+query resolves to `never`. They are the reason `as any` existed here.
 
 1. Row shapes are `type X = { … }`, never `interface X { … }` — interfaces get no implicit index
    signature, so `Row extends Record<string, unknown>` fails.
@@ -68,9 +72,10 @@ selects collapse to `never`.
 ```bash
 bun install
 bun run build                                                 # compiles (CI)
-bun run lint                                                  # eslint app (CI — fails on new errors); there is no server/ source
+bun run lint                                                  # eslint app (CI — fails on new errors; scoped to app/)
 bun run verify                                                # scripts/verify-ui.mjs (CI) — needs Chrome
-./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only
+bun run test                                                  # tests/unit — 51 checks, not in CI, ~0.2 s
+./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only (add tsconfig.server.json for server/)
 bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too
 ```
 
@@ -83,7 +88,8 @@ so they can be run at once — worth ~30 s of the 217 s, because the guest slice
 86 % of the run and `--only` cannot split it further.
 
 `build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
-compiled, not that it works, and there is no test suite. `bun run typecheck` (vue-tsc) does
+compiled, not that it works; the unit suite (`bun run test`, 51 checks) is small and runs in CI-able
+time but is not wired there. `bun run typecheck` (vue-tsc) does
 mechanically check template bindings — a mistyped prop or missing variable in a `.vue` template
 fails on it. It is NOT in CI (it adds wall time); it exits 0 since 2026-10-03 (the `app.config.ts`
 slot classes, the `useHead` meta in `[id].vue` and the dead `nuxt.config.ts` cookie options were

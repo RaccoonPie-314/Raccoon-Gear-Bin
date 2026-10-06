@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const user = useSupabaseUser()
+const { user } = useUser()
 const { isAdmin } = useAdminAuth()
 const { locale, t } = useI18n()
 

@@ -12,6 +12,17 @@ the owner has no merchant gateway account yet. Registration is the next step —
 `https://sandbox.payway.com.kh/register-sandbox/` (self-serve, keys arrive by email), production via
 `paywaysales@ababank.com`. P3–P5 wait on it.
 
+**Amended 2026-10-06 (P3 built; G2 sandbox half cleared):** the sandbox merchant
+(`ec479163`) + API key landed and live in `.env` (key valid until **2026-11-04** — re-request
+before then); `NUXT_PAYWAY_BASE` pins the sandbox host. P3 built: the three routes under
+`server/api/payments/payway/` + the shared `server/utils/payway-callback.ts` pipeline. **Post-pivot
+spellings applied (this spec predates the Clerk/Neon pivot):** the session user comes from
+`requireUser(event)` (Clerk) — not the Supabase server helper — and the server-tier writes use the
+Neon **owner connection** (`appSql(event)`, `server/utils/db.ts`) — the role plans/005 made the
+designated service tier when the service-role key died with the pivot. Reads that answer
+ownership (order + items in `create`) still run on the **claims path** (`userTx`), so RLS — not
+route code — decides visibility. Remaining: P4 (UI), P5 (audit), sandbox E2E.
+
 Specified in [CAPABILITY-MAP.md](CAPABILITY-MAP.md); global rules in
 [SPEC-overview.md](SPEC-overview.md). Provider contract below grounded in the official docs captured
 2026-10-04 (Purchase API page, developer.payway.com.kh).
@@ -176,21 +187,26 @@ mark_payment_refunded(p_order_id uuid, p_note text) returns void   -- admin-gate
     recorded + rejected; already `paid` → no-op; `amount` must equal `orders.total` (mismatch → mark
     `failed`, never `paid`); success → `payments.status='paid'`, `paid_at`, `orders.payment_status='paid'`.
     The Supabase client is **injected** so the tests mock it.
-- `server/api/payments/payway/create.post.ts` — session user via the Supabase Nuxt module's server
-  helper; order must exist, belong to the user, be `pending`, `unpaid`; inserts the attempt row;
-  calls PayWay; returns `{ paymentUrl }` (the checkout URL). Errors from the provider map to typed
-  responses — no stack traces to the client.
-- `server/api/payments/payway/return.post.ts` — receives PayWay's browser return; verifies hash;
-  Check Transaction; `applyPaywayResult`; answers a 303 to `/checkout/pay-result?order=<id>`.
-- `server/api/payments/payway/webhook.post.ts` — same processing path for the server-to-server
-  notification if the merchant profile enables one; 200 `OK` on success **and on replays** (idempotency
-  is what makes retries safe).
+- `server/api/payments/payway/create.post.ts` — session via `requireUser(event)` (Clerk); order must
+  exist, belong to the user, be `pending`, `unpaid` (read on the claims path — RLS answers
+  ownership); inserts the attempt row on the owner connection; signs the fields; returns
+  `{ action, fields }` for the browser's multipart submit. `tran_id` collisions surface as the DB
+  unique index (23505) and regenerate once — in the browser-submit flow PayWay's code `4` is never
+  seen by us. Errors map to typed responses — no stack traces to the client.
+- `server/api/payments/payway/return.post.ts` — receives PayWay's browser return; the shared
+  pipeline (`server/utils/payway-callback.ts`: verify → Check Transaction → apply) runs; answers a
+  303 to `/checkout/pay-result?order=<id>`.
+- `server/api/payments/payway/webhook.post.ts` — same pipeline for the server-to-server
+  notification if the merchant profile enables one; 200 `OK` on success **and on replays**
+  (idempotency is what makes retries safe), 503 when the provider/config is at fault so PayWay
+  retries later.
 - **No other server route exists**, and none of them ever log or echo key material.
 
 ### Secrets and runtime config
 
 - Worker secrets (never committed, never in `runtimeConfig.public`):
-  `NUXT_PAYWAY_MERCHANT_ID`, `NUXT_PAYWAY_API_KEY`, `NUXT_SUPABASE_SERVICE_ROLE_KEY`.
+  `NUXT_PAYWAY_MERCHANT_ID`, `NUXT_PAYWAY_API_KEY`, `NUXT_PAYWAY_BASE` (host override; code default
+  is production), `NUXT_SUPABASE_SERVICE_ROLE_KEY`, `NUXT_DATABASE_URL`.
 - `nuxt.config.ts` gains server-side `runtimeConfig` entries with **empty-string defaults** (the
   build inlines only the empty defaults; the real values arrive as env bindings at runtime) and a
   comment pointing at the existing `secretKey: ''` reasoning.
@@ -219,6 +235,9 @@ mark_payment_refunded(p_order_id uuid, p_note text) returns void   -- admin-gate
   WebCrypto cross-runtime equality in the same test); `tran_id` length/uniqueness charset; items
   base64 shape ≤500; callback verification accepts good / rejects tampered payloads; error-code
   mapping; `applyPaywayResult` idempotency, amount mismatch, unknown tran_id, double-apply.
+- **P3 live verification (2026-10-06, sandbox):** Clerk token (Backend API session → `POST /v1/sessions/{id}/tokens`, **needs `content-type: application/json` or the API answers "Content-Type is unsupported"**) → `POST /api/orders` (real order) → `POST /api/payments/payway/create` → fields replayed to the sandbox purchase endpoint via curl: **`HTTP/2 200`** (the hash is accepted — the full route field set incl. `currency`, `items`, `return_params`, `skip_success_page` signs correctly). Error shape `403 code=1 Wrong Hash` observed while the key in `.env` was wrong — the hash formula itself was never at fault. Attempt rows land `initiated` with the right tran_id/amount/currency. Two operational traps recorded: (1) the credential file's key is the LAST token of its `Public Key (Valid until: …)` line — a regex stopping at the first colon captures "04"; (2) a dev server started before `.env` changed keeps signing with the old key — kill it via `lsof -ti :3000` (pkill patterns miss nuxt's node process) before retesting.
+- **P3 browser E2E (2026-10-06, sandbox — the complete loop; the owner-reported "still not working" root-caused and fixed):** the owner's clicks minted attempts but "nothing happened" — the form submit answered `code 00` with the **raw KHQR JSON** instead of the checkout page. Root cause: the merchant profile also carries the QR Payment service, and the documented selector **`payment_gate: 0`** was missing (unhashed, purely additive) — without it the endpoint never offers the hosted checkout. Then, end to end in a real browser: checkout rendered ("Raccoon Gear Bin / 2.00 USD"), the official sandbox test Mastercard (`5156 8399 3770 6777`, 01/30, 993 — listed at developer.payway.com.kh/resources, the 3DS-free success card) paid **APPROVED** (`apv 897974`), and the success redirect landed on `continue_success_url` **without any return-URL hit** (recorded: zero `[payway]` log lines — in dev the notification is structurally unreachable, localhost; with `skip_success_page=1` the browser goes straight to the destination). The loop closes via the new **`POST /api/payments/payway/verify`**: the result page asks the server to Check Transaction for the order's latest `initiated` attempt — the same idempotent `applyPaywayResult` door — and the verified run flipped payment `paid` (`paid_at`, raw payload) and `orders.payment_status='paid'` with fulfilment untouched. Lesson recorded: a `200 code 00` is NOT the checkpoint — the response BODY SHAPE (checkout HTML vs QR JSON) is.
+- **QR-first checkout + mobile deeplink (2026-10-06, owner request — credit cards are the least used method here).** The default flow now sends `payment_option: abapay_khqr_deeplink` (a hash-relevant field, present on PAYWAY_HASH_FIELDS) and the route performs the purchase SERVER-SIDE: probed live, that option makes the endpoint answer JSON (application/json, `code 00`) with `qr_string` / `abapay_deeplink` / `checkout_qr_url` — which supersedes the "browser must submit the form" settlement for the default path (the form shape survives as the 3xx fallback branch in the route). The client receives only `{ checkoutUrl, deeplink }` — the signed fields no longer reach the browser at all (a security tightening). Desktops navigate to `checkout_qr_url` (the hosted "Scan. Pay. Done." KHQR page — verified visually); phones get `window.location = abapay_deeplink` (`abamobilebank://…`, UA-sniffed) with the tab parked on the QR page after ~1.8s so the return from ABA Mobile lands on the live status, and the QR page itself remains the fallback if the app never opens. The result page's `&tran=` capability (24 h, status-only) is untouched.
 - Sandbox end-to-end (manual, recorded at P3 on the G2 environment): create → PayWay sandbox
   checkout → pay with a sandbox method → return lands, Check Transaction confirms, order shows
   `paid`; then replay the same webhook payload by hand and prove the second apply is a no-op.

@@ -164,6 +164,24 @@ exists; the console gate allowlists exactly that load-failure class plus the hyd
 `create_order` function + route; order reads via `withClaims`; admin order routes; account order
 pages; cart merge hooks onto Clerk session events (localStorage model untouched).
 
+**Done (2026-10-05).** `server/utils/order-queries.ts` (the shared embed + the machine-code
+ extractor) and seven routes: `POST /api/orders` (create_order inside `userTx`; raises become 400s
+carrying the RPC's code), `GET /api/orders` (desk list, policy-scoped), `/mine`, `/stamps`,
+`/pending`, `/:id` (the buyer trio re-filters to the caller explicitly — access is not ownership),
+and `POST /:id/status` (set_order_status, admin re-checked in SQL). Client: `useCheckout` /
+`useCustomerOrders` / `useAdminOrders` swapped to `$fetch`, shapes and mappers untouched
+(`OrderWithItemsRow`/`OrderStampsRow` now name `order-queries.ts` as their pairing counterpart);
+the PostgREST select strings are gone. Live-verified against a real Clerk dev session (Bearer
+session token → middleware → claims path): create qty 2 → stock 5→3, mine/stamps/pending/single
+reads, garbage and missing ids → null, non-admin transition → 400 `NOT_ADMIN`, confirm → desk list
+shows `confirmed_at`, cancel-with-note → note recorded + stock back to 5, illegal transition →
+`INVALID_TRANSITION`, probe order deleted. Harness: orders stubs + seven assertion groups
+re-pointed; green **430/430 guest · 94/94 admin**, one run. Deferred to P6: the cart's identity
+scope — it still keys off the Supabase user until the Clerk session flips there (the key is the
+account id, so stored carts and the seen-marker survive that change). Dev fixture left for
+P6/P7: Clerk user `p855960000001` (+855 96 000 0001) with a profiles row and an admin_users row
+(password resettable via the clerk CLI).
+
 ## P6 — Clerk integration + identity flows (the C-phase, born here)
 
 `@clerk/nuxt` wiring; customer + admin guards; email sign-in/up preserving current copy/flows; the
@@ -172,21 +190,119 @@ real number in `profiles.phone`; rate-limit table ports as-is); Telegram login (
 seen live in P0); login codes (same mint); `/account` cards (code + Telegram connect). The Supabase-era
 `/api/auth/**` routes are deleted as their replacements land.
 
+**Done (2026-10-05, session 2 of 2) — the client flip.** The harness auth slice rides to P8 as
+planned. What landed: `useCustomerAuth` rebuilt on Clerk's client SDK (signIn/signUp/signUpWithPhone/
+phoneIdentifier/signOut/completeOnHosted/waitForUser/telegram+code calls; `useAdminAuth` + both global
+guards on `useUser`); cart scope and `useCustomerOrders` keyed by the Clerk user id; `/login` with
+email|phone|code modes + a Telegram button, `/signup` with email|phone, `/account` with the login-code
+card and the Telegram connect card; ~25 i18n keys in both locales; `/sign-in` + `/sign-up` catch-alls
+(already wired to `.env`'s Clerk URL vars) now render the real prebuilt components. New routes
+`/api/auth/phone/identifier` (alias lookup, no existence oracle) and `/api/auth/telegram/link`.
+
+**Guard shape decided in the walkthrough:** the signed-out bounce is a **server-side 302** — the
+request's Clerk cookies are verified by the module's Nitro middleware, so `event.context.auth()`
+answers on the server; the client branch (bounded `waitForClerkLoaded` wait) is for SPA navigations
+only. Reasons, both discovered live: (a) a hydration-phase client redirect ran before clerk-js booted,
+so `/account` mounted with `fetchProfile()` resolving to `null` — empty fields that never refilled;
+(b) after the guard started awaiting the SDK, the client hydrated *with* the user known while SSR had
+rendered empty — a hydration text mismatch — fixed by `<ClientOnly>` on the account identifier
+(matching @clerk/vue's documented pattern). Known-wrong intermediate states gone with the 302: no
+flash of the guarded page, locale links stay correct (`/km/account` → `/km/login?redirect=…`).
+
+**Walkthrough (browser, live dev instance):** phone sign-in end-to-end (mode tab → alias → landing /
+when a nickname exists), account page (identifier `p855960000001`, profile fields, cards), generate
+login code (shown once), sign-out → `/`, signed-out hard loads 302 (en + km arms), signed-in hard load
+200 (server verified the session cookie), admin hard load → `/admin/login`, Telegram connect: deep
+link captured → simulated webhook tap → 2 s poll → **"Connected as @verifybot"**; test rows deleted
+after (links 0). Admin login page (rewritten this phase) verified both arms: non-admin gets the
+"not authorized" sentence and **keeps** the session — the earlier `signOut()` there was a defect:
+clerk's default `afterSignOutUrl: '/'` navigated away and swallowed the message, and it logged the
+visitor out of the storefront too; admin lands on `/` with ADMIN MODE and `/admin/orders` renders.
+The identifier field is `type="text"` now — the alias usernames aren't email-shaped and native
+validation would block them. One render bug found and fixed: `telegramConnected: 'Connected as
+@{name}'` — vue-i18n compiles `@{…}` as linked-message syntax and *throws in the render function*
+the moment the linked branch paints; the fix uses the file's existing `{'@'}` literal idiom.
+
+**Blocked external:** the code-login *hosted completion* — `verify → signInUrl` mints and the browser
+lands on `accounts.dev/sign-in?__clerk_ticket=…&redirect_url=…` correctly (proven twice), but Clerk's
+dev-instance host answered **522/timeouts** all evening, so the ticket never completed; retest when the
+host recovers (a fresh code, the old ones were consumed at mint). Dev-instance-only nuance to re-check
+in P8: the post-ticket landing can arrive before the dev-browser handshake sets a session cookie, so
+the 302 bounces it to `/login`; on production keys the session cookie rides the same request.
+
+**Harness now red by design** (`bun run verify`, 2026-10-05): catalog/legal checks green; everything
+downstream of a harness sign-in fails (the stub layer still answers the Supabase shape, and Clerk's
+test keys never authenticate) — the checkout slice reads `url: /login` for the same reason; the admin
+slice aborts early on a missing element. P8 owns the re-baseline.
+
+
 ## P7 — admin remaining
 
 Category/product/site-info editors route-by-route; admin_users keyed by Clerk ids; guard verified
 against RLS + route checks.
+
+**Done (2026-10-05).** The three editors' data ops left the Supabase client: five routes —
+`/api/admin/site-info` (upsert), `/api/admin/categories` (the whole list in **one transaction**;
+the editor used to write row-by-row over PostgREST), `/api/admin/categories/[id]` DELETE,
+`/api/admin/products` (product + translation + image rows, one transaction; promo columns written
+only when the client sent them, so a product that never had one is never touched), and
+`/api/admin/products/[id]` DELETE. A shared `requireAdmin` (401 / 403) gates them all and now also
+carries the category-drafts read's check. Client-generated uuids for new rows keep every statement
+independent inside the transaction.
+
+**Found live, fixed:** (a) every admin write died as "permission denied for table …" — 0001 granted
+`app_authenticated` SELECT only, so the admin policies were unreachable; migration
+**0003_admin_write_grants** opens the six tables (the policies stay the boundary). (b) Supabase's
+`on delete restrict` FK refusals answer **SQLSTATE 23001** (restrict_violation), not 23503 —
+PostgREST used to translate for the old client; the delete route does now (409 CATEGORY_IN_USE →
+the "products are still filed here" sentence, verified). (c) The product editor's uploads still go
+to the legacy bucket from the browser — attempted live: storage RLS refuses the Clerk session
+("new row violates row-level security policy"), and because uploads now run **before** the route
+call, the failure leaves no partial rows (confirmed: no stray product). R2 (P3) replaces that arm.
+
+**Live-verified:** 401 × 6 / 403 × 5 with CLI-minted tokens (admin vs non-admin); site-info saved
+and restored through Neon; categories create → 9 rows public → delete → 8; the FK-refusal arm on
+`keyboards`; product create (9) → edit price → delete (8); no-op round trips answer 204. All test
+rows cleaned (products 8, categories 8; site-info restored). Fast gates green. Harness untouched
+(P8 owns the re-baseline).
 
 ## P8 — harness full re-baseline + docs
 
 `verify-ui.mjs` stub layer replaced route-by-route (the tedious one — assertions unchanged);
 AGENTS.md + ARCHITECTURE.md rewritten to the new doctrine; SPEC-overview stack sections amended.
 
+**Done (2026-10-05).** The stub layer is the **new** stack now: the browser `fetch` stub answers
+`/api/**` (catalog, site-info, orders, admin, profile, admin-check) plus the legacy storage upload
+— the Supabase trio branches are gone — and a **scripted clerk-js** (served over CDP Fetch, beside
+the photo generator; ~35 lines implementing exactly the surface `@clerk/vue` + the app touch:
+`load`/`addListener`/`setActive`/`signOut` + minimal sign-in/sign-up resources, session in one
+cookie) makes signed-in state deterministic offline. The auth-dependent check mechanics were
+re-pointed (signup/login drive the same forms; `__harness_clerk` replaces the `auth-token`
+signals; profile writes assert on `/api/profile`; the desk write sequences assert the P7 contracts:
+upload → one transactional POST, path-shaped deletes, payload-carried image lists and name
+deletion intents). **522/522 checks in one combined run** (guest 430 · admin 94, twice verified
+across runs), fast gates green.
+
+**Three findings worth keeping:** (a) the harness's admin-ness must be session-scoped — a
+`--only`-baked flag answered admin to the guest walk in combined runs; restored the old
+`sessionStorage.__admin_session` seed shape, and the stub's `/api/admin-check` also requires the
+scripted session to be signed in, or a signed-out admin mode re-lights after logout ("logout
+clears admin mode" caught both). (b) The fixture categories carry readable pseudo-ids (`…c01`),
+not UUIDs — check regexes must accept them (the real route validates UUIDs; the stub is a
+stand-in). (c) The account sign-out click is aim-drift-flaky like the other departures near
+freshly-settled pages; it got the file's standard one-retry idiom. Docs: AGENTS.md re-scoped to
+the claims path (typing rules now bind the legacy storage client until P3; the unit suite enters
+the command list), SPEC-overview stack table/snippets/harness row amended, ARCHITECTURE P8 note.
+
 ## P9 — deploy + retire
 
-Worker secrets (DB URL, Clerk keys, R2 binding) → deploy → smoke (order → Telegram push → login
-flows). Supabase projects stay untouched as cold backup during a soak; then `supabase/` leaves the
-repo (git history keeps it). Payments (parked) gets specified Clerk-native when un-parked.
+Worker secrets (DB URL, Clerk keys, R2 binding) → deploy → **set the bot webhook**: `setWebhook` to
+`https://raccoon-gear-bin.alsorandomkay.workers.dev/api/telegram/webhook` with `secret_token` =
+the Worker's `NUXT_TELEGRAM_WEBHOOK_SECRET` (verified missing 2026-10-06: `getWebhookInfo.url`
+empty, so Telegram login's `/start` went nowhere — local testing uses `.cache/tg-bridge.py` until
+then) → smoke (order → Telegram push → login flows). Supabase projects stay untouched as cold
+backup during a soak; then `supabase/` leaves the repo (git history keeps it). Payments (parked)
+gets specified Clerk-native when un-parked.
 
 ## Estimates (agent sessions; owner cost = review/verify)
 

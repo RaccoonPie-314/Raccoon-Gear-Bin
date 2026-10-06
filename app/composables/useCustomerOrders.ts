@@ -1,40 +1,31 @@
-import type { Database } from '~/types/database'
 import type { OrderView } from '~/types/orders'
 import { bumpOrdersSeen, readOrdersSeen, unseenOrderCount } from '~/utils/order-notices'
-import { mapOrder, mapOrderStamp, ORDER_STAMPS_SELECT, ORDER_WITH_ITEMS_SELECT } from '~/utils/orders'
+import type { OrderStampsRow, OrderWithItemsRow } from '~/utils/orders'
+import { mapOrder, mapOrderStamp } from '~/utils/orders'
 
 /**
- * The buyer's order reads (specs/ecommerce/SPEC-orders.md). RLS scopes *access* — own rows for a
- * customer, every row for an admin — but access is not ownership: without the `user_id` filter an
- * admin's own account (the shop owner's) would list the whole shop under "My account → Orders",
- * which is the desk's view, not this page's. The reads are therefore scoped to the signed-in user
- * explicitly; the row → view conversion stays the shared one in `app/utils/orders.ts`.
+ * The buyer's order reads (specs/ecommerce/SPEC-orders.md). The `…/mine`, `…/stamps` and single
+ * endpoints are the self-scoped ones — the server filters to the caller inside the claims path,
+ * which is where the old explicit `user_id` filter went; the desk's unscoped list is never asked
+ * for from these pages. The row → view conversion stays the shared one in `app/utils/orders.ts`.
  *
  * Fetching the orders area is also what marks it seen: `fetchOrders` / `fetchOrder` raise the
  * browser-local notice marker (only ever forward — see `bumpOrdersSeen`), and `fetchUnseenCount`
  * is the masthead badge's light read against that marker.
+ *
+ * Identity is still the Supabase session — the Clerk flip is P6 of plans/005, and the marker's key
+ * is the account id either way, so the stored marker survives that change untouched.
  */
 
 export const useCustomerOrders = () => {
-  const supabase = useSupabaseClient<Database>()
-  const user = useSupabaseUser()
+  const { user } = useUser()
 
-  // `id` on a hard load, `sub` after the module re-places state from JWT claims — the recurring
-  // spelling trap; both name the same uuid.
-  const currentUserId = () => {
-    const identity = user.value as { id?: string, sub?: string } | null
-    return identity?.id || identity?.sub || null
-  }
+  const currentUserId = () => user.value?.id ?? null
 
   const fetchOrders = async (): Promise<OrderView[]> => {
     const userId = currentUserId()
     if (!userId) return []
-    const { data, error } = await supabase
-      .from('orders')
-      .select(ORDER_WITH_ITEMS_SELECT)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-    if (error) throw error
+    const data = await $fetch<OrderWithItemsRow[]>('/api/orders/mine')
     const views = (data ?? []).map(mapOrder)
     bumpOrdersSeen(userId, views)
     return views
@@ -44,24 +35,18 @@ export const useCustomerOrders = () => {
   const fetchUnseenCount = async (): Promise<number> => {
     const userId = currentUserId()
     if (!userId) return 0
-    const { data, error } = await supabase
-      .from('orders')
-      .select(ORDER_STAMPS_SELECT)
-      .eq('user_id', userId)
-    if (error) throw error
+    const data = await $fetch<OrderStampsRow[]>('/api/orders/stamps')
     return unseenOrderCount((data ?? []).map(mapOrderStamp), readOrdersSeen(userId))
   }
 
   const fetchOrder = async (id: string): Promise<OrderView | null> => {
     const userId = currentUserId()
-    if (!userId) return null
-    const { data, error } = await supabase
-      .from('orders')
-      .select(ORDER_WITH_ITEMS_SELECT)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .maybeSingle()
-    if (error) throw error
+    // A not-yet-loaded clerk-js user is NOT "no such order": returning null here is how the
+    // order page's post-PayWay reload flashed "order could not be found" — the silent null
+    // skipped the API entirely, and both the settle-retry loop and the late-session watch
+    // treated it as success. Throwing routes it through the callers' retry instead.
+    if (!userId) throw new Error('SESSION_NOT_READY')
+    const data = await $fetch<OrderWithItemsRow | null>(`/api/orders/${id}`)
     const view = data ? mapOrder(data) : null
     if (view) bumpOrdersSeen(userId, [view])
     return view

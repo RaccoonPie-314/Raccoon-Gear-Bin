@@ -1,4 +1,3 @@
-import type { Database } from '~/types/database'
 import type { CatalogCategoryDraft } from '~/types/catalog'
 
 /**
@@ -30,10 +29,6 @@ export type AdminCategoryRow = {
 let categoryUidSeq = 0
 const nextCategoryUid = () => `category-${++categoryUidSeq}`
 
-/** The two locales the storefront renders. A blank Khmer name writes no row, so the public view's
- * English fallback is what a Khmer visitor gets — absent, never invented. */
-const LOCALES = ['en', 'km'] as const
-
 /**
  * The slug is load-bearing twice: it is what a category keeps its icon matched on, and it is the
  * stable identity a shop shares with itself ("monitors"), so an empty Slug field takes the English
@@ -60,23 +55,23 @@ const toRow = (draft: CatalogCategoryDraft): AdminCategoryRow => ({
 })
 
 /** `products.category_id … on delete restrict`: Postgres is what decides whether a category may be
- * forgotten, and its answer is the one the shop needs to hear in its own words. */
-const isStillInUse = (error: any) => error?.code === '23503' || error?.statusCode === 409
+ * forgotten, and its answer is the one the shop needs to hear in its own words. The route carries
+ * the refusal as a 409, which ofetch surfaces as `error.statusCode`. */
+const isStillInUse = (error: any) => error?.statusCode === 409
 
 /**
- * The admin category editor: the row list the Categories page binds to, the two-table save
- * (`categories` then `category_translations`, one pair per locale) and the delete that only succeeds
- * while nothing is filed under the category.
+ * The admin category editor: the row list the Categories page binds to, the one-save POST that
+ * rewrites the whole list (`/api/admin/categories`, one transaction server-side) and the delete
+ * that only succeeds while nothing is filed under the category.
  *
  * It follows the shape of the two editors already here on purpose — `canMutate` is a UI guard and
- * authorisation stays in row-level security, the reads come from `useCatalog` (the only owner of the
- * `categories` table, in its admin view `fetchCategoryDrafts`) and no state crosses between this and
- * the product or site-info editors. Nothing new is stored: `categories` and `category_translations`
- * already exist, so adding a category is a write, not a migration.
+ * authorization is the claims-path admin policy behind the route, the reads come from `useCatalog`
+ * (the only owner of the `categories` table, in its admin view `fetchCategoryDrafts`) and no state
+ * crosses between this and the product or site-info editors. Nothing new is stored: `categories`
+ * and `category_translations` already exist, so adding a category is a write, not a migration.
  */
 export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) => {
   const { canMutate } = options
-  const supabase = useSupabaseClient<Database>()
   const { fetchCategoryDrafts } = useCatalog()
   const { t } = useI18n()
 
@@ -140,12 +135,11 @@ export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) =>
     actionError.value = ''
     savedNotice.value = ''
     try {
-      const { error } = await supabase.from('categories').delete().eq('id', row.id)
-      if (error) throw error
+      await $fetch(`/api/admin/categories/${row.id}`, { method: 'DELETE' })
       categoryRows.value.splice(index, 1)
       savedNotice.value = t('categoryDeleted')
     } catch (error: any) {
-      actionError.value = isStillInUse(error) ? t('categoryHasProducts') : (error?.message || t('categoryDeleteError'))
+      actionError.value = isStillInUse(error) ? t('categoryHasProducts') : (error?.data?.message || error?.message || t('categoryDeleteError'))
     } finally {
       isSaving.value = false
     }
@@ -167,42 +161,20 @@ export const useAdminCategoryEditor = (options: { canMutate: () => boolean }) =>
         if (slugs.has(slug)) throw new Error(t('categorySlugTaken'))
         slugs.add(slug)
       }
-      for (const [index, row] of categoryRows.value.entries()) {
-        const slug = slugOf(row)
-        // `sort_order` is the row's position, one-based, so the dock and this list cannot disagree.
-        const values = { slug, sort_order: index + 1, is_active: row.isActive }
-        const storedId = row.id
-        let id = storedId
-        if (id) {
-          const { error } = await supabase.from('categories').update(values).eq('id', id)
-          if (error) throw error
-        } else {
-          const { data, error } = await supabase.from('categories').insert(values).select('id').single()
-          if (error) throw error
-          id = data.id
-          row.id = id
-        }
-        const translations = LOCALES.map((locale) => ({ locale, name: nameOf(row, locale) }))
-          .filter((entry) => entry.name)
-          .map((entry) => ({ category_id: id, locale: entry.locale, name: entry.name }))
-        if (translations.length) {
-          const { error } = await supabase.from('category_translations').upsert(translations, { onConflict: 'category_id,locale' })
-          if (error) throw error
-        }
-        // An upsert only writes what is there, so a name the owner *deleted* has to be removed on
-        // purpose: a stale Khmer row is a name still showing in the dock after it was erased here.
-        if (storedId) {
-          for (const locale of LOCALES) {
-            if (!(row.namesBefore[locale] || '').trim() || nameOf(row, locale)) continue
-            const { error } = await supabase.from('category_translations').delete().eq('category_id', storedId).eq('locale', locale)
-            if (error) throw error
-          }
-        }
-      }
+      // Display order is the payload's order; the route writes `sort_order` from it. A new row gets
+      // its uuid here so the server can run every statement independently, in one transaction.
+      const rows = categoryRows.value.map((row) => ({
+        id: row.id ?? crypto.randomUUID(),
+        slug: slugOf(row),
+        isActive: row.isActive,
+        names: { en: nameOf(row, 'en'), km: nameOf(row, 'km') },
+        namesBefore: row.namesBefore
+      }))
+      await $fetch('/api/admin/categories', { method: 'POST', body: { rows } })
       savedNotice.value = t('categorySaved')
       await loadCategories()
     } catch (error: any) {
-      actionError.value = error?.message || t('categorySaveError')
+      actionError.value = error?.data?.message || error?.message || t('categorySaveError')
     } finally {
       isSaving.value = false
     }

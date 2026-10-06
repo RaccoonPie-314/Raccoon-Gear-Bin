@@ -1,6 +1,5 @@
 <script setup lang="ts">
-const supabase = useSupabaseClient()
-const { signIn } = useAdminAuth()
+const { signIn, isAdmin } = useAdminAuth()
 const { locale, t } = useI18n()
 
 const email = ref('')
@@ -23,24 +22,14 @@ const handleSubmit = async () => {
   isSubmitting.value = true
 
   try {
-    const { user } = await signIn(email.value, password.value)
+    await signIn(email.value, password.value)
 
-    if (!user) {
-      throw new Error(t('invalidLogin'))
-    }
-
-    const { data: adminRecord, error: adminError } = await supabase
-      .from('admin_users')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (adminError) {
-      throw adminError
-    }
-
-    if (!adminRecord) {
-      await supabase.auth.signOut()
+    // The allowlist lives in Neon and the browser has no read path to it — `/api/admin-check` is
+    // the guard's own question, asked after the session exists. A non-admin gets the sentence and
+    // keeps their session: this is the same Clerk session as the storefront, and the admin pages
+    // stay shut by the guard + RLS — signing them out from here would log them out of the shop,
+    // and clerk's signOut navigates to afterSignOutUrl ('/'), which swallowed the message.
+    if (!(await isAdmin())) {
       errorMessage.value = t('unauthorized')
       return
     }
@@ -86,7 +75,9 @@ useHead({ title: pageTitle })
 
       <form class="space-y-5 pt-6" @submit.prevent="handleSubmit">
         <UFormField :label="t('email')" name="email">
-          <UInput v-model="email" type="email" :placeholder="t('emailPlaceholder')" class="w-full" />
+          <!-- text, not email: Clerk takes an email or the username alias the phone accounts
+               carry, and type="email" would let native validation block the latter on submit. -->
+          <UInput v-model="email" type="text" autocomplete="username" :placeholder="t('emailPlaceholder')" class="w-full" />
         </UFormField>
 
         <UFormField :label="t('password')" name="password">
@@ -103,6 +94,10 @@ useHead({ title: pageTitle })
             :title="errorMessage"
           />
         </Transition>
+
+        <!-- Clerk bot protection's widget mount (see signup.vue) — a flagged sign-in without it
+             would fail `captcha_invalid` the same way. -->
+        <div id="clerk-captcha" />
 
         <UButton
           type="submit"

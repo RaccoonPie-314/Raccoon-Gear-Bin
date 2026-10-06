@@ -4,10 +4,24 @@ import { safeRedirectPath } from '~/utils/safe-redirect'
 const { locale, t } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()
-const { signIn, waitForUser, fetchProfile } = useCustomerAuth()
+const {
+  signIn, phoneIdentifier, verifyLoginCode,
+  startTelegram, pollTelegram, completeOnHosted, completeTicket, signInWithGoogle, waitForUser, fetchProfile
+} = useCustomerAuth()
+
+// The three ways in (SPEC-identity.md amendment): password by email, password by phone (the
+// alias lives server-side), and the saved login code. Telegram is a button beside all of them.
+const mode = ref<'email' | 'phone' | 'code'>('email')
+const modes = [
+  { value: 'email' as const, label: 'email' },
+  { value: 'phone' as const, label: 'phone' },
+  { value: 'code' as const, label: 'loginCode' }
+]
 
 const email = ref('')
+const phone = ref('')
 const password = ref('')
+const code = ref('')
 const isSubmitting = ref(false)
 const errorMessage = ref('')
 
@@ -29,27 +43,143 @@ const landingTarget = async () => {
 }
 const showRedirectNotice = computed(() => typeof route.query.redirect === 'string')
 
+// A session adopted by clerk-js can get bounced here by the server branch of the guard before
+// the server's cookie catches up (the dev-browser lag) — or the visitor simply navigates here
+// while signed in. Either way, a signed-in visitor has no business on the form: land them where
+// they were headed. `useSignedIn` or-s the server-seeded truth with the client user, so this
+// fires exactly when the browser (or the server) knows a session exists.
+const signedIn = useSignedIn()
+// `watch`, not a one-shot mount check: when this page lands from a guard bounce, clerk-js is
+// still loading and the client user arrives a beat later. `!isSubmitting` is load-bearing: during
+// an in-page sign-in this watcher and the submit handler would otherwise BOTH navigate on the
+// same tick (two concurrent router pushes, one with `replace`) — the walking harness observed
+// the form parking on /login. The submit handler owns the landing it started; this watcher only
+// lands visitors who arrived here already signed in.
+watch(signedIn, async (value) => {
+  if (!value || isSubmitting.value || !route.path.startsWith('/login')) return
+  await navigateTo(await landingTarget(), { replace: true })
+}, { immediate: true })
+
+// The route's machine codes → copy, one map for every mode (the checkout's convention).
+const failFor = (error: unknown): string => {
+  const codeValue = String((error as { data?: { message?: string } })?.data?.message || '')
+  if (codeValue === 'INVALID_PHONE') return t('phoneInvalid')
+  if (codeValue === 'THROTTLED') return t('throttled')
+  if (codeValue === 'INVALID_CODE' || codeValue === 'BAD_FORMAT') return t('codeInvalid')
+  if (codeValue === 'EXPIRED') return t('codeExpired')
+  return t('invalidLogin')
+}
+
 const handleSubmit = async () => {
   errorMessage.value = ''
 
-  if (!email.value || !password.value) {
+  if (mode.value === 'code') {
+    if (!code.value.trim()) {
+      errorMessage.value = t('requiredFields')
+      return
+    }
+    isSubmitting.value = true
+    try {
+      // The mint's ticket completes the session in-page (a password sign-in's own mechanism);
+      // Clerk's hosted page is the fallback, and its redirect target is computed before leaving
+      // this document.
+      const mint = await verifyLoginCode(code.value)
+      const landing = await landingTarget()
+      if (await completeTicket(mint.ticket)) {
+        await navigateTo(landing, { replace: true })
+        return
+      }
+      await navigateTo(completeOnHosted(mint.signInUrl, window.location.origin + landing), { external: true })
+    } catch (error) {
+      errorMessage.value = failFor(error)
+    } finally {
+      isSubmitting.value = false
+    }
+    return
+  }
+
+  if (!password.value || (mode.value === 'email' ? !email.value : !phone.value)) {
     errorMessage.value = t('requiredFields')
     return
   }
 
   isSubmitting.value = true
-
   try {
-    await signIn(email.value, password.value)
+    const identifier = mode.value === 'email' ? email.value : await phoneIdentifier(phone.value)
+    await signIn(identifier, password.value)
     // See useCustomerAuth.waitForUser: the guarded redirect needs the user state to have landed.
     await waitForUser()
     await navigateTo(await landingTarget(), { replace: true })
-  } catch {
+  } catch (error) {
+    errorMessage.value = failFor(error)
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// ---- Google: OAuth out, callback back ---------------------------------------------------------
+// The same arm signs in and signs up (Clerk creates the account on first consent), so the login
+// and signup pages both offer it.
+const beginGoogle = async () => {
+  errorMessage.value = ''
+  isSubmitting.value = true
+  try {
+    await signInWithGoogle(await landingTarget())
+  } catch (error) {
+    console.warn('[google] sign-in failed:', error)
     errorMessage.value = t('invalidLogin')
   } finally {
     isSubmitting.value = false
   }
 }
+
+// ---- Telegram: deep link out, poll back -------------------------------------------------------
+const telegramOpen = ref(false)
+const telegramWaiting = ref(false)
+const telegramError = ref('')
+let telegramTimer: ReturnType<typeof setInterval> | null = null
+
+const stopTelegram = (message = '') => {
+  if (telegramTimer) { clearInterval(telegramTimer); telegramTimer = null }
+  telegramWaiting.value = false
+  telegramError.value = message
+}
+
+const beginTelegram = async () => {
+  telegramError.value = ''
+  telegramWaiting.value = true
+  try {
+    const { nonce, deepLink } = await startTelegram('login')
+    window.open(deepLink, '_blank', 'noopener')
+    const until = Date.now() + 10 * 60 * 1000
+    telegramTimer = setInterval(async () => {
+      if (Date.now() > until) { stopTelegram(t('telegramExpired')); return }
+      try {
+        const result = await pollTelegram(nonce)
+        if (result.status === 'expired') { stopTelegram(t('telegramExpired')); return }
+        if (result.status === 'confirmed') {
+          stopTelegram()
+          const landing = await landingTarget()
+          // Ticket first — the session lands here, same as a password sign-in; the hosted page
+          // stays as the fallback for the browsers where in-page completion fails.
+          if (result.ticket && await completeTicket(result.ticket)) {
+            await navigateTo(landing, { replace: true })
+            return
+          }
+          if (result.signInUrl) {
+            await navigateTo(completeOnHosted(result.signInUrl, window.location.origin + landing), { external: true })
+          } else {
+            telegramError.value = t('telegramFailed')
+          }
+        }
+      } catch { /* transient poll failure — keep polling until the window closes */ }
+    }, 2000)
+  } catch {
+    stopTelegram(t('telegramFailed'))
+  }
+}
+
+onUnmounted(() => stopTelegram())
 
 const pageTitle = computed(() => `${t('signIn')} | ${t('appName')}`)
 useHead({ title: pageTitle })
@@ -81,30 +211,134 @@ useHead({ title: pageTitle })
         </div>
       </div>
 
-      <form class="space-y-5 pt-6" @submit.prevent="handleSubmit">
-        <UFormField :label="t('email')" name="email">
-          <UInput v-model="email" type="email" :placeholder="t('emailPlaceholderUser')" class="w-full" />
-        </UFormField>
+      <div class="pt-6 space-y-5">
+        <!-- The mode switch: email | phone | saved code. Telegram below works in every mode. -->
+        <div class="grid grid-cols-3 gap-1 rounded-full border border-zinc-200/80 bg-zinc-100/70 p-1 dark:border-zinc-800/80 dark:bg-zinc-900/60" data-login-modes>
+          <button
+            v-for="option in modes"
+            :key="option.value"
+            type="button"
+            class="cursor-pointer rounded-full px-2 py-1.5 text-xs font-semibold transition-colors"
+            :class="mode === option.value
+              ? 'bg-white text-zinc-950 shadow-xs dark:bg-zinc-800 dark:text-white'
+              : 'text-zinc-500 hover:text-zinc-950 dark:text-zinc-400 dark:hover:text-white'"
+            :data-login-mode="option.value"
+            :aria-pressed="mode === option.value"
+            @click="mode = option.value; errorMessage = ''"
+          >
+            {{ t(option.label) }}
+          </button>
+        </div>
 
-        <UFormField :label="t('password')" name="password">
-          <UInput v-model="password" type="password" :placeholder="t('passwordPlaceholder')" class="w-full" />
-        </UFormField>
+        <form class="space-y-5" @submit.prevent="handleSubmit">
+          <template v-if="mode === 'email'">
+            <UFormField :label="t('email')" name="email">
+              <UInput v-model="email" type="email" :placeholder="t('emailPlaceholderUser')" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('password')" name="password">
+              <UInput v-model="password" type="password" :placeholder="t('passwordPlaceholder')" class="w-full" />
+            </UFormField>
+          </template>
 
-        <!-- The failure arrives with the same opacity-only `reveal` the catalog uses, so the
-             message is not pasted onto the form between two frames. -->
-        <Transition name="reveal">
-          <UAlert v-if="errorMessage" color="error" variant="soft" :title="errorMessage" />
-        </Transition>
+          <template v-else-if="mode === 'phone'">
+            <UFormField :label="t('phone')" name="phone">
+              <UInput v-model="phone" type="tel" :placeholder="t('phoneNumberPlaceholder')" class="w-full" />
+            </UFormField>
+            <UFormField :label="t('password')" name="password">
+              <UInput v-model="password" type="password" :placeholder="t('passwordPlaceholder')" class="w-full" />
+            </UFormField>
+          </template>
 
-        <UButton
-          type="submit"
-          color="neutral"
-          class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
-          :loading="isSubmitting"
-          :disabled="isSubmitting"
-        >
-          {{ isSubmitting ? t('signingIn') : t('signIn') }}
-        </UButton>
+          <template v-else>
+            <UFormField :label="t('loginCode')" name="code">
+              <UInput v-model="code" type="text" :placeholder="t('loginCodePlaceholder')" class="w-full font-mono" data-login-code />
+            </UFormField>
+          </template>
+
+          <!-- The failure arrives with the same opacity-only `reveal` the catalog uses, so the
+               message is not pasted onto the form between two frames. -->
+          <Transition name="reveal">
+            <UAlert v-if="errorMessage" color="error" variant="soft" :title="errorMessage" />
+          </Transition>
+
+          <!-- Clerk bot protection's widget mount (see signup.vue) — a flagged sign-in without it
+               would fail `captcha_invalid` the same way. -->
+          <div id="clerk-captcha" />
+
+          <UButton
+            type="submit"
+            color="neutral"
+            class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+            :loading="isSubmitting"
+            :disabled="isSubmitting"
+          >
+            {{ isSubmitting ? t('signingIn') : t('signIn') }}
+          </UButton>
+        </form>
+
+        <!-- Social, one button each in every mode. Google first: it is also a sign-up, and it
+             returns via /sso-callback on this origin. Telegram opens the bot, the poll completes. -->
+        <div class="space-y-3 border-t border-zinc-100 pt-5 dark:border-zinc-800/80">
+          <UButton
+            type="button"
+            color="neutral"
+            variant="outline"
+            class="w-full justify-center py-2.5 font-semibold text-sm cursor-pointer"
+            :disabled="isSubmitting"
+            data-google-login
+            @click="beginGoogle"
+          >
+            <span class="inline-flex items-center gap-2">
+              <SocialBrandIcon platform="google" />
+              {{ t('continueWithGoogle') }}
+            </span>
+          </UButton>
+
+          <UButton
+            type="button"
+            color="neutral"
+            variant="outline"
+            class="w-full justify-center py-2.5 font-semibold text-sm cursor-pointer"
+            :disabled="telegramWaiting"
+            data-telegram-login
+            @click="telegramOpen = true; beginTelegram()"
+          >
+            <span class="inline-flex items-center gap-2">
+              <SocialBrandIcon platform="telegram" />
+              {{ t('continueWithTelegram') }}
+            </span>
+          </UButton>
+
+          <Transition name="reveal">
+            <div v-if="telegramOpen" class="rounded-2xl border border-zinc-200/80 bg-zinc-50/60 p-4 text-sm dark:border-zinc-800/80 dark:bg-zinc-900/40" data-telegram-panel>
+              <p class="font-semibold text-zinc-950 dark:text-white">{{ t('telegramWaiting') }}</p>
+              <p v-if="telegramError" class="mt-2 text-zinc-500 dark:text-zinc-400">{{ telegramError }}</p>
+              <div class="mt-3 flex items-center gap-2">
+                <UButton
+                  v-if="telegramError || !telegramWaiting"
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="outline"
+                  class="cursor-pointer"
+                  @click="beginTelegram()"
+                >
+                  {{ t('continueWithTelegram') }}
+                </UButton>
+                <UButton
+                  type="button"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  class="cursor-pointer"
+                  @click="telegramOpen = false; stopTelegram()"
+                >
+                  {{ t('cancel') }}
+                </UButton>
+              </div>
+            </div>
+          </Transition>
+        </div>
 
         <div class="space-y-2 text-center pt-2">
           <p class="text-xs text-zinc-500 dark:text-zinc-400">
@@ -117,7 +351,7 @@ useHead({ title: pageTitle })
             ← {{ t('home') }}
           </NuxtLink>
         </div>
-      </form>
+      </div>
     </div>
   </main>
 </template>

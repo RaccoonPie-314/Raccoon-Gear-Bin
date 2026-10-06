@@ -4,6 +4,7 @@ import { ORDER_STATUS_KEYS, ORDER_STATUS_TONES, PAYMENT_STATUS_KEYS } from '~/ut
 import { formatOrderDate } from '~/utils/orders'
 import { getSiteContactChannels } from '~/utils/site-contact'
 import { platformLabel } from '~/utils/social-prefill'
+import { startPaywayCheckout } from '~/utils/payway-checkout'
 
 /**
  * One order, as its buyer reads it (specs/ecommerce/SPEC-orders.md): the snapshot items, the
@@ -23,16 +24,63 @@ const order = ref<OrderView | null>(null)
 const isLoading = ref(true)
 const loadError = ref(false)
 
-onMounted(async () => {
+// Pay now (SPEC-payments P4): offered only while the order is pending and unpaid; anything else
+// — paid, cancelled, confirmed — has nothing left to charge.
+const paying = ref(false)
+const payError = ref('')
+const payable = computed(() => order.value?.status === 'pending' && order.value?.paymentStatus === 'unpaid')
+const payNow = async () => {
+  if (paying.value || !order.value) return
+  paying.value = true
+  payError.value = ''
   try {
-    order.value = await fetchOrder(String(route.params.id ?? ''))
+    await startPaywayCheckout(order.value.id)
+  } catch {
+    payError.value = t('payUnavailable')
+    paying.value = false
+  }
+}
+
+// Retries through the handshake settle: this page doubles as the browser's Back target from
+// PayWay, and after a multi-minute excursion the first reads can 401 while clerk-js (or the
+// server handshake) is still reissuing the session. The page itself is unguarded for the same
+// reason — the read is owner-scoped, so a true stranger still gets the not-found state.
+const loadOrder = async () => {
+  loadError.value = false
+  isLoading.value = true
+  try {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        order.value = await fetchOrder(String(route.params.id ?? ''))
+        lastError = null
+        break
+      } catch (error) {
+        lastError = error
+        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 1200))
+      }
+    }
+    if (lastError) throw lastError
   } catch {
     loadError.value = true
   } finally {
     isLoading.value = false
   }
+}
+
+const { user } = useUser()
+
+onMounted(async () => {
+  await loadOrder()
   // Auxiliary, the product page's policy: a failed contact read costs the channels, not the order.
   try { await fetchSiteInfo() } catch (error) { console.error('Site info load failed:', error) }
+})
+
+// The late-session case — previously a false "order not found" right after returning from
+// PayWay: the reads can exhaust their retries while clerk-js is still fresh-loading, and then
+// its user lands a beat later. One more load then; cheap, and it clears the dead end.
+watch(user, (value) => {
+  if (value && loadError.value) loadOrder()
 })
 
 const channels = computed(() => getSiteContactChannels(siteInfo.value, {
@@ -161,6 +209,18 @@ useHead({ title: pageTitle })
               <span class="text-zinc-500">{{ t('paymentStatus') }}</span>
               <span class="font-semibold text-zinc-950 dark:text-white">{{ t(PAYMENT_STATUS_KEYS[order.paymentStatus]) }}</span>
             </div>
+          </div>
+          <div v-if="payable" class="mt-4 border-t border-zinc-200/80 pt-4 dark:border-zinc-800/80">
+            <UButton
+              color="neutral"
+              :loading="paying"
+              data-order-pay
+              class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+              @click="payNow()"
+            >
+              {{ t('payNow') }}
+            </UButton>
+            <p v-if="payError" class="mt-2 text-center text-xs font-semibold text-red-600 dark:text-red-400">{{ payError }}</p>
           </div>
         </section>
 

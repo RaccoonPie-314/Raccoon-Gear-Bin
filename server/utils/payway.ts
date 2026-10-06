@@ -75,6 +75,14 @@ export type PurchaseInput = {
   continueSuccessUrl: string
   /** Defaults to production; the sandbox base is passed in dev/sandbox environments. */
   base?: string
+  /** Pre-minted by the route when the URLs must carry it; otherwise generated here. */
+  tranId?: string
+  /**
+   * `abapay_khqr_deeplink` makes the purchase endpoint answer JSON (qr_string, abapay_deeplink,
+   * checkout_qr_url) instead of an HTML page — probed live 2026-10-06 — which is what lets the
+   * route serve the QR to desktops and push phones into ABA Mobile.
+   */
+  paymentOption?: string
 }
 
 /**
@@ -84,7 +92,7 @@ export type PurchaseInput = {
  * hash-invisible `custom_fields` (that one is dashboard metadata).
  */
 export const buildPurchaseRequest = async (input: PurchaseInput) => {
-  const tranId = newTranId()
+  const tranId = input.tranId ?? newTranId()
   const fields: Record<string, string> = {
     req_time: utcTimestamp(),
     merchant_id: input.merchantId,
@@ -92,6 +100,12 @@ export const buildPurchaseRequest = async (input: PurchaseInput) => {
     amount: input.amount.toFixed(2),
     items: toBase64(JSON.stringify(input.itemLines.map(line => ({ name: line.name, quantity: line.quantity, price: line.price })))),
     type: 'purchase',
+    // The merchant profile also carries the QR Payment service; this flag selects the CHECKOUT
+    // service. Without it the endpoint answers the raw KHQR JSON — code `00`, wrong shape, and
+    // the browser renders a JSON blob instead of PayWay's checkout page (the owner-reported
+    // "nothing happens"). Not part of the hash order, so it rides along unhashed per the docs.
+    payment_gate: '0',
+    ...(input.paymentOption ? { payment_option: input.paymentOption } : {}),
     return_url: input.returnUrl,
     cancel_url: input.cancelUrl,
     skip_success_page: '1',

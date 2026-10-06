@@ -7,14 +7,14 @@
 const { t } = useI18n()
 const localePath = useLocalePath()
 // The account entry lives here, not in the tuned masthead: one reactive label, no measured geometry.
-const user = useSupabaseUser()
+const signedIn = useSignedIn()
 </script>
 
 <template>
   <footer class="mt-16 pb-10">
     <div class="flex items-center justify-center gap-3 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500">
-      <NuxtLink :to="localePath(user ? '/account' : '/login')" class="transition-colors hover:text-zinc-950 dark:hover:text-white">
-        {{ user ? t('myAccount') : t('signIn') }}
+      <NuxtLink :to="localePath(signedIn ? '/account' : '/login')" class="transition-colors hover:text-zinc-950 dark:hover:text-white">
+        {{ signedIn ? t('myAccount') : t('signIn') }}
       </NuxtLink>
       <span aria-hidden="true">·</span>
       <NuxtLink :to="localePath('/privacy')" class="transition-colors hover:text-zinc-950 dark:hover:text-white">

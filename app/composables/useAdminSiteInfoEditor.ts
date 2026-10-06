@@ -1,4 +1,3 @@
-import type { Database } from '~/types/database'
 import type { SiteInfoDraft } from '~/types/site-info'
 
 /** The editor's copy of one social link. `sortOrder` is deliberately absent: position in the
@@ -50,9 +49,9 @@ const draftToForm = (draft: SiteInfoDraft): AdminSiteInfoForm => ({
 /**
  * The admin site-info editor: the form the Site Info page binds to, the link-row operations,
  * and the singleton save. It follows the product editor's shape on purpose — `canMutate` is a
- * UI guard, not the security boundary (authorisation is row-level security in Postgres), and
- * the storage shapes are not re-implemented here: reads and jsonb conversions come from
- * `useSiteInfo`, the only owner of the `site_settings` row.
+ * UI guard, and authorization is the claims-path admin policy behind `/api/admin/site-info`,
+ * whose `requireAdmin` gate answers first. The storage shapes are not re-implemented here:
+ * reads and jsonb conversions come from `useSiteInfo`, the only owner of the `site_settings` row.
  *
  * No catalog state passes through this module, and none of it passes into
  * `useAdminProductEditor` — the two editors stay separate features that happen to share a
@@ -60,7 +59,6 @@ const draftToForm = (draft: SiteInfoDraft): AdminSiteInfoForm => ({
  */
 export const useAdminSiteInfoEditor = (options: { canMutate: () => boolean }) => {
   const { canMutate } = options
-  const supabase = useSupabaseClient<Database>()
   const { fetchSiteInfoDraft, locationLabelsToColumn, socialLinksToColumn } = useSiteInfo()
   const { t } = useI18n()
 
@@ -124,12 +122,11 @@ export const useAdminSiteInfoEditor = (options: { canMutate: () => boolean }) =>
         location_translations: locationLabelsToColumn(Object.entries(siteForm.value.locationLabels).map(([locale, label]) => ({ locale, label }))),
         social_links: socialLinksToColumn(siteForm.value.socialLinks)
       }
-      const { error } = await supabase.from('site_settings').upsert(payload, { onConflict: 'id' })
-      if (error) throw error
+      await $fetch('/api/admin/site-info', { method: 'POST', body: payload })
       savedNotice.value = t('siteInfoSaved')
       await loadSiteInfo()
     } catch (error: any) {
-      actionError.value = error?.message || t('siteInfoSaveError')
+      actionError.value = error?.data?.message || error?.message || t('siteInfoSaveError')
     } finally {
       isSaving.value = false
     }

@@ -1,4 +1,3 @@
-import type { Database } from '~/types/database'
 import { cartTotals } from '~/utils/cart-totals'
 import { locateDeliveryAddress } from '~/utils/geolocation'
 import { shake } from '~/utils/motion'
@@ -29,7 +28,6 @@ const deliveryFieldValid = (field: DeliveryField, values: DeliveryValues): boole
  * and stock; everything here is display state, profile prefill, and one in-flight guard.
  */
 export const useCheckout = () => {
-  const supabase = useSupabaseClient<Database>()
   const { locale, t } = useI18n()
   const localePath = useLocalePath()
   const { fetchProducts, products } = useCatalog()
@@ -159,28 +157,28 @@ export const useCheckout = () => {
         .filter(view => view.product && view.quantity >= 1)
         .map(view => ({ productId: view.line.productId, quantity: view.quantity }))
 
-      const { data, error } = await supabase.rpc('create_order', {
-        p_items: lines,
-        p_delivery: {
-          name: name.value.trim(),
-          phone: phone.value.trim(),
-          address: address.value.trim(),
-          location: locationLink.value.trim(),
-          note: note.value.trim() || null
-        },
-        p_locale: locale.value
+      const orderId = await $fetch<string>('/api/orders', {
+        method: 'POST',
+        body: {
+          items: lines,
+          delivery: {
+            name: name.value.trim(),
+            phone: phone.value.trim(),
+            address: address.value.trim(),
+            location: locationLink.value.trim(),
+            note: note.value.trim() || null
+          },
+          locale: locale.value
+        }
       })
 
-      if (error) {
-        errorMessage.value = messageFor(String(error.message || ''))
-        return false
-      }
-
       clear()
-      await navigateTo(localePath({ path: '/checkout/success', query: { order: String(data) } }))
+      await navigateTo(localePath({ path: '/checkout/success', query: { order: String(orderId) } }))
       return true
-    } catch {
-      errorMessage.value = t('errUnknown')
+    } catch (error: any) {
+      // The route resends the RPC's machine code in the error body's `message`; a transport
+      // failure has none, and `messageFor` answers either with the right sentence.
+      errorMessage.value = messageFor(String(error?.data?.message || error?.message || ''))
       return false
     } finally {
       isSubmitting.value = false

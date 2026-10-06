@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useReducedMotion } from 'motion-v'
 import { iconPop, pulseScale } from '~/utils/motion'
+import { startPaywayCheckout } from '~/utils/payway-checkout'
 
 /**
  * Order confirmation (specs/ecommerce/SPEC-orders.md). This page reads one thing — the order id
@@ -13,6 +14,28 @@ const localePath = useLocalePath()
 const route = useRoute()
 
 const orderId = computed(() => typeof route.query.order === 'string' ? route.query.order : '')
+
+// Pay now (SPEC-payments P4): a just-placed order is pending + unpaid by construction, so no
+// fetch is needed to offer the button — the create route's 409/404 guards decide the rest. A
+// non-payable answer simply shows the order page, where the truth is visible.
+const paying = ref(false)
+const payError = ref('')
+const payNow = async () => {
+  if (paying.value || !orderId.value) return
+  paying.value = true
+  payError.value = ''
+  try {
+    await startPaywayCheckout(orderId.value)
+  } catch (error) {
+    const code = String((error as { data?: { message?: string } })?.data?.message || '')
+    if (code === 'ORDER_NOT_PAYABLE' || code === 'ORDER_NOT_FOUND') {
+      await navigateTo(localePath(`/account/orders/${orderId.value}`))
+      return
+    }
+    payError.value = t('payUnavailable')
+    paying.value = false
+  }
+}
 
 // The funnel's one delight-budget moment (rare tier): the tick acknowledges a placed order just
 // after the page's own enter transition has landed — `iconPop`'s one-shot pulse, the repo's
@@ -63,10 +86,22 @@ useHead({ title: pageTitle })
       <div class="mt-6 space-y-3">
         <UButton
           v-if="orderId"
+          color="neutral"
+          :loading="paying"
+          data-order-pay
+          class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+          @click="payNow()"
+        >
+          {{ t('payNow') }}
+        </UButton>
+        <p v-if="payError" class="text-center text-xs font-semibold text-red-600 dark:text-red-400">{{ payError }}</p>
+        <UButton
+          v-if="orderId"
           :to="localePath(`/account/orders/${orderId}`)"
           color="neutral"
+          variant="soft"
           data-order-view
-          class="w-full justify-center py-2.5 font-semibold text-sm shadow-xs cursor-pointer"
+          class="w-full justify-center py-2.5 font-semibold text-sm cursor-pointer"
         >
           {{ t('viewOrder') }}
         </UButton>

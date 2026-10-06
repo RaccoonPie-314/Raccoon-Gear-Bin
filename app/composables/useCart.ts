@@ -19,15 +19,12 @@ const storageKey = (scope: string) => `${STORAGE_PREFIX}${scope}`
 let bound = false
 
 export const useCart = () => {
-  const user = useSupabaseUser()
+  const { user } = useUser()
   const items = useState<CartLine[]>('cart:items', () => [])
 
-  // On a hard load the server user carries `id`; on client-side navigation the module re-places
-  // state from JWT claims, which name the user `sub` (the project-wide trap).
-  const scope = () => {
-    const identity = user.value as { id?: string, sub?: string } | null
-    return identity?.id || identity?.sub || 'guest'
-  }
+  // Clerk's user id once the SDK holds a session; `guest` before that and when signed out. The
+  // key is the account id either way, so a cart follows the same human across the auth flip.
+  const scope = () => user.value?.id || 'guest'
 
   const load = () => {
     if (!import.meta.client) return

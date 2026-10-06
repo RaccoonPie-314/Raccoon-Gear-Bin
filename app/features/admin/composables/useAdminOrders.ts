@@ -1,19 +1,19 @@
-import type { Database, OrderStatus } from '~/types/database'
+import type { OrderStatus } from '~/types/database'
 import type { OrderView } from '~/types/orders'
-import { mapOrder, ORDER_WITH_ITEMS_SELECT } from '~/utils/orders'
+import type { OrderWithItemsRow } from '~/utils/orders'
+import { mapOrder } from '~/utils/orders'
 
 /** Which chip is on. `all` is a view, not a status — the type says so. */
 export type OrderFilter = 'all' | OrderStatus
 
 /**
- * The admin order desk (specs/ecommerce/SPEC-orders.md): the list read — RLS's admin policy is
- * what makes it *every* order — the transition writes through `set_order_status`, and the filter.
+ * The admin order desk (specs/ecommerce/SPEC-orders.md): the list read — the claims policy is what
+ * makes it *every* order — the transition writes through `set_order_status`, and the filter.
  * The RPC re-checks admin and legality in SQL, so `canMutate` here only keeps a button honest
  * before the server has to say no, the same split as the other admin composables.
  */
 export const useAdminOrders = (options: { canMutate?: () => boolean } = {}) => {
   const canMutate = options.canMutate ?? (() => false)
-  const supabase = useSupabaseClient<Database>()
   const { t } = useI18n()
 
   const orders = ref<OrderView[]>([])
@@ -32,12 +32,7 @@ export const useAdminOrders = (options: { canMutate?: () => boolean } = {}) => {
     isLoading.value = true
     loadError.value = false
     try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select(ORDER_WITH_ITEMS_SELECT)
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      orders.value = (data ?? []).map(mapOrder)
+      orders.value = (await $fetch<OrderWithItemsRow[]>('/api/orders')).map(mapOrder)
     } catch {
       loadError.value = true
     } finally {
@@ -70,8 +65,7 @@ export const useAdminOrders = (options: { canMutate?: () => boolean } = {}) => {
     busyOrderId.value = orderId
     actionError.value = ''
     try {
-      const { error } = await supabase.rpc('set_order_status', { p_order_id: orderId, p_status: status, p_note: note })
-      if (error) throw error
+      await $fetch(`/api/orders/${orderId}/status`, { method: 'POST', body: { status, note } })
       await loadOrders()
     } catch {
       actionError.value = t('transitionError')
@@ -83,12 +77,7 @@ export const useAdminOrders = (options: { canMutate?: () => boolean } = {}) => {
   // The masthead badge's read: the desk's work queue, counted without the heavy select. It clears
   // by being worked (confirm, cancel), not by being looked at — which is why it needs no marker.
   const fetchPendingCount = async (): Promise<number> => {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('id')
-      .eq('status', 'pending')
-    if (error) throw error
-    return (data ?? []).length
+    return await $fetch<number>('/api/orders/pending')
   }
 
   return { orders, visibleOrders, isLoading, loadError, actionError, filter, search, busyOrderId, loadOrders, setStatus, fetchPendingCount }

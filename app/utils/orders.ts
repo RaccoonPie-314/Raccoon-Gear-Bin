@@ -11,7 +11,7 @@ import type { OrderStamps } from '~/utils/order-notices'
  * as the catalog's mappers, but outside its composable because two features share this one.
  */
 
-/** The input shape: an `orders` row with its `order_items` embedded by the select. */
+/** The input shape: an `orders` row with its `order_items` embedded by the route (see ORDERS_WITH_ITEMS below). */
 export type OrderWithItemsRow = Pick<
   OrderRow,
   | 'id' | 'status' | 'delivery_name' | 'delivery_phone' | 'delivery_address' | 'delivery_location' | 'delivery_note'
@@ -25,20 +25,10 @@ export type OrderWithItemsRow = Pick<
   >[]
 }
 
-/**
- * The select both order readers hand to PostgREST (`useCustomerOrders`, `useAdminOrders`). It
- * lives beside the row type it must produce: `mapOrder` checks the result against
- * `OrderWithItemsRow`, so a column dropped from this string cannot fall out of sync silently —
- * the query stops compiling instead.
- */
-export const ORDER_WITH_ITEMS_SELECT = 'id, status, delivery_name, delivery_phone, delivery_address, delivery_location, delivery_note, subtotal, total, currency, payment_status, confirmed_at, delivered_at, cancelled_at, cancel_note, created_at, order_items(id, product_id, name_snapshot, sku_snapshot, unit_price, unit_price_original, promo_label_snapshot, quantity, line_total)'
-
-/**
- * The masthead badge's light read: five columns, no embeds. The same pairing rule as the heavy
- * select — the row type sits beside the string `mapOrderStamp` consumes.
- */
-export const ORDER_STAMPS_SELECT = 'id, created_at, confirmed_at, delivered_at, cancelled_at'
-
+// The JSON these row types describe is produced by the routes in `server/api/orders/**`
+// (server/utils/order-queries.ts owns the SQL): `OrderWithItemsRow` = ORDERS_WITH_ITEMS,
+// `OrderStampsRow` = ORDERS_STAMPS. A column changed on one side changes both — the pairing the
+// old select-string constants enforced mechanically is now a same-commit rule.
 export type OrderStampsRow = Pick<OrderRow, 'id' | 'created_at' | 'confirmed_at' | 'delivered_at' | 'cancelled_at'>
 
 /** PostgREST hands numerics back as strings; absent means null, never `NaN` (the catalog's rule). */

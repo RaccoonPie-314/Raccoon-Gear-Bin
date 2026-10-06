@@ -41,8 +41,8 @@ Initiative level (module criteria are in each spec):
 | Framework | Nuxt ^4.5 (SSR, `cloudflare_module` Nitro preset) | [nuxt.config.ts](../../nuxt.config.ts) |
 | UI | Tailwind v4 + Nuxt UI ^4.11, motion-v ^2.4 | presentational components under `app/components/` |
 | i18n | `@nuxtjs/i18n` ^10.6, locales `en` + `km`, `prefix_except_default` | all strings in [i18n.config.ts](../../i18n.config.ts), both locales, inline |
-| Data | `@nuxtjs/supabase` ^2.0.10 + `@supabase/supabase-js` ^2.116 | browser → Postgres under RLS; anon key only |
-| DB | Supabase Postgres 15 (local stack on 54322; migrations in [supabase/migrations/](../../supabase/migrations/)) | pushed migrations are never edited |
+| Data | Clerk sessions (`@clerk/nuxt`) + Nitro `/api/**` routes on Neon | browser → `/api/**` (claims path); the legacy Supabase client survives for storage only, until the R2 flip (P3) |
+| DB | Neon Postgres (migrations in [db/migrations/](../../db/migrations/), applied by `scripts/db-migrate.mjs`) | pushed migrations are never edited |
 | Runtime | Bun (package manager + scripts), Node 24 for the verify harness | CI: [ci.yml](../../.github/workflows/ci.yml) |
 | Deploy | Cloudflare Worker (`bun run deploy`), free plan currently sufficient | [wrangler.jsonc](../../wrangler.jsonc) |
 | Payments (phase 4) | ABA PayWay Purchase API (HMAC-SHA512 signed, hosted checkout) | contract in [SPEC-payments.md](SPEC-payments.md) |
@@ -59,10 +59,11 @@ bun run lint                       # eslint app (CI)
 bun run verify                     # scripts/verify-ui.mjs, headless Chrome (CI)
 bun run typecheck                  # vue-tsc via `nuxt typecheck`
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit
-supabase db reset                  # apply migrations to the local stack
-supabase migration new <slug>      # new migration (ISO timestamp prefix is added)
-supabase db push                   # push to the linked project (after local verification)
+bun scripts/db-migrate.mjs         # apply db/migrations/*.sql to Neon (records in schema_migrations)
 ```
+
+The legacy Supabase CLI commands (`supabase db reset|migration new|db push`) belong to the frozen
+Supabase project only — cold backup until P9, not the live stack.
 
 Added by this initiative (phase 2, task K1):
 
@@ -112,37 +113,31 @@ strings as inline literals; pure non-reactive rules as plain functions under `ap
 under `app/components/` stay presentational; feature components may use their own feature composable
 and nothing else's; errors thrown, not returned as values.
 
-Representative snippet — a new composable in the established shape (throws; typed client):
+Representative snippet — a new composable in the established shape after the pivot (throws; the
+session is Clerk's, the data lives behind the routes):
 
 ```ts
-import type { Database } from '~/types/database'
-
 export const useCustomerAuth = () => {
-  const supabase = useSupabaseClient<Database>()
-  const user = useSupabaseUser()
+  const { signIn: signInResource } = useSignIn()
+  const clerk = useClerk()
 
-  const signUp = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error) throw error
-    return data
+  const signIn = async (identifier: string, password: string) => {
+    const attempt = await signInResource.value!.create({ identifier, password })
+    if (attempt.status !== 'complete') throw new Error('SIGN_IN_INCOMPLETE')
+    await clerk.value?.setActive({ session: attempt.createdSessionId })
   }
 
-  const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw error
-    return data
-  }
-
-  return { user, signUp, signIn }
+  return { signIn, /* … */ }
 }
 ```
 
-Representative snippet — a migration in the established shape (uuid PK, timestamptz pair, text +
-check, policies inline like [20260922000002_storage_and_rls.sql](../../supabase/migrations/20260922000002_storage_and_rls.sql)):
+Representative snippet — a migration in the established shape (uuid PK unless the id is an identity,
+timestamptz pair, text + check; policies AND grants since P7 — grants open the table, the policy is
+the boundary):
 
 ```sql
 create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
+  id text primary key,              -- Clerk user id
   display_name text,
   phone text,
   created_at timestamptz not null default now(),
@@ -151,11 +146,11 @@ create table if not exists public.profiles (
 
 alter table public.profiles enable row level security;
 
+grant select, update, insert on public.profiles to app_authenticated;
+
 create policy "Users can read their own profile"
 on public.profiles for select
-using (id = auth.uid());
-
--- insert/delete have no policy on purpose: the signup trigger inserts, admin deletion cascades.
+using (id = app.current_user_id());
 ```
 
 Naming: SQL snake_case; TS camelCase functions, `PascalCase` types, `*Row` for table shapes and
@@ -170,7 +165,7 @@ Four tiers, each with a distinct job — and deliberately no framework beyond wh
 | Unit | `bun test tests` (built-in) | pure logic only: `cart-totals`, order-status transition table, PayWay hash/field-building/result-parsing, idempotent `applyResult` against a mocked client | every edit; fast |
 | Migration self-checks | `do $$ ... $$` asserts **inside** the migration that defines the rule (pricing fixtures for `effective_unit_price`; transition accept/reject fixtures for `set_order_status`) | the SQL charging/state rules, executed on every `supabase db reset` | on migration change |
 | RLS verification | documented SQL checklist per migration task (exact `set local role` queries + expected rows), run against the local stack | policies, ownership, default-deny writes | once per migration task, results recorded in the task |
-| Browser harness | `scripts/verify-ui.mjs` (raw CDP, stubbed `/rest/v1`, `/auth/v1`, `/storage/v1`) | flows, geometry, exact request tuples — extended per module: auth stub fixtures, cart badge/persistence/merge, checkout submit payload, admin order transitions, payment UI states | once per module (G3) |
+| Browser harness | `scripts/verify-ui.mjs` (raw CDP; a scripted `fetch` stub for **/api/** and the legacy storage upload, plus a scripted **clerk-js** and photo generator over CDP Fetch) | flows, geometry, exact request tuples — extended per module: session fixtures, cart badge/persistence/merge, checkout submit payload, admin order transitions and desk writes, payment UI states | once per module (G3) |
 
 **Pricing parity** (`orders`, amended 2026-10-04 to what was built): the written rule table exists
 in [SPEC-orders.md](SPEC-orders.md). The TS rule (`getProductPricing`) and the SQL function

@@ -15,12 +15,14 @@
  * It serves the existing `.output`, launches headless Chrome over raw CDP, and asserts geometry,
  * animation state and the exact (method, path, query, body) tuple of every Supabase call.
  *
- * SAFETY: it never touches a real project. A browser-level `fetch` stub answers every
- * /rest/v1, /auth/v1 and /storage/v1 request — and, since the Neon port (P4), the browser's
- * /api/catalog and /api/site-info reads — from scripts/fixtures.json, so no read is needed,
- * no login is required, and no write can reach the database. Server-side (SSR) requests are NOT
- * stubbed — which is why the admin section stays inside the SPA after logging in rather than
- * hard-reloading into a session the real auth server cannot validate.
+ * SAFETY: it never touches a real project. A browser-level `fetch` stub answers every browser
+ * call the app makes — the port-era /api/** routes (catalog, site-info, orders, admin, profile,
+ * admin-check) and the legacy storage upload — from scripts/fixtures.json, and a scripted
+ * clerk-js (served through CDP Fetch, beside the product photos) makes signed-in state
+ * deterministic with no network: the fake keeps its session in one same-origin cookie. No read is
+ * needed, no login is real, and no write can reach the database. Server-side (SSR) requests are
+ * NOT stubbed — which is why signed-in sections stay inside the SPA, and why a signed-out hard
+ * load is expected to bounce on the server guard's own 302.
  *
  * USAGE
  *   bun run verify                 # build first, then all checks
@@ -120,11 +122,6 @@ const stubSource = [
   `  var SITE = ${JSON.stringify(FIXTURES.siteSettings)};`,
   '  var FIXED_USER = "00000000-0000-4000-8000-0000000000ad";',
   '  var NEW_ROW_ID = "11111111-2222-4333-8444-555555555555";',
-  // The id a newly inserted category comes back with, so the category flow can assert the DELETE it
-  // issues later targets the row it just created rather than one of the fixtures.
-  '  var NEW_CAT_ID = "33333333-4444-4555-8666-777777777777";',
-  // The customer profile the account flow reads and writes. The signup response below is the same
-  // fixed user, so the account page's email assertion reads this fixture identity.
   '  var PROFILE = { id: FIXED_USER, display_name: "Verify User", phone: "+855 12 345 678" };',
   // The order rows the reads answer from. Deliberately newest-first (as the list query would return
   // them): the cancelled row is newer than the pending one, so the admin desk cannot pass the row
@@ -132,17 +129,6 @@ const stubSource = [
   // refusal arm — it makes `create_order` answer the RPC's documented machine code shape.
   `  var ORDERS = ${JSON.stringify(FIXTURES.orders)};`,
   '  var ORDER_ID = (ORDERS.filter(function (o) { return o.status === "pending" })[0] || ORDERS[0]).id;',
-  '  function b64(o) { return btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/[+]/g, "-").replace(/[/]/g, "_") }',
-  '  var iat = Math.floor(Date.now() / 1000);',
-  '  var jwt = b64({ alg: "HS256", typ: "JWT" }) + "." + b64({ sub: FIXED_USER, email: "verify@example.test", role: "authenticated", aud: "authenticated", session_id: "verify", iat: iat, exp: iat + 7200 }) + ".sig";',
-  '  var user = { id: FIXED_USER, aud: "authenticated", role: "authenticated", email: "verify@example.test", phone: null, user_metadata: {}, app_metadata: { provider: "email", providers: ["email"] }, identities: [], created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString(), last_sign_in_at: new Date(0).toISOString() };',
-  '  var session = { access_token: jwt, token_type: "bearer", expires_in: 3600, refresh_token: "verify-refresh", expires_at: iat + 3600, user: user };',
-  // The stub must be honest about auth state: `/auth/v1/user` answers 401 when signed out, or the
-  // module's post-sign-out refresh keeps re-populating the user and the UI never flips back to
-  // "Sign in". The flag seeds from the session cookie, so a FULL page load (any `nav()` while signed
-  // in) starts with the stub agreeing a session exists — otherwise the module's on-load validation
-  // 401s against a fresh document and the user state lingers in limbo until the claims re-placement.
-  '  var signedIn = document.cookie.indexOf("auth-token") !== -1;',
   '  window.__W = [];',
   // Aliases for the two fixture collections the stub answers from. They are handed out on purpose:
   // a test that needs a *different* shop configuration — no contact channels at all, a product with
@@ -158,27 +144,24 @@ const stubSource = [
   '  window.fetch = function (input, init) {',
   '    var url = (typeof input === "string") ? input : ((input && input.url) || "");',
   '    var method = String((init && init.method) || ((typeof input === "object") && input.method) || "GET").toUpperCase();',
-  // The port-era read routes (plans/005 P4) are stubbed too: the browser's catalog and site-info
-  // reads arrive as /api/** now, and they answer from the same fixtures.
-  '    if (!new RegExp("/(rest|auth|storage)/|/api/(catalog|site-info)").test(url)) return orig(input, init);',
+  // Every port-era route is stubbed: the storefront's /api reads and writes, the desk's /api/admin
+  // set, the account's /api/profile and the guard's /api/admin-check all answer from the fixtures,
+  // and the legacy storage upload keeps its fake so the editor write flow stays exercisable.
+  '    if (!new RegExp("/storage/|/api/(catalog|site-info|orders|admin|profile)").test(url)) return orig(input, init);',
   '    var path = url.replace(new RegExp("^https?://[^/]+"), "");',
   '    var cut = path.indexOf("?");',
   '    var p = cut >= 0 ? path.slice(0, cut) : path;',
   '    var q = cut >= 0 ? path.slice(cut + 1).replace(new RegExp("&?apikey=[^&]*", "g"), "").replace(new RegExp("&?[a-z-]+=\\\\d{10,13}", "g"), "") : "";',
   '    var raw = init && init.body;',
   '    window.__W.push({ method: method, p: p, q: q, body: (typeof raw === "string") ? raw : (raw ? "<bytes>" : null) });',
-  // Admin-ness is per browser session, seeded by the admin section itself: the guest slice's
-  // shopper must resolve non-admin (the masthead Orders pill switches targets on it, and so does
-  // the buyer badge branch), while sessionStorage carries the admin answer across reloads.
-  '    if (method === "GET" && p === "/rest/v1/admin_users") return json(sessionStorage.getItem("__admin_session") === "1" ? { role: "super_admin" } : null, 200);',
-  '    if (method === "GET" && p === "/auth/v1/user") return signedIn ? json(user, 200) : json({ message: "invalid claim: missing sub claim" }, 401);',
-  '    if (p === "/auth/v1/token") { signedIn = true; return json(session, 200); }',
-  '    if (p === "/auth/v1/logout") { signedIn = false; return json(null, 204); }',
-  // Sign-up answers with the session shape GoTrue returns when email confirmation is off — the
-  // documented v1 configuration (SPEC-identity). It is parsed by auth-js's `_sessionResponse`, which
-  // reads `access_token`/`refresh_token`/`user` at the TOP level, so this is the bare session object
-  // (same shape the token endpoint returns), not a `{ user, session }` wrapper.
-  '    if (p === "/auth/v1/signup") { signedIn = true; return json(session, 200); }',
+  // The identity read every auth-aware surface asks (P6/P7). Admin-ness is per browser session,
+  // seeded by the admin section itself: the guest walk's shopper must resolve non-admin (the
+  // masthead Orders pill switches targets on it, and so does the buyer badge branch), while
+  // sessionStorage carries the admin answer across the section's documents — and it only counts
+  // while the scripted session is signed in, exactly like the real route's 401 (a stale "admin"
+  // branch would re-light admin mode after a sign-out). The fake session itself lives in the
+  // scripted clerk-js below, not in this stub.
+  '    if (p === "/api/admin-check" && method === "GET") return json({ admin: sessionStorage.getItem("__admin_session") === "1" && document.cookie.indexOf("__harness_clerk") !== -1 }, 200);',
   '    if (new RegExp("^/storage/v1/object").test(p) && method !== "GET") return json({ Key: "ok", Id: NEW_ROW_ID }, 200);',
   // The public reads moved to /api routes in the Neon port (P4): same fixtures, same row shapes,
   // with one object (not an array) for a single-row answer. The write paths below stay PostgREST
@@ -187,29 +170,79 @@ const stubSource = [
   '    if (p === "/api/catalog/categories" && method === "GET") return json(CATEGORIES, 200);',
   '    if (p === "/api/catalog/category-drafts" && method === "GET") return json(CATEGORIES, 200);',
   '    if (p === "/api/site-info" && method === "GET") return json(SITE, 200);',
-  // An inserted category answers with one object, because the editor asks for `id` with `.single()`.
-  '    if (p === "/rest/v1/categories" && method === "POST") return json({ id: NEW_CAT_ID }, 201);',
-  // The site-info singleton is editable in-stub so the "public reflects the save" check can
-  // read back what the admin flow wrote, without any real project being touched.
-  '    if (p === "/rest/v1/site_settings" && (method === "PATCH" || method === "POST")) { try { Object.assign(SITE, JSON.parse(raw || "{}")); } catch (e) {} return json(method === "POST" ? [SITE] : null, method === "POST" ? 201 : 204); }',
-  // The profile row is readable and writable in-stub, mirroring the site-settings pattern, so the
-  // account save can read back what it wrote. `.single()` after an update wants an object, not an array.
-  '    if (p === "/rest/v1/profiles" && method === "GET") { var prof = PROFILE; if (window.__PROFILE_EMPTY) { window.__PROFILE_EMPTY = false; prof = Object.assign({}, PROFILE, { display_name: null }) } return json([prof], 200); }',
-  '    if (p === "/rest/v1/profiles" && method === "PATCH") { try { Object.assign(PROFILE, JSON.parse(raw || "{}")); } catch (e) {} return json(PROFILE, 200); }',
-  // Orders are read-only here: the list answers every fixture, the detail filters by id. The two
-  // RPCs are the only writes — `create_order` returns the pending fixture's id unless the one-shot
-  // refusal flag is set, when it answers PostgREST's error shape for a `P0001` raise.
-  // `__ORDER_TOUCH` is the buyer-notice one-shot: the next orders read answers with the pending
-  // row's `confirmed_at` set — exactly what confirming it does — so the unseen count has one
-  // update to report. `status=eq.pending` is the admin badge's count read.
-  '    if (p === "/rest/v1/orders" && method === "GET") { if (window.__ORDER_TOUCH) { window.__ORDER_TOUCH = false; var touched = ORDERS.filter(function (x) { return x.id === ORDER_ID })[0]; if (touched) touched.confirmed_at = "2026-10-04T04:00:00.000Z" } var rows = ORDERS; var ord = new RegExp("(?:^|&)id=eq[.]([0-9a-f-]+)").exec(q); if (ord) rows = rows.filter(function (x) { return x.id === ord[1] }); var st = new RegExp("(?:^|&)status=eq[.]([a-z]+)").exec(q); if (st) rows = rows.filter(function (x) { return x.status === st[1] }); return json(rows, 200) }',
-  '    if (p === "/rest/v1/rpc/create_order" && method === "POST") { if (window.__ORDERS_FAIL) { var fail = window.__ORDERS_FAIL; window.__ORDERS_FAIL = null; return json({ code: "P0001", message: fail, details: null, hint: null }, 400) } return json(ORDER_ID, 200) }',
-  '    if (p === "/rest/v1/rpc/set_order_status" && method === "POST") return json(null, 204);',
-  '    if (p === "/rest/v1/products" && method === "POST") return json({ id: NEW_ROW_ID }, 201);',
+  // The desk's writes (P7) are one transactional route each: the stub answers success and the
+  // checks assert the request payload — the fixtures stay the read truth (only `site_settings` is
+  // mutable in-stub so the "public reflects the save" check can read back what the editor wrote).
+  '    if (p === "/api/admin/site-info" && method === "POST") { try { Object.assign(SITE, JSON.parse(raw || "{}")); } catch (e) {} return json(null, 204); }',
+  '    if (p === "/api/admin/categories" && method === "POST") return json(null, 204);',
+  '    if (new RegExp("^/api/admin/categories/[0-9a-f-]+$").test(p) && method === "DELETE") return json(null, 204);',
+  '    if (p === "/api/admin/products" && method === "POST") { var pid = ""; try { pid = JSON.parse(raw || "{}").id || "" } catch (e) {} return json({ id: pid || NEW_ROW_ID }, 200); }',
+  '    if (new RegExp("^/api/admin/products/[0-9a-f-]+$").test(p) && method === "DELETE") return json(null, 204);',
+  // The account's profile row (P6): readable and writable in-stub, mirroring the site-settings
+  // pattern, so the account save can read back what it wrote.
+  '    if (p === "/api/profile" && method === "GET") { var prof = PROFILE; if (window.__PROFILE_EMPTY) { window.__PROFILE_EMPTY = false; prof = Object.assign({}, PROFILE, { display_name: null }) } return json(prof, 200); }',
+  '    if (p === "/api/profile" && method === "PATCH") { try { var patch = JSON.parse(raw || "{}"); if ("displayName" in patch) PROFILE.display_name = patch.displayName; if ("phone" in patch) PROFILE.phone = patch.phone } catch (e) {} return json(PROFILE, 200); }',
+  // Orders, port-era (P5): reads run on /api/orders* — the buyer's self-scoped trio
+  // (mine/stamps/:id) and the desk's bare list; the two RPCs are the only writes, now
+  // POST /api/orders and POST /api/orders/:id/status. `create_order` returns the pending fixture's
+  // id unless the one-shot refusal flag is set, when it answers the route's 400 body (the machine
+  // code in `message`). `__ORDER_TOUCH` is the buyer-notice one-shot: the next self-scoped read
+  // answers with the pending row's `confirmed_at` set — exactly what confirming it does — so the
+  // unseen count has one update to report.
+  '    var touchOrders = function () { if (window.__ORDER_TOUCH) { window.__ORDER_TOUCH = false; var t = ORDERS.filter(function (x) { return x.id === ORDER_ID })[0]; if (t) t.confirmed_at = "2026-10-04T04:00:00.000Z" } };',
+  '    if (p === "/api/orders" && method === "GET") return json(ORDERS, 200);',
+  '    if (p === "/api/orders/mine" && method === "GET") { touchOrders(); return json(ORDERS, 200) }',
+  '    if (p === "/api/orders/stamps" && method === "GET") { touchOrders(); return json(ORDERS, 200) }',
+  '    if (p === "/api/orders/pending" && method === "GET") return json(ORDERS.filter(function (x) { return x.status === "pending" }).length, 200);',
+  '    if (new RegExp("^/api/orders/[0-9a-f-]+$").test(p) && method === "GET") { var oid = p.split("/").pop(); return json(ORDERS.filter(function (x) { return x.id === oid })[0] || null, 200) }',
+  '    if (p === "/api/orders" && method === "POST") { if (window.__ORDERS_FAIL) { var fail = window.__ORDERS_FAIL; window.__ORDERS_FAIL = null; return json({ statusCode: 400, statusMessage: fail, message: fail }, 400) } return json(ORDER_ID, 200) }',
+  '    if (new RegExp("^/api/orders/[0-9a-f-]+/status$").test(p) && method === "POST") return json(null, 204);',
   '    if (method === "PATCH" || method === "DELETE") return json(null, 204);',
   '    if (method === "POST") return json([], 201);',
   '    return json([], 200);',
   '  };',
+  '})()'
+].join('\n')
+
+// ---------------------------------------------------------------- scripted clerk-js
+// `@clerk/vue` loads clerk-js as a <script> (and the UI bundle beside it) and then builds its
+// whole reactive world from three things: the globals the scripts leave behind, one `load()`
+// promise, and the payload of `addListener`. So the rig answers every request to the fake
+// frontend-API host from CDP Fetch — the same domain the product photos use — with a minimal
+// stand-in implementing exactly that surface, the sign-in/sign-up resources the forms call, and
+// `setActive`/`signOut` moving one same-origin cookie. The cookie is the session: a fresh document
+// (any `nav()` while signed in) re-runs the script and agrees a session exists — the same trick the
+// old Supabase stub's auth cookie pulled. Plain lines and no regexes, same as the fetch stub: this
+// file keeps its backslash-free discipline.
+const FAKE_CLERK = [
+  '(function () {',
+  '  var COOKIE = "__harness_clerk";',
+  '  function signedIn() { return document.cookie.indexOf(COOKIE + "=1") !== -1 }',
+  '  function makeUser() { return { id: "00000000-0000-4000-8000-0000000000ad", username: "verify-user", firstName: "Verify", primaryEmailAddress: { emailAddress: "verify@example.test" } } }',
+  '  function makeSession() { return { id: "sess_harness", status: "active" } }',
+  '  var listeners = [];',
+  '  function emit() {',
+  '    window.__HARNESS_CLERK = { signedIn: signedIn() };',
+  '    var resources = { client: client, session: signedIn() ? makeSession() : null, user: signedIn() ? makeUser() : null, organization: null };',
+  '    for (var i = 0; i < listeners.length; i++) listeners[i](resources);',
+  '  }',
+  '  function setCookie(value) { document.cookie = COOKIE + "=" + value + "; path=/; max-age=" + (value ? 86400 : 0) }',
+  '  function refuse(message) { return Promise.reject({ errors: [{ message: message }] }) }',
+  '  var client = {',
+  '    signIn: { create: function (params) { return String((params || {}).password) === "wrong-password" ? refuse("Password is incorrect.") : Promise.resolve({ status: "complete", createdSessionId: "sess_harness" }) } },',
+  '    signUp: { create: function (params) { return String((params || {}).emailAddress || "").indexOf("taken") === 0 ? refuse("That email address is taken.") : Promise.resolve({ status: "complete", createdSessionId: "sess_harness" }) } }',
+  '  };',
+  '  var clerk = {',
+  '    load: function () { return Promise.resolve() },',
+  '    addListener: function (cb) { listeners.push(cb); emit(); return function () { var i = listeners.indexOf(cb); if (i !== -1) listeners.splice(i, 1) } },',
+  '    setActive: function () { setCookie("1"); emit(); return Promise.resolve() },',
+  '    signOut: function () { setCookie(""); emit(); return Promise.resolve() },',
+  '    client: client',
+  '  };',
+  // The UI bundle's own request lands on the same host and must leave this behind, or the loader
+  // rejects and the plugin logs a fetch failure before ever reaching `load()`.
+  '  window.__internal_ClerkUICtor = window.__internal_ClerkUICtor || function () {};',
+  '  window.Clerk = clerk;',
   '})()'
 ].join('\n')
 
@@ -403,20 +436,35 @@ const run = async () => {
   // every catalog URL now carries a `?width=` transform and arrives on `/render/image/`, while an
   // absolute `storage_path` still comes back on `/object/`. `photoFor` cuts the query off first, so
   // the transform never changes which synthetic size a fixture filename asks for.
+  // Two families arrive here: the product photos (every storage image URL) and the scripted
+  // clerk-js (every request to the fake frontend-API host — the browser bundle and the UI one,
+  // both served the same payload; see FAKE_CLERK). `crossOrigin: anonymous` on the clerk scripts
+  // means these answers must carry the CORS header, same as the photos.
   cdp.onEvent = async (m) => {
     if (m.method !== 'Fetch.requestPaused') return
-    const body = Buffer.from(photoFor(m.params.request.url)).toString('base64')
+    const url = m.params.request.url
+    const isClerk = url.indexOf('clerk.example.invalid') !== -1
+    const payload = isClerk ? FAKE_CLERK : photoFor(url)
+    const type = isClerk ? 'application/javascript; charset=utf-8' : 'image/svg+xml'
+    const body = Buffer.from(payload).toString('base64')
     try {
       await cdp.send('Fetch.fulfillRequest', {
         requestId: m.params.requestId,
         responseCode: 200,
-        responseHeaders: [{ name: 'content-type', value: 'image/svg+xml' }, { name: 'access-control-allow-origin', value: '*' }],
+        responseHeaders: [{ name: 'content-type', value: type }, { name: 'access-control-allow-origin', value: '*' }],
         body
       })
-    } catch { /* the request was already dropped; the picture is decorative here */ }
+    } catch { /* the request was already dropped; nothing here is load-bearing for a check */ }
   }
   await cdp.send('Page.enable'); await cdp.send('Runtime.enable'); await cdp.send('DOM.enable')
-  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/storage/v1/render/image/public/*', requestStage: 'Request' }, { urlPattern: '*/storage/v1/object/public/*', requestStage: 'Request' }] })
+  // Product photos come from the rig, not the network. `Fetch` is the only CDP domain that can
+  // answer an `<img>` request — the in-browser `fetch` stub cannot — and it is scoped to the one
+  // bucket the app builds public URLs from plus the fake Clerk host, so nothing else is
+  // intercepted. Both storage paths are listed because every catalog URL now carries a `?width=`
+  // transform and arrives on `/render/image/`, while an absolute `storage_path` still comes back
+  // on `/object/`. `photoFor` cuts the query off first, so the transform never changes which
+  // synthetic size a fixture filename asks for.
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*/storage/v1/render/image/public/*', requestStage: 'Request' }, { urlPattern: '*/storage/v1/object/public/*', requestStage: 'Request' }, { urlPattern: '*clerk.example.invalid*', requestStage: 'Request' }] })
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: stubSource })
 
   // 3. helpers built on the client
@@ -2626,7 +2674,7 @@ const run = async () => {
     const keptComponent = await ev('(() => { const m = document.querySelector("main"); return !!m && m.__localeProbe === "kept" })()')
     const yAfter = await ev('window.scrollY')
     const hAfter = await ev('document.documentElement.scrollHeight')
-    const readsAfterSwitch = (await allW()).filter(w => w.method === 'GET' && (w.p.startsWith('/rest/v1/') || w.p.startsWith('/api/')))
+    const readsAfterSwitch = (await allW()).filter(w => w.method === 'GET' && w.p.startsWith('/api/'))
     check('a locale switch lands on the Khmer route without leaving the page', switched && pillFocused && keptComponent === true, { switched, pillFocused, keptComponent })
     check('a locale switch asks the server for nothing it already has', readsAfterSwitch.length === 0, { calls: seqOf(readsAfterSwitch) })
     // A shorter document — the Khmer text lands under a font the layout was not tuned on — clamps
@@ -2739,7 +2787,7 @@ const run = async () => {
     await clickSelector('main article a[href]', 'location.pathname.startsWith("/km/products/")')
     await waitFor('!!document.querySelector(\'[data-product-gallery]\')')
     const rebuilt = await ev('(() => { const m = document.querySelector("main"); return !m || m.__localeProbe !== "kept" })()')
-    const readsAfterCard = (await allW()).filter(w => w.method === 'GET' && (w.p.startsWith('/rest/v1/') || w.p.startsWith('/api/')))
+    const readsAfterCard = (await allW()).filter(w => w.method === 'GET' && w.p.startsWith('/api/'))
     check('a product navigation rebuilds the page and reads again', rebuilt === true && readsAfterCard.length > 0, { rebuilt, calls: seqOf(readsAfterCard).slice(0, 3) })
     check('following that card keeps the detail page in Khmer', await ev('(() => { const p = location.pathname; const khmer = /[\u1780-\u17FF]/.test(document.body.innerText); return p.startsWith("/km/products/") && khmer })()'), { href: kmHref })
     const kmDetailWide = await latinSpacedKhmer()
@@ -3160,7 +3208,7 @@ const run = async () => {
       await cdp.send('Input.insertText', { text: signupValues[i] })
     }
     await clickByText('main form button[type="submit"]', 'Create account', 'location.pathname === "/account"')
-    const afterSignup = await ev('(() => ({ url: location.pathname + location.search, cookie: document.cookie.indexOf("auth-token") !== -1, auth: window.__W.filter(w => w.p.indexOf("auth/v1") !== -1).map(w => w.method + " " + w.p) }))()')
+    const afterSignup = await ev('(() => ({ url: location.pathname + location.search, cookie: document.cookie.indexOf("__harness_clerk") !== -1, session: (window.__HARNESS_CLERK || {}).signedIn === true }))()')
     check('signing up lands signed in on the account page', await waitFor('location.pathname === "/account"'), afterSignup)
 
     await waitFor('!!document.querySelector("[data-account-email]")')
@@ -3169,15 +3217,15 @@ const run = async () => {
     check('the account form is prefilled from the profile row', await waitFor('[...document.querySelectorAll("main form input")].some(el => el.value === "Verify User")'))
 
     await clickByText('main form button[type="submit"]', 'Save changes', 'document.body.innerText.includes("Account saved.")')
-    const profileWrites = await ev('window.__W.filter(w => w.p === "/rest/v1/profiles" && w.method === "PATCH").map(w => ({ q: w.q, b: w.body || "" }))')
-    check('saving the profile confirms once, on the signed-in row, with the form values', await waitFor('document.body.innerText.includes("Account saved.")') && profileWrites.length === 1 && profileWrites[0].q.includes('id=eq.00000000-0000-4000-8000-0000000000ad') && profileWrites[0].b.includes('display_name') && profileWrites[0].b.includes('phone'), profileWrites)
+    const profileWrites = await ev('window.__W.filter(w => w.p === "/api/profile" && w.method === "PATCH").map(w => ({ b: w.body || "" }))')
+    check('saving the profile confirms once, on the signed-in row, with the form values', await waitFor('document.body.innerText.includes("Account saved.")') && profileWrites.length === 1 && profileWrites[0].b.includes('displayName') && profileWrites[0].b.includes('phone'), profileWrites)
 
     // The merge runs when the cart next binds with the new session — visiting the catalog is that
     // moment. The guest key's removal is the merge's signature, and the watcher that performs it
     // fires when the module's async user state lands, so wait for the evidence, not for a clock.
     await nav(appUrl)
     await waitFor('!localStorage.getItem("raccoon-cart:v1:guest")')
-    const mergeState = await ev('(() => ({ guest: !!localStorage.getItem("raccoon-cart:v1:guest"), user: JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "null"), pill: ([...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim() === "My account") || {}).textContent?.trim() || null, signed: document.cookie.indexOf("auth-token") !== -1 }))()')
+    const mergeState = await ev('(() => ({ guest: !!localStorage.getItem("raccoon-cart:v1:guest"), user: JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "null"), pill: ([...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim() === "My account") || {}).textContent?.trim() || null, signed: document.cookie.indexOf("__harness_clerk") !== -1 }))()')
     check('signing in merges the guest cart into the account cart', !mergeState.guest && !!mergeState.user && mergeState.user.items.length === 1 && mergeState.user.items[0].productId === cartProductId && mergeState.user.items[0].quantity === 1, mergeState)
     check('the merged cart badges the masthead', await waitFor('(document.querySelector("[data-cart-badge]") || {}).textContent?.trim() === "1"'), { badge: await ev('(document.querySelector("[data-cart-badge]") || {}).textContent') })
     // Back to /account client-side: a full page load would hit the SSR guard, which the in-browser
@@ -3268,12 +3316,12 @@ const run = async () => {
     // Submitting with the address still empty must not spend a request: the first invalid field
     // in form order is shaken (the WAAPI animation is read on its form-field wrapper) and the
     // message names the requirements. The request count pins the local short-circuit.
-    const postsBeforeInvalid = (await allW()).filter(w => w.p === '/rest/v1/rpc/create_order').length
+    const postsBeforeInvalid = (await allW()).filter(w => w.method === 'POST' && w.p === '/api/orders').length
     await clickSelector('[data-checkout-submit]')
     const addressShake = await waitFor('(() => { const el = document.querySelector("[data-checkout-field=address]"); return !!el && el.getAnimations().length >= 1 })()', 500)
     const addressHint = await waitFor('(() => { const el = document.querySelector("[data-checkout-field=address]"); return !!el && (el.textContent || "").includes(' + JSON.stringify(EXP.orders.requiredAddressText) + ') })()')
     const invalidShown = await waitFor('(() => { const a = document.querySelector("[data-checkout-error]"); return !!a && (a.textContent || "").includes(' + JSON.stringify(EXP.orders.invalidDeliveryText) + ') })()')
-    const postsAfterInvalid = (await allW()).filter(w => w.p === '/rest/v1/rpc/create_order').length
+    const postsAfterInvalid = (await allW()).filter(w => w.method === 'POST' && w.p === '/api/orders').length
     check('an empty address refuses locally: the field shakes, names what is needed, and sends nothing', addressShake && addressHint && invalidShown && postsAfterInvalid === postsBeforeInvalid, { addressShake, addressHint, invalidShown, posts: postsAfterInvalid })
     const DELIVERY = EXP.orders.delivery
     await ev(setInput('[data-checkout-name]', DELIVERY.name))
@@ -3293,14 +3341,14 @@ const run = async () => {
     await clickSelector('[data-checkout-submit]')
     const refusedShown = await waitFor('(() => { const a = document.querySelector("[data-checkout-error]"); return !!a && (a.textContent || "").includes(' + JSON.stringify(EXP.orders.promoLimitText) + ') && location.pathname === "/checkout" })()')
     const cartAfterRefusal = await ev('(JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "{}").items || []).length')
-    const refusalProbe = await ev('JSON.stringify({ path: location.pathname, alert: !!document.querySelector("[data-checkout-error]"), disabled: (document.querySelector("[data-checkout-submit]") || {}).disabled ?? null, posts: (window.__W || []).filter(w => w.p === "/rest/v1/rpc/create_order").length, failFlag: window.__ORDERS_FAIL || null })')
+    const refusalProbe = await ev('JSON.stringify({ path: location.pathname, alert: !!document.querySelector("[data-checkout-error]"), disabled: (document.querySelector("[data-checkout-submit]") || {}).disabled ?? null, posts: (window.__W || []).filter(w => w.method === "POST" && w.p === "/api/orders").length, failFlag: window.__ORDERS_FAIL || null })')
     check('a refused order shows the mapped sentence, stays put and keeps the cart', refusedShown && cartAfterRefusal === 1, { refusedShown, cartAfterRefusal, refusalProbe })
-    check('the refused click issued exactly one create_order', (await allW()).filter(w => w.p === '/rest/v1/rpc/create_order').length === 1)
+    check('the refused click issued exactly one create_order', (await allW()).filter(w => w.method === 'POST' && w.p === '/api/orders').length === 1)
 
     check('placing the order lands on the success page with the returned reference', await clickSelector('[data-checkout-submit]', 'location.pathname === "/checkout/success" && !!document.querySelector("[data-order-number]")'))
-    const placed = (await allW()).filter(w => w.p === '/rest/v1/rpc/create_order')
+    const placed = (await allW()).filter(w => w.method === 'POST' && w.p === '/api/orders')
     const placedBody = JSON.parse(placed[placed.length - 1]?.body || '{}')
-    const wantBody = { p_items: [{ productId: cartProductId, quantity: 1 }], p_delivery: { name: DELIVERY.name, phone: DELIVERY.phone, address: DELIVERY.address, location: pinUrl, note: null }, p_locale: 'en' }
+    const wantBody = { items: [{ productId: cartProductId, quantity: 1 }], delivery: { name: DELIVERY.name, phone: DELIVERY.phone, address: DELIVERY.address, location: pinUrl, note: null }, locale: 'en' }
     const ref = await ev('(document.querySelector("[data-order-number]") || {}).textContent?.trim()')
     const cartAfterOrder = await ev('(JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "{}").items || []).length')
     check('the placed body is the clamped cart, the delivery form and the locale — exactly', placed.length === 2 && JSON.stringify(placedBody) === JSON.stringify(wantBody), { placedBody })
@@ -3327,17 +3375,22 @@ const run = async () => {
     check('the buyer sees the cancellation note on a cancelled order', cancelledClicked && cancelledRef === CANCELLED_ORDER_ID && cancelledNote === CANCELLED_NOTE, { cancelledClicked, cancelledRef, cancelledNote })
     check('Back to orders returns after the cancelled visit', await clickByText('main a', 'Back to orders', 'location.pathname === "/account/orders" && !!document.querySelector("[data-orders-list]")'))
 
-    // RLS decides what the client *may* read; this page must still ask only for what is *its own*.
-    // Without the explicit filter, an admin account's My-account → Orders lists the whole shop
-    // (the policy grants that access), which is the desk's view, not this page's.
-    const ordersQueries = (await allW()).filter(w => w.method === 'GET' && w.p === '/rest/v1/orders').map(w => w.q)
-    check('the buyer history read is scoped to the signed-in user', ordersQueries.length > 0 && ordersQueries.every(q => q.includes('user_id=eq.00000000-0000-4000-8000-0000000000ad')), { ordersQueries })
+    // The endpoint set decides what a buyer's pages may read: the self-scoped trio (mine, stamps,
+    // single) and never the desk's unscoped list — without that split an admin account's
+    // My-account → Orders would list the whole shop (the policy grants that access), which is
+    // the desk's view, not this page's.
+    const ordersReads = (await allW()).filter(w => w.method === 'GET' && w.p.startsWith('/api/orders'))
+    check('the buyer history reads all go through the self-scoped endpoints, never the desk list', ordersReads.length > 0 && ordersReads.every(w => w.p !== '/api/orders'), { reads: ordersReads.map(w => w.p) })
 
     await clickByText('main a', 'My account', 'location.pathname === "/account"')
     await waitFor('!!document.querySelector("[data-account-signout]")')
 
+    // Asserted and retried once, like every other aimed departure near a freshly-settled page in
+    // this file (observed once absorbed: the run stayed on /account with the session intact).
     await clickSelector('[data-account-signout]', 'location.pathname === "/"')
-    check('signing out returns to the storefront and clears the session', await waitFor('location.pathname === "/" && document.cookie.indexOf("auth-token") === -1 && !Object.keys(localStorage).some(k => k.indexOf("auth-token") !== -1)'), { url: await ev('location.pathname'), cookie: await ev('document.cookie.indexOf("auth-token") !== -1'), ls: await ev('Object.keys(localStorage).some(k => k.indexOf("auth-token") !== -1)') })
+      || await clickSelector('[data-account-signout]', 'location.pathname === "/"')
+    const signOutProbe = await ev('(() => { const btn = document.querySelector("[data-account-signout]"); const alerts = [...document.querySelectorAll("main [role=\\"alert\\"]")].map(a => (a.textContent || "").trim()); return { url: location.pathname, btn: !!btn, btnText: btn ? (btn.textContent || "").trim() : null, alerts, clerk: (window.__HARNESS_CLERK || {}).signedIn } })()')
+    check('signing out returns to the storefront and clears the session', await waitFor('location.pathname === "/" && document.cookie.indexOf("__harness_clerk") === -1 && (window.__HARNESS_CLERK || {}).signedIn === false'), { probe: signOutProbe, url: await ev('location.pathname'), cookie: await ev('document.cookie.indexOf("__harness_clerk") !== -1'), clerk: await ev('(window.__HARNESS_CLERK || {}).signedIn') })
 
     // The label flips when the module's post-sign-out refresh lands (which is also when the stub's
     // 401 makes it stick), so wait for it before reading the href.
@@ -3377,9 +3430,26 @@ const run = async () => {
       || await clickByText('footer a', 'Sign in', 'location.pathname === "/login"')
     await waitFor('!!document.querySelector(\'main form input[type="email"]\')')
     const liveLoginBoxes = await ev(boxesExpr('main form input'))
+    // The form can EXIST while still mid-enter-animation: a falsified `preSubmit` once showed the
+    // boxes 16px above their final home, the first click landing and the second hitting whatever
+    // slid into the gap. Settle on stable coordinates first, then (below) re-measure per click —
+    // the same drifting-gap class the walk's retried departures name.
+    let settledBoxes = liveLoginBoxes
+    for (let tries = 0; tries < 8; tries++) {
+      await sleep(150)
+      const next = await ev(boxesExpr('main form input'))
+      if (JSON.stringify(next) === JSON.stringify(settledBoxes)) break
+      settledBoxes = next
+    }
     const liveLoginValues = ['shopper@example.test', 'password123']
-    for (let i = 0; i < liveLoginBoxes.length && i < liveLoginValues.length; i++) {
-      await clickAt(liveLoginBoxes[i].x, liveLoginBoxes[i].y)
+    // The boxes are re-measured before EVERY click: the first observation can land mid-enter-
+    // animation (~16px of drift once falsified `preSubmit` with a BUTTON-focused password miss —
+    // the page settles between the two inserts, and the second fixed-coordinate click then hits
+    // whatever slid into the gap). Same class as the walk's documented retried departures.
+    for (let i = 0; i < liveLoginValues.length; i++) {
+      const fresh = await ev(boxesExpr('main form input'))
+      if (!fresh[i]) break
+      await clickAt(fresh[i].x, fresh[i].y)
       await cdp.send('Input.insertText', { text: liveLoginValues[i] })
     }
     const preSubmit = await ev('location.pathname')
@@ -3427,7 +3497,7 @@ const run = async () => {
     await resetW()
     await ev('(() => { const a = [...document.querySelectorAll("main a")].find(el => (el.getAttribute("href") || "") === "/"); if (a) a.click(); return !!a })()')
     await waitFor('location.pathname === "/" && !!document.querySelector("main article h2 a")', 10000)
-    const quietRead = await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/rest/v1/orders" && (w.q || "").indexOf("select=id%2Ccreated_at") !== -1)', 10000)
+    const quietRead = await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/api/orders/stamps")', 10000)
     const badgeBefore = await ev('(() => { const a = [...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim().startsWith("Orders")); if (!a) return null; const b = a.querySelector("[data-orders-badge]"); return { text: (a.textContent || "").trim(), badge: b ? (b.textContent || "").trim() : null } })()')
     check('the Orders entry stays quiet while nothing has changed', quietRead && !!badgeBefore && badgeBefore.text === 'Orders' && badgeBefore.badge === null, { quietRead, badgeBefore })
     await ev('window.__ORDER_TOUCH = true; true')
@@ -3440,17 +3510,17 @@ const run = async () => {
     await resetW()
     await ev('(() => { const a = [...document.querySelectorAll("main a")].find(el => (el.getAttribute("href") || "") === "/"); if (a) a.click(); return !!a })()')
     const homeHop = await waitFor('location.pathname === "/" && !!document.querySelector("main article h2 a")', 10000)
-    const noticeRead = await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/rest/v1/orders" && (w.q || "").indexOf("select=id%2Ccreated_at") !== -1)', 10000)
+    const noticeRead = await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/api/orders/stamps")', 10000)
     const noticeSeen = await waitFor('(document.querySelector("[data-orders-badge]") || {}).textContent?.trim() === "1"')
     // Evidence-rich on purpose: if this ever fails, the detail names the broken link — a hop that
     // did not happen, the read never firing (watch path), firing with a stale marker (count path),
     // or firing and the badge not rendering.
-    const noticeProbe = await ev('JSON.stringify({ url: location.pathname, pill: ([...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim().startsWith("Orders")) || {}).textContent || null, seen: localStorage.getItem("raccoon-orders-seen:v1:00000000-0000-4000-8000-0000000000ad"), reads: (window.__W || []).filter(w => w.p === "/rest/v1/orders").map(w => w.method + " " + (w.q || "").slice(0, 48)) })')
+    const noticeProbe = await ev('JSON.stringify({ url: location.pathname, pill: ([...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim().startsWith("Orders")) || {}).textContent || null, seen: localStorage.getItem("raccoon-orders-seen:v1:00000000-0000-4000-8000-0000000000ad"), reads: (window.__W || []).filter(w => w.p.indexOf("/api/orders") === 0).map(w => w.method + " " + (w.q || "").slice(0, 48)) })')
     check('a status update surfaces as the Orders badge', accountHop && accountHere && homeHop && noticeRead && noticeSeen, { accountHop, accountHere, homeHop, noticeRead, noticeSeen, noticeProbe })
     const clearHop = await ev('(() => { const a = [...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim().startsWith("Orders")); if (a) a.click(); return !!a })()')
     check('viewing the orders area clears the badge', clearHop && await waitFor('location.pathname === "/account/orders" && !!document.querySelector("[data-orders-list]")'))
     await nav(appUrl)
-    await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/rest/v1/orders" && (w.q || "").indexOf("select=id%2Ccreated_at") !== -1)', 10000)
+    await waitFor('window.__W.some(w => w.method === "GET" && w.p === "/api/orders/stamps")', 10000)
     check('and the badge stays clear once seen', await ev('!document.querySelector("[data-orders-badge]")'))
 
     // The legal pages (compliance module): reachable from the catalog footer, translated headings in
@@ -3477,13 +3547,14 @@ const run = async () => {
     // Wait for the form rather than trusting `nav`'s settle guess: every other section does this, and
     // without it a page that fails to render turns into `Cannot read properties of undefined (reading 'x')`
     // instead of a named check that says which element never arrived.
-    await waitFor('!!document.querySelector(\'input[type="email"]\')')
-    // The stub's admin answer for this browser session, set before the submit: the login page's
-    // own admin_users check and every read after it answer from this, and sessionStorage carries
-    // it across the section's reloads.
+    // The identifier field is `type="text"` since P6 — the phone-alias usernames are not
+    // email-shaped, so the admin door takes either. This browser session becomes the desk here:
+    // the stub's `/api/admin-check` answers admin while `__admin_session` is set (sessionStorage
+    // carries it across the section's documents; the guest walk never sets it).
+    await waitFor('!!document.querySelector("main form input")')
     await ev('sessionStorage.setItem("__admin_session", "1"); true')
-    const email = (await ev(boxesExpr('input[type="email"]')))[0]
-    const pass = (await ev(boxesExpr('input[type="password"]')))[0]
+    const email = (await ev(boxesExpr('main form input')))[0]
+    const pass = (await ev(boxesExpr('main form input')))[1]
     await clickAt(email.x, email.y)
     await cdp.send('Input.insertText', { text: 'verify@example.test' })
     await clickAt(pass.x, pass.y)
@@ -3492,7 +3563,7 @@ const run = async () => {
     await clickByText('form button[type="submit"]', 'Sign in')
     check('login lands back on the catalog', await waitFor('location.pathname === "/"'))
     const loginWrites = await allW()
-    check('login read admin_users and wrote no data', loginWrites.some(w => w.p === '/rest/v1/admin_users') && (await writes()).length === 0, seqOf(loginWrites))
+    check('login asked the admin gate and wrote no data', loginWrites.some(w => w.method === 'GET' && w.p === '/api/admin-check') && (await writes()).length === 0, seqOf(loginWrites))
     // stay in the SPA: a hard reload would make the un-stubbed server validate the fake JWT
     check('admin mode turns on', await waitFor(`document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length === ${EXP.cards}`, 15000))
     check('admin banner labels the mode', await ev('!![...document.querySelectorAll("header span")].find(el => /admin\\s*mode/i.test(el.textContent || ""))'))
@@ -3533,18 +3604,21 @@ const run = async () => {
     await clickByText(DIALOG + ' button[type="submit"]', 'Save changes', '!document.querySelector(' + JSON.stringify(DIALOG) + ')')
     check('add closes the editor', await ev('!document.querySelector(' + JSON.stringify(DIALOG) + ')'))
     const addW = await writes()
-    check('add write order: product → translation → upload → image rows',
-      JSON.stringify(addW.map(w => w.p.startsWith('/storage') ? 'UPLOAD' : `${w.method} ${w.p}`)) === JSON.stringify(['POST /rest/v1/products', 'POST /rest/v1/product_translations', 'UPLOAD', 'DELETE /rest/v1/product_images', 'POST /rest/v1/product_images']),
+    // The save is one transactional route call now (P7): the uploads run first from the browser,
+    // then a single POST carries the row, its translation and the whole ordered image list.
+    check('add write order: upload → one transactional save',
+      JSON.stringify(addW.map(w => w.p.startsWith('/storage') ? 'UPLOAD' : `${w.method} ${w.p}`)) === JSON.stringify(['UPLOAD', 'POST /api/admin/products']),
       seqOf(addW))
-    const prodBody = JSON.parse(addW.find(w => w.p === '/rest/v1/products')?.body || '{}')
+    const addBody = JSON.parse(addW.find(w => w.p === '/api/admin/products')?.body || '{}')
+    const prodBody = addBody.product || {}
     check('product payload keeps exactly the products columns', Object.keys(prodBody).sort().join(',') === EXP.sortedPayloadColumns && prodBody.status === 'published' && Number(prodBody.price) === 99.99 && prodBody.sku === 'VERIFY-KB-99', prodBody)
-    const trBody = JSON.parse(addW.find(w => w.p === '/rest/v1/product_translations')?.body || '{}')
-    check('translation row carries the name and parsed specification pairs', trBody.locale === 'en' && trBody.name === 'Verify Keyboard 99' && JSON.stringify(trBody.specifications) === JSON.stringify([{ label: 'Switch', value: 'MX Black' }, { label: 'Ratio', value: '70:30' }]), { name: trBody.name, specs: trBody.specifications })
+    const trBody = addBody.translation || {}
+    check('translation row carries the name and parsed specification pairs', trBody.name === 'Verify Keyboard 99' && JSON.stringify(trBody.specifications) === JSON.stringify([{ label: 'Switch', value: 'MX Black' }, { label: 'Ratio', value: '70:30' }]), { name: trBody.name, specs: trBody.specifications })
     const uploadPath = norm(addW.find(w => w.p.startsWith('/storage/v1/object'))?.p || '')
     check('upload path is object/<bucket>/products/<newId>/<uuid>-<file>', uploadPath === '/storage/v1/object/product-images/products/<uuid>/<uuid>-upload-probe.png', uploadPath)
-    const rows = JSON.parse(addW.find(w => w.method === 'POST' && w.p === '/rest/v1/product_images')?.body || '[]')
-    check('image rows replace all: existing first and primary, upload second, sort_order 0,1', Array.isArray(rows) && rows.length === 2 && rows[0].storage_path === 'products/verify/keep-me.png' && String(rows[1].storage_path).endsWith('upload-probe.png') && rows[0].is_primary === true && rows[1].is_primary === false && rows.map(r => r.sort_order).join(',') === '0,1', rows)
-    check('previous image rows cleared by product_id', /^product_id=eq[.]/.test(addW.find(w => w.method === 'DELETE' && w.p === '/rest/v1/product_images')?.q || ''))
+    const rows = addBody.images || []
+    check('the save payload replaces all image rows: existing first, upload second', Array.isArray(rows) && rows.length === 2 && rows[0] === 'products/verify/keep-me.png' && String(rows[1]).endsWith('upload-probe.png'), rows)
+    check('no image-row traffic rides beside the save', addW.every(w => w.p === '/api/admin/products' || w.p.startsWith('/storage')))
     check('catalog reloaded after the write', (await allW()).some(w => w.method === 'GET' && w.p === '/api/catalog/products'))
 
     // --- edit + update ---
@@ -3560,12 +3634,13 @@ const run = async () => {
     await resetW()
     await clickByText(DIALOG + ' button[type="submit"]', 'Save changes', '!document.querySelector(' + JSON.stringify(DIALOG) + ')')
     const editW = await writes()
-    check('update order: PATCH product → PATCH translation → rows replaced, no upload',
-      JSON.stringify(editW.map(w => `${w.method} ${w.p}`)) === JSON.stringify(['PATCH /rest/v1/products', 'PATCH /rest/v1/product_translations', 'DELETE /rest/v1/product_images', 'POST /rest/v1/product_images']),
+    check('update order: one transactional save, no upload',
+      JSON.stringify(editW.map(w => `${w.method} ${w.p}`)) === JSON.stringify(['POST /api/admin/products']),
       seqOf(editW))
-    const patchReq = editW.find(w => w.p === '/rest/v1/products')
-    check('update targets one row and keeps the same column set', /^id=eq[.]/.test(patchReq?.q || '') && Object.keys(JSON.parse(patchReq.body || '{}')).sort().join(',') === EXP.sortedPayloadColumns, { q: norm(patchReq?.q) })
-    check('update rewrites the translation with the new name', JSON.parse(editW.find(w => w.p === '/rest/v1/product_translations')?.body || '{}').name === 'Renamed By Harness')
+    const patchReq = editW.find(w => w.p === '/api/admin/products')
+    const patchBody = JSON.parse(patchReq?.body || '{}')
+    check('update targets one row and keeps the same column set', /^[0-9a-f-]{36}$/.test(String(patchBody.id || '')) && Object.keys(patchBody.product || {}).sort().join(',') === EXP.sortedPayloadColumns, { id: norm(patchBody.id) })
+    check('update rewrites the translation with the new name', (patchBody.translation || {}).name === 'Renamed By Harness')
 
     // --- promotion write ---
     // The five fields do not exist until the switch is on, so this reads the switch as the feature's
@@ -3580,7 +3655,7 @@ const run = async () => {
     await resetW()
     const promoSaved = await clickByText(DIALOG + ' button[type="submit"]', 'Save changes', '!document.querySelector(' + JSON.stringify(DIALOG) + ')')
     const promoW = await writes()
-    const promoBody = JSON.parse(promoW.find(w => w.p === '/rest/v1/products')?.body || '{}')
+    const promoBody = JSON.parse(promoW.find(w => w.p === '/api/admin/products')?.body || '{}').product || {}
     check('a promotion saves five columns on the product row', promoSaved && promoBody.promo_price === 79 && promoBody.promo_label === 'Verify Sale' && promoBody.promo_quantity === 3 && Date.parse(promoBody.promo_starts_at) === new Date('2026-09-01T10:00').getTime() && Date.parse(promoBody.promo_ends_at) === new Date('2026-09-30T20:00').getTime(), { promoBody, seq: seqOf(promoW) })
 
     // --- cancel + backdrop ---
@@ -3603,7 +3678,7 @@ const run = async () => {
     await resetW()
     await clickByText(ALERT + ' button', 'Delete product', `!document.querySelector('${ALERT}')`)
     const delW = await writes()
-    check('delete issues exactly one DELETE on the product row', delW.length === 1 && delW[0].method === 'DELETE' && delW[0].p === '/rest/v1/products' && /^id=eq[.]/.test(delW[0].q), seqOf(delW))
+    check('delete issues exactly one DELETE on the product row', delW.length === 1 && delW[0].method === 'DELETE' && /^\/api\/admin\/products\/[0-9a-f-]{36}$/.test(delW[0].p), seqOf(delW))
     check('no error alert surfaced by any admin flow', !(await ev('document.body.innerText.includes("could not be")')))
 
     // --- category editor: open, seed, rename, add, reorder, save, delete ---
@@ -3627,11 +3702,12 @@ const run = async () => {
     await resetW()
     await clickByText(CAT_FORM + ' button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Categories saved")')
     const catW = await writes()
-    const catPatches = catW.filter(w => w.method === 'PATCH' && w.p === '/rest/v1/categories')
-    const catInsert = JSON.parse(catW.find(w => w.method === 'POST' && w.p === '/rest/v1/categories')?.body || '{}')
-    const catTrans = catW.filter(w => w.method === 'POST' && w.p === '/rest/v1/category_translations').map(w => JSON.parse(w.body || '[]')).flat()
-    check('one save writes every category row and both locale names per row', catPatches.length === 5 && catTrans.filter(entry => entry.locale === 'en').length === 6 && catTrans.some(entry => entry.name === 'Earphones Renamed') && catTrans.some(entry => entry.name === 'Monitors' && entry.locale === 'en'), { patches: catPatches.length, translations: catTrans })
-    check('position in the list is the stored order, and the moved row takes its place not the end', catInsert.slug === 'monitors' && catInsert.sort_order === 5 && catInsert.is_active === true && catPatches.map(p => JSON.parse(p.body).sort_order).join(',') === '1,2,3,4,6', { catInsert, orders: catPatches.map(p => JSON.parse(p.body).sort_order) })
+    // One save = one POST (P7). The rows array's ORDER is the dock order — the route writes
+    // `sort_order` from the array position — and each row carries both locale names.
+    const catSave = catW.filter(w => w.method === 'POST' && w.p === '/api/admin/categories')
+    const catRows = JSON.parse(catSave[0]?.body || '{}').rows || []
+    check('one save writes every category row and both locale names per row', catSave.length === 1 && catRows.length === 6 && catRows.some(r => r.names.en === 'Earphones Renamed') && catRows.some(r => r.names.en === 'Monitors'), { saves: catSave.length, rows: catRows.length })
+    check('position in the list is the stored order, and the moved row takes its place not the end', catRows[4]?.slug === 'monitors' && catRows[4]?.isActive === true && catRows.map(r => r.slug).join(',') === 'controllers,keyboards,mice,headphones,monitors,earphones', { order: catRows.map(r => r.slug) })
     // The save reloads from the stub, which answers GETs from its fixture rows and keeps nothing an
     // admin flow writes (only `site_settings` is mutable in-stub) — so the created category is gone
     // again here and the list is the stored five. What this step proves is the row's own delete: one
@@ -3639,17 +3715,18 @@ const run = async () => {
     await resetW()
     await clickSelector(CAT_FORM + ' [data-category-remove="4"]', 'document.querySelectorAll("[data-category-row]").length === 4')
     const catDeleteW = await writes()
-    check('a stored category\'s delete is one DELETE on its own row, and it leaves the list', catDeleteW.length === 1 && catDeleteW[0].method === 'DELETE' && catDeleteW[0].p === '/rest/v1/categories' && /^id=eq[.]/.test(catDeleteW[0].q), seqOf(catDeleteW))
-    // A name the owner erases has to leave the database. An upsert only writes what is there, so a
-    // stored Khmer name that is now blank would keep showing in the dock forever — and the stub does
-    // not persist writes, which is why the stored value comes from the fixture row, not from an
-    // earlier save in this flow.
+    check('a stored category\'s delete is one DELETE on its own row, and it leaves the list', catDeleteW.length === 1 && catDeleteW[0].method === 'DELETE' && /^\/api\/admin\/categories\/[0-9a-z-]+$/i.test(catDeleteW[0].p), seqOf(catDeleteW))
+    // A name the owner erases has to leave the database. The save payload is where that decision
+    // is visible now: the route deletes the stored locale when `namesBefore` had a name and the
+    // new `names` entry is blank (the stub does not persist writes, so the stored value comes
+    // from the fixture row, not from an earlier save in this flow).
     await resetW()
     await ev(setInput('[data-category-km="0"]', ''))
     await clickByText(CAT_FORM + ' button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Categories saved")')
     const clearedW = await writes()
-    const clearedDeletes = clearedW.filter(w => w.method === 'DELETE' && w.p === '/rest/v1/category_translations')
-    check('erasing a stored Khmer name deletes that translation row instead of leaving it live', clearedDeletes.length === 1 && /locale=eq[.]km/.test(clearedDeletes[0].q) && /category_id=eq[.]/.test(clearedDeletes[0].q), seqOf(clearedW))
+    const clearedSave = JSON.parse(clearedW.find(w => w.method === 'POST' && w.p === '/api/admin/categories')?.body || '{}')
+    const clearedRow = (clearedSave.rows || [])[0] || {}
+    check('erasing a stored Khmer name marks that translation for deletion in the save payload', clearedW.filter(w => w.method === 'DELETE').length === 0 && (clearedRow.names || {}).km === '' && String(((clearedRow.namesBefore || {}).km) || '').length > 0, { names: clearedRow.names, namesBefore: clearedRow.namesBefore })
 
     // Two rows that resolve to the same slug have to fail before the first write. The save loop is not
     // a transaction, so discovering the collision mid-loop would leave a half-saved dock order.
@@ -3734,7 +3811,7 @@ const run = async () => {
     await resetW()
     await clickByText('form button[type="submit"]', 'Save changes', 'document.body.textContent.includes("Site info saved")')
     const siteW = await writes()
-    check('save issues exactly one upsert on the singleton', siteW.length === 1 && siteW[0].method === 'POST' && siteW[0].p === '/rest/v1/site_settings', seqOf(siteW))
+    check('save issues exactly one upsert on the singleton', siteW.length === 1 && siteW[0].method === 'POST' && siteW[0].p === '/api/admin/site-info', seqOf(siteW))
     const siteBody = JSON.parse(siteW[0]?.body || '{}')
     check('saved phone, location label and link reflect the edits', siteBody.phone === '+855 99 888 777' && siteBody.location_url === 'https://maps.example/hq' && JSON.stringify(siteBody.location_translations) === JSON.stringify([{ locale: 'en', label: 'RGB Bin HQ' }, { locale: 'km', label: 'ភ្នំពេញ កម្ពុជា' }]), { phone: siteBody.phone, url: siteBody.location_url, labels: siteBody.location_translations })
     check('saved links reflect add, edit, disable, enable, reorder and remove', JSON.stringify(siteBody.social_links) === JSON.stringify([
@@ -3857,21 +3934,21 @@ const run = async () => {
     check('a pending order offers exactly the two written transitions', JSON.stringify(pendingActions) === JSON.stringify(EXP.orders.pendingActions), pendingActions)
 
     await resetW()
-    await clickSelector('[data-order-action="confirmed"]', 'window.__W.filter(w => w.p === "/rest/v1/rpc/set_order_status").length === 1')
+    await clickSelector('[data-order-action="confirmed"]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/status") !== -1).length === 1')
     const orderWrites = await writes()
     const transitionBody = JSON.parse(orderWrites[0]?.body || '{}')
-    check('confirming issues exactly one set_order_status and no other write', orderWrites.length === 1 && orderWrites[0].p === '/rest/v1/rpc/set_order_status' && transitionBody.p_status === 'confirmed' && transitionBody.p_order_id === ORDER_ID, seqOf(orderWrites))
-    check('the desk reloads the list after the write', (await allW()).some(w => w.method === 'GET' && w.p === '/rest/v1/orders'))
+    check('confirming issues exactly one set_order_status and no other write', orderWrites.length === 1 && orderWrites[0].p === '/api/orders/' + ORDER_ID + '/status' && transitionBody.status === 'confirmed', seqOf(orderWrites))
+    check('the desk reloads the list after the write', (await allW()).some(w => w.method === 'GET' && w.p === '/api/orders'))
 
     // The cancel arm: its confirmation asks for an optional reason, and confirming sends it with
     // the transition in the same one RPC. The row is still open from the confirm above.
     check('the cancel confirmation asks for an optional reason', await clickSelector('[data-order-action="cancelled"]', '!!document.querySelector("[data-order-cancel-note]")'))
     await ev(setInput('[data-order-cancel-note]', CANCEL_NOTE))
     await resetW()
-    await clickSelector('[data-order-cancel-confirm]', 'window.__W.filter(w => w.p === "/rest/v1/rpc/set_order_status").length === 1')
+    await clickSelector('[data-order-cancel-confirm]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/status") !== -1).length === 1')
     const cancelWrites = await writes()
     const cancelBody = JSON.parse(cancelWrites[0]?.body || '{}')
-    check('cancelling sends the note with the transition', cancelWrites.length === 1 && cancelBody.p_status === 'cancelled' && cancelBody.p_order_id === ORDER_ID && cancelBody.p_note === CANCEL_NOTE, seqOf(cancelWrites))
+    check('cancelling sends the note with the transition', cancelWrites.length === 1 && cancelBody.status === 'cancelled' && cancelBody.note === CANCEL_NOTE, seqOf(cancelWrites))
 
     check('a cancelled order opens with no transition buttons at all', await clickSelector(`[data-order-toggle="${CANCELLED_ORDER_ID}"]`, `!!document.querySelector(${JSON.stringify('[data-order-body="' + CANCELLED_ORDER_ID + '"]')}) && !document.querySelector("[data-order-actions]")`))
     const cancelledDeskBody = await ev('(document.querySelector(' + JSON.stringify('[data-order-body="' + CANCELLED_ORDER_ID + '"]') + ') || {}).textContent || ""')

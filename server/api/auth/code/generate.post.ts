@@ -1,6 +1,5 @@
-import { createError, defineEventHandler } from 'h3'
 import { LOGIN_CODE_TTL_MS, formatLoginCode, generateLoginCode, hashCode } from '../../../utils/auth'
-import { createServiceClient, currentUserId } from '../../../utils/auth-service'
+import { requireUser } from '../../../utils/auth-service'
 
 /**
  * Generates (or replaces) the account's login code — SPEC-identity.md amendment, capability 3.
@@ -8,19 +7,16 @@ import { createServiceClient, currentUserId } from '../../../utils/auth-service'
  * lost code is regenerated, never recovered.
  */
 export default defineEventHandler(async (event) => {
-  const userId = await currentUserId(event)
-  if (!userId) throw createError({ statusCode: 401, statusMessage: 'AUTH_REQUIRED' })
+  const userId = requireUser(event)
 
-  const service = createServiceClient(event)
+  const sql = appSql(event)
   const raw = generateLoginCode()
   const expiresAt = new Date(Date.now() + LOGIN_CODE_TTL_MS).toISOString()
 
   // Upsert on the user_id primary key: one active code per account, regenerate replaces.
-  const { error } = await service
-    .from('login_codes')
-    .upsert({ user_id: userId, code_hash: await hashCode(raw), expires_at: expiresAt, attempts: 0 })
-
-  if (error) throw createError({ statusCode: 502, statusMessage: 'AUTH_UPSTREAM' })
+  await sql`insert into public.login_codes (user_id, code_hash, expires_at, attempts)
+    values (${userId}, ${await hashCode(raw)}, ${expiresAt}, 0)
+    on conflict (user_id) do update set code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`
 
   return { code: formatLoginCode(raw), expiresAt }
 })
