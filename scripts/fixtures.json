@@ -227,6 +227,37 @@
           { "id": "ffffffff-0000-4000-8000-000000000301", "locale": "en", "name": "Keyboards" }
         ]
       }
+    },
+    {
+      "_comment": "The uncategorized row (ARCHITECTURE → Known gaps): `categories` is null on purpose, so the `?? t('uncategorized')` fallback renders on a card, a search row and a detail page instead of only existing in the source. Oldest created_at, price 55.00 and stock 9 so it appends last in every sequence the expectations below pin.",
+      "id": "aaaaaaaa-0000-4000-8000-000000000007",
+      "category_id": null,
+      "slug": "clamp-meter",
+      "sku": "CLAMP-M-01",
+      "price": "55.00",
+      "currency": "USD",
+      "stock_quantity": 9,
+      "status": "published",
+      "promo_price": null,
+      "promo_label": null,
+      "promo_quantity": null,
+      "promo_starts_at": null,
+      "promo_ends_at": null,
+      "created_at": "2025-12-31T00:00:00.000Z",
+      "product_translations": [
+        {
+          "id": "dddddddd-0000-4000-8000-000000000107",
+          "locale": "en",
+          "name": "Clamp Meter",
+          "short_description": "Harness fixture with no category",
+          "description": "Synthetic row used only by scripts/verify-ui.mjs.",
+          "specifications": []
+        }
+      ],
+      "product_images": [
+        { "id": "eeeeeeee-0000-4000-8000-000000000217", "storage_path": "products/verify/clamp-meter.png", "alt_text": "Clamp Meter", "sort_order": 0 }
+      ],
+      "categories": null
     }
   ],
   "siteSettings": {
@@ -326,9 +357,9 @@
   ],
   "expectations": {
     "_comment": "What the synthetic data must produce, asserted independently of the fixtures so a bad fixture edit fails loudly instead of silently changing the test.",
-    "cards": 6,
-    "priceLowToHigh": ["39.00", "45.00", "59.00", "89.00", "123.45", "149.00"],
-    "stockSequence": ["in", "low", "out", "in", "in", "low"],
+    "cards": 7,
+    "priceLowToHigh": ["39.00", "45.00", "55.00", "59.00", "89.00", "123.45", "149.00"],
+    "stockSequence": ["in", "low", "out", "in", "in", "low", "in"],
     "conversion": {
       "_comment": "The Phase 1 customer-facing contract, stated here so a message line, a CTA label or a channel list can only be changed deliberately. The strings are the English values of the keys in i18n.config.ts and the hrefs are built from the site_settings row above; the harness compares what the app actually produced against this, so drifting one side fails loudly instead of quietly re-wording the flow. `lines` is the composition policy itself: five lines, in this order.",
       "cta": { "in": "Contact to order", "low": "Contact to order", "out": "Ask about availability" },

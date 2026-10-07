@@ -712,6 +712,12 @@ const run = async () => {
     check('catalog renders every fixture product', cards.length === EXP.cards, { cards: cards.length })
     check('guest sees no admin affordance', !(await ev('!![...document.querySelectorAll("header span")].find(el => /admin\\s*mode/i.test(el.textContent || ""))')) && (await ev(`document.querySelectorAll(${JSON.stringify(EDIT_BTN)}).length`)) === 0)
     check('cards carry an image and a price', (await ev('document.querySelectorAll("main article img").length')) === EXP.cards && (await ev('document.querySelectorAll("main article p.tabular-nums").length')) === EXP.cards)
+    // The uncategorized row (fixtures.json, ARCHITECTURE → Known gaps): its `categories` is null, so
+    // this is where `?? t('uncategorized')` actually renders instead of only existing in the source.
+    // Found by its product link rather than by position — the grid is newest-first and this row is the
+    // oldest, so a positional read would keep passing after the order changed, for the wrong reason.
+    const uncategorizedLabel = await ev('(() => { const a = document.querySelector(' + JSON.stringify('main article h2 a[href$="/products/aaaaaaaa-0000-4000-8000-000000000007"]') + '); const card = a && a.closest("article"); const p = card && card.querySelector("p.uppercase"); return p ? (p.textContent || "").trim() : null })()')
+    check('a product with no category shows the fallback label', uncategorizedLabel === 'Uncategorized', { uncategorizedLabel })
 
     // The band is now asked of one shared rule (`app/utils/product-stock.ts`) rather than re-derived
     // inside the badge, so all three of its outputs are asserted per card: which band a quantity

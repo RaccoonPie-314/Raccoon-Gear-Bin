@@ -1161,12 +1161,18 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   as the verdict rather than trusting what the return carried. So what still waits on the owner is not
   code: production registration (`paywaysales@ababank.com`) plus the return-URL whitelist, and the
   secret audit.
-  **The refund marker is a door with no handle.** `mark_payment_refunded` is in the live schema
-  (`db/migrations/0001_schema.sql`) and typed in `app/types/database.ts`, and **nothing calls it** — no
-  route, no admin affordance — while `payway.ts` deliberately treats a provider-side `refunded` as a
-  no-op because the marker is meant to be the admin's explicit act. So SPEC-payments.md's criterion 5
-  is not met, and today a refund leaves no trace in our tables. Whether the button is owed at all is an
-  owner decision, not an implementation gap to close quietly.
+  **The refund marker has a handle now (2026-10-07).** `mark_payment_refunded` stays the boundary —
+  `security definer`, re-checks `admin_users`, and guards both of its updates on `status = 'paid'` so a
+  double-click is a no-op — and three things now reach it: `POST /api/orders/:id/refund` (a near-copy
+  of the status route, P0001 → 400 with the RPC's machine code), `canRefund(paymentStatus)` in
+  `app/utils/order-status.ts` as the one owner of "may this be offered" (`paid` alone), and the desk's
+  button, which renders **beside** the transitions row rather than inside it. That placement is the
+  design: `ORDER_TRANSITIONS` is fulfilment, money is a separate axis, and the SPEC's own case is a
+  paid-then-cancelled order — a terminal row renders no transition buttons at all and must still offer
+  the marker. The button is pinned at both levels (`--only=admin`: "an unpaid order offers no refund
+  marker"; the unit table for `canRefund`), and the harness's stub is the first mutable *order* so the
+  desk's reload can be read back. The money itself still moves in the ABA portal — the marker records
+  it, which is criterion 5 of SPEC-payments.md and its recorded v1 decision.
 - **Admin identity has one gate and one client question — asked once.** Server routes call
   `requireAdmin` (401/403, P7). The client's question is `/api/admin-check` and it has exactly one
   caller, `useAdminAuth.isAdmin()`, which keeps the answer in `useState('admin-mode')`; the guard's
@@ -1214,15 +1220,17 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   with `.env` renamed away), and CI carries no secrets and runs the same command. The bounded
   waits in `nav()` are still the shape to keep — they are what made the old cold run diagnosable —
   but a red run is no longer the expected no-`.env` signature.
-- **A product with no category, and the admin sweep's one blind spot.** The Khmer editors are reached
-  by clicking `LanguageSwitcher`'s own pills (both directions), so the `switchLocalePath` half of
-  Boundary rule 4 is now measured rather than held by reading `@nuxtjs/i18n`'s source, and the
+- **A product with no category is measured now; the admin sweep's blind spot is not.** The Khmer editors
+  are reached by clicking `LanguageSwitcher`'s own pills (both directions), so the `switchLocalePath`
+  half of Boundary rule 4 is measured rather than held by reading `@nuxtjs/i18n`'s source, and the
   storefront is no longer reached only by URL: the run switches EN → ខ្មែរ through the phone masthead's
   own pill to lock the highlight entry. What still sits behind that is the Khmer *return* trip on a
   storefront page — the run goes to `/km/` by URL from there, and the admin editors are the only place
-  it clicks back. Still open there too:
-  every fixture product carries a category, so
-  `?? t('uncategorized')` never renders — one fixture row with `categories: null` closes it.
+  it clicks back. Closed 2026-10-07: the fixtures carry a row with `categories: null` (`clamp-meter`,
+  oldest `created_at`, price 55.00, stock 9 so every pinned sequence keeps its shape) and
+  `a product with no category shows the fallback label` reads the eyebrow `?? t('uncategorized')`
+  actually renders. It is found by its product link, not by position, because the grid is newest-first
+  and this row is oldest.
 - **The specifications view model round-trips through a string.** `mapProduct` stores
   `formatSpecifications(jsonb)` on `CatalogProduct.specifications` so the editor textarea can
   bind straight to it, and the detail page then calls `parseSpecificationPairs` to undo that.
@@ -1244,16 +1252,22 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   `/api/admin-check`, `/api/auth/**` and `/api/telegram/webhook` — over the two db contexts in
   `server/utils/db.ts`
   (`appSql` for system bookkeeping, `userTx` claims path for anything a user's data touches).
-  `lint` still runs over `app` only; extending it to `server/` is the change that says the whole
-  tree is linted. One SSR note kept: the harness's fetch stub is browser-level, so server-side
+  `lint` covers `app` and `server` (2026-10-07), so the whole tree the app deploys is linted. One SSR
+  note kept: the harness's fetch stub is browser-level, so server-side
   reads leave it — which is why signed-in flows stay in the SPA (see the P8 note above) and why
   the green no-`.env` run above is the CI shape to trust.
-- **Tests exist but stay small; typecheck is not in CI.** CI runs `bun run build`, `bun run lint`
-  and `bun run verify`. `bun run test` (Bun's runner, 51 checks) covers the pure rules — pricing
-  parity, order transitions, PayWay hashing — but is not wired into CI. `bun run typecheck`
-  (vue-tsc) mechanically checks .vue templates and exits 0 since 2026-10-03; it is not in CI
-  (wall time). `lint` still scopes to `app/` only and downgrades the pre-existing warnings;
-  extending it over `server/` is the change that says the whole tree is linted. The
+- **Tests exist but stay small, and every mechanical gate is in CI now.** CI runs `bun run build`,
+  `bun run lint`, `bun run test`, `bun run typecheck` and `bun run verify` (2026-10-07: the unit suite
+  and vue-tsc joined the lint job, which needs no Chrome and no `.output`). `bun run test` (Bun's
+  runner) covers the pure rules — pricing parity, order transitions, PayWay hashing, the Telegram push
+  body — the ones the browser harness stubs past. `bun run typecheck` mechanically reads `.vue`
+  templates, which no other gate does; it was kept out of CI on wall-time grounds until the objection
+  was weighed against a binding that compiles and paints wrong. The jobs run on a **pinned
+  `ubuntu-24.04`** rather than `ubuntu-latest`, because the `latest` label moves to Ubuntu 26 on
+  2026-10-19 and a migrated runner is a deliberate change, not a surprise red run.
+  `lint` covers the whole tree since 2026-10-07 (`eslint app server`); extending it cost exactly one
+  `no-useless-assignment` fix in `payway-callback.ts` and one stale disable directive in `db.ts`, which
+  is why `server/` went unlinted for so long without anyone noticing. The
   `no-explicit-any` rule being off does not relax the Supabase `as any` prohibition in AGENTS.md,
   which stays a review rule.
 - **Generated pages that describe absent capabilities.** `Supabase Integration/Real-time
