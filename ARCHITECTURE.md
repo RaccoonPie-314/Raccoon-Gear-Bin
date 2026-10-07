@@ -106,8 +106,10 @@ shared component silently stops resolving (the build stays green; the page rende
    URL. This rule exists because a second private copy of that path lived in `index.vue`
    for a long time, quietly drifted (English-only category names, `slug`/`status` missing
    from its select), and read as intentional because the generated wiki described the
-   unified version. Since Phase 5 the catalog pages hold no Supabase client at all; the one
-   page that still does is `admin/login.vue` (see Known gaps).
+   unified version. Since Phase 5 no *page* holds a Supabase client at all. Two holders remain and
+   both are the storage client rather than a query, so rule 1's data half is intact: `useCatalog`'
+   `publicImageUrl` (a URL builder, retired by the R2 flip) and `useAdminProductEditor`'s image
+   `upload`. Neither is a read of a table, and `admin/login.vue` holds neither.
    `categories` has exactly two readers and both are here: `fetchCategories` (the public view —
    active rows, `sort_order`, one locale picked per row) and `fetchCategoryDrafts` (the admin view —
    every row, both locale names kept apart). Same table, one module, so the row shape cannot drift;
@@ -1146,21 +1148,40 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   the P2–P7 port notes above — reads, writes, identity and the admin editors all run on Neon
   through `/api/**`. The Supabase project stays untouched as a cold backup until P9 retires it
   (git history keeps `supabase/`).
-- **Payments: gate NOT cleared — P0–P2 built ahead and parked, inert.** The owner has no merchant
-  gateway account yet; registration is the blocker (sandbox: `sandbox.payway.com.kh/register-sandbox/`
-  — self-serve, keys by email; production: `paywaysales@ababank.com`). Built ahead so that the day
-  the account exists only the routes remain: P0 re-retrieved the PayWay docs and they had moved —
-  the sandbox host is `checkout-sandbox` (not `checkout-uat`), the request hash is a fixed 24-field
-  order pinned by `tests/unit/payway.test.ts` against an independently computed vector, checkouts
-  are a browser form-submit (no returns-a-URL mode), and the callback signature is a sorted-keys
-  scheme in `X-PAYWAY-HMAC-SHA512`. P1 (payments table + `mark_payment_refunded`) is pushed with
-  anon probes recorded — inert until used; P2 (`server/utils/payway.ts` + tests) is green and
-  imported by nothing. P3–P5 (routes, Pay-now UI, sandbox E2E, secret audit) wait on G2.
-- **Admin identity has one gate and one client question.** Server routes call `requireAdmin`
-  (401/403, P7); the client asks `/api/admin-check` from the guard and the admin login page's
-  `isAdmin()` — the same endpoint in both. The verify harness models membership with a
-  sessionStorage seed plus the scripted session, and the stub's answer requires **both** — a
-  signed-out admin mode re-lit after logout until it did ("logout clears admin mode" caught it).
+- **Payments: the loop is live; the gate that remains is the merchant account.** P0 re-retrieved the
+  PayWay docs and they had moved — the sandbox host is `checkout-sandbox` (not `checkout-uat`), the
+  request hash is a fixed 24-field order pinned by `tests/unit/payway.test.ts` against an
+  independently computed vector, checkouts are a browser form-submit (no returns-a-URL mode), and the
+  callback signature is a sorted-keys scheme in `X-PAYWAY-HMAC-SHA512`. P1's `payments` table is
+  pushed and P2's `server/utils/payway.ts` is no longer parked — it is what the routes call. The
+  routes and the pay-now UI are shipped: `/api/payments/payway/{create,verify,return,webhook}` are the
+  only payment path the browser has, `startPaywayCheckout` is its one door and it has three callers
+  (`useCheckout` at placement, `checkout/success.vue`, and the order detail's pay button), and
+  `checkout/pay-result.vue` re-reads the **order row**
+  as the verdict rather than trusting what the return carried. So what still waits on the owner is not
+  code: production registration (`paywaysales@ababank.com`) plus the return-URL whitelist, and the
+  secret audit.
+  **The refund marker is a door with no handle.** `mark_payment_refunded` is in the live schema
+  (`db/migrations/0001_schema.sql`) and typed in `app/types/database.ts`, and **nothing calls it** — no
+  route, no admin affordance — while `payway.ts` deliberately treats a provider-side `refunded` as a
+  no-op because the marker is meant to be the admin's explicit act. So SPEC-payments.md's criterion 5
+  is not met, and today a refund leaves no trace in our tables. Whether the button is owed at all is an
+  owner decision, not an implementation gap to close quietly.
+- **Admin identity has one gate and one client question — asked once.** Server routes call
+  `requireAdmin` (401/403, P7). The client's question is `/api/admin-check` and it has exactly one
+  caller, `useAdminAuth.isAdmin()`, which keeps the answer in `useState('admin-mode')`; the guard's
+  client branch goes through that helper rather than keeping its own `$fetch`, because the middleware
+  runs before the page mounts, so the trip it pays is the trip the page was about to make. Six surfaces
+  used to ask per mount (the guard, the storefront badge, the login page, the three editors) — an admin
+  walking the desk paid a round trip per view to learn a boolean the previous view already had.
+  **Only `true` is stored.** A cached `false` is a lie with a lock behind it: `index.vue` asks on a
+  `watch(signedIn, …, { immediate: true })`, so a visitor who arrived signed out would hand the cached
+  `false` to `login.vue`'s check right after signing in for real — refused without a reload. That is
+  harness-pinned (`a refused gate is not remembered`, and the walk that follows it proves the door
+  still opens). A rejected request is not stored either, so a blip retries instead of sticking.
+  `markSignedOut()` clears `'admin-mode'` beside `'signed-in'`, since cookies going away does not change
+  a `useState` — the failure "logout clears admin mode" measures. The harness models membership with a
+  sessionStorage seed plus the scripted session, and the stub's answer requires **both**.
 - **The editor's two entry points are a hand-checked contract.** `index.vue` types its `adminEditor`
   ref with the pair of functions it expects; `tsc` cannot read `.vue`, so nothing in CI proves the
   component still `defineExpose`s names that match. The IDE language server does, and the harness
@@ -1219,8 +1240,9 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   under the harness's inset-and-href invariants and a conversion pass has no business editing it.
   One owner under `app/utils/` is the change a site-info pass should make.
 - **The `server/` tier is real now (P2+).** Nitro routes own every data path — `/api/catalog/**`,
-  `/api/site-info`, `/api/orders*`, `/api/admin/**`, `/api/profile`, `/api/admin-check`,
-  `/api/auth/**` and `/api/telegram/webhook` — over the two db contexts in `server/utils/db.ts`
+  `/api/site-info`, `/api/orders*`, `/api/payments/payway/**`, `/api/admin/**`, `/api/profile`,
+  `/api/admin-check`, `/api/auth/**` and `/api/telegram/webhook` — over the two db contexts in
+  `server/utils/db.ts`
   (`appSql` for system bookkeeping, `userTx` claims path for anything a user's data touches).
   `lint` still runs over `app` only; extending it to `server/` is the change that says the whole
   tree is linted. One SSR note kept: the harness's fetch stub is browser-level, so server-side

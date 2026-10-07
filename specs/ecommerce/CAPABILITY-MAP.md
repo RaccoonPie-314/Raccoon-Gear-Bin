@@ -1,6 +1,8 @@
 # E-commerce capability map — Raccoon Gear Bin
 
-Status: **APPROVED** (user, 2026-10-04); amended 2026-10-05 (identity v2 — see [SPEC-identity.md](SPEC-identity.md)). Branch: `feat/ecommerce`.
+Status: **APPROVED** (user, 2026-10-04); amended 2026-10-05 (identity v2 — see [SPEC-identity.md](SPEC-identity.md))
+and 2026-10-07 (admin-mode hardening + doc truth — see the same file's last amendment, and
+[Hardening amendments](#hardening-amendments) below for the module ids it introduces). Branch: `feat/ecommerce`.
 This map is the index of the module specs in this folder. Tasks in
 [plans/003](../../plans/003-ecommerce-implementation-plan.md) select work by the module ids below —
 nothing is selected by guessing which spec is "active".
@@ -98,6 +100,20 @@ Phase 1: compliance + identity · Phase 2: cart · Phase 3: orders · Phase 4: p
 | [SPEC-cart.md](SPEC-cart.md) | `cart` |
 | [SPEC-orders.md](SPEC-orders.md) | `orders` |
 | [SPEC-payments.md](SPEC-payments.md) | `payments` |
+
+## Hardening amendments
+
+Small, already-specified surfaces that need a contract change rather than a new module. They are
+indexed here so nothing is selected by guessing which spec is "active", and each traces to a section
+of an existing spec file — no separate spec set, because the boundary they touch is already owned there.
+
+| Module id | Responsibility | Spec |
+|---|---|---|
+| `admin-identity` | `/api/admin-check` asked once per navigation (`useState('admin-mode')`, invalidated by `markSignedOut`); authority stays RLS + `requireAdmin` | [SPEC-identity.md → Amendment 2026-10-07](SPEC-identity.md) |
+| `doc-truth` | ARCHITECTURE.md reconciled with the committed code (payments shipped, the two Supabase-storage holders, the `/api/**` list, the admin-question invariant) | same amendment, `doc-truth` items |
+
+Build order: one change, both ids land together (G3 requires the doc to move in the same commit as
+the design it documents). Depends on nothing; blocks nothing.
 
 ## Explicitly deferred (not in this initiative)
 

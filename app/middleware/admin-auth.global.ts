@@ -17,11 +17,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   // Client branch: the allowlist question is answered by the server — `/api/admin-check` reads
   // the session cookie, so no clerk-js state is consulted at all. The old `user.value` pre-check
-  // raced hydration (still empty right after a handshake) and ejected real admins; the fetch's
+  // raced hydration (still empty right after a handshake) and ejected real admins; `isAdmin()`'s
   // fail-closed catch is the only judgement, exactly like the Supabase-era lookup it replaced.
-  const admin = await $fetch<{ admin: boolean }>('/api/admin-check')
-    .then(response => response.admin)
-    .catch(() => false)
+  // It asks through the composable instead of keeping its own `$fetch` because the middleware runs
+  // before the page mounts: this round trip is the answer the page is about to ask for, so paying it
+  // here is what makes the walk between admin views cost nothing.
+  const admin = await useAdminAuth().isAdmin()
   if (!admin) {
     return navigateTo('/admin/login', { replace: true })
   }

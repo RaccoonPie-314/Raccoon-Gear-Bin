@@ -372,3 +372,210 @@ synthetic-email shapes — `bun test`, same location as the payway tests.
 - Identity merging (phone / email / Telegram are separate accounts in v1) — trigger: a buyer is
   visibly split across accounts.
 - Telegram detach — v2. QR for desktop Telegram login — deferred.
+
+## Amendment 2026-10-07 — admin mode is asked once per navigation (+ the doc says what the code does)
+
+Status: **specified — awaiting your approval (this amendment's G0).** Module ids `admin-identity` and
+`doc-truth`, indexed in [CAPABILITY-MAP.md](CAPABILITY-MAP.md). Written against committed HEAD
+`1f8dae5` with a clean tree, so every claim below cites code that is in history, not in a diff.
+
+### Objective
+
+1. **`admin-identity`** — the browser asks `/api/admin-check` once per navigation instead of once per
+   component that wants to know. Authority is untouched: RLS + `requireAdmin` stay the boundary and
+   `isAdminMode` stays a UI affordance, exactly as "the guard is UX, not security" says above.
+2. **`doc-truth`** — four passages in [ARCHITECTURE.md](../../ARCHITECTURE.md) describe a system the
+   committed code contradicts. AGENTS.md's order of trust makes the code the truth and requires the
+   doc to move *in the same change*; that change is this one.
+
+User story: an admin opens the desk and the storefront stops paying a round trip per view to learn a
+boolean it already knows; a future agent reading ARCHITECTURE.md is not told that shipped work is parked.
+
+### The defect, as measured (not as suspected)
+
+Six sites ask the same question; only one of them is the guard:
+
+| Site | Form | Cost today |
+|---|---|---|
+| [admin-auth.global.ts:22](../../app/middleware/admin-auth.global.ts) | inline `$fetch` — does **not** share the answer | 1 GET per `/admin/*` client nav |
+| [index.vue:76](../../app/pages/index.vue) | `isAdmin()` on every mount + on `signedIn` change | 1 GET per storefront visit, signed in |
+| [admin/login.vue:32](../../app/pages/admin/login.vue) | `isAdmin()` after a password sign-in | 1 GET, correct to ask |
+| [admin/orders.vue:11](../../app/pages/admin/orders.vue) · [categories.vue:51](../../app/pages/admin/categories.vue) · [site-info.vue:57](../../app/pages/admin/site-info.vue) | `isAdmin()` in a `watch(user, …, { immediate: true })` | 1 GET per admin page **on top of the guard's** |
+
+So an admin's `/admin/orders → /admin/categories` walk costs 4 GETs of one boolean, and the storefront
+costs 1 per visit. The consequence already has a comment in the source: the badge's "known transient"
+where the buyer branch runs before `isAdminMode` resolves
+([index.vue:83-84](../../app/pages/index.vue)).
+
+### Decisions (all of them, so implementation makes none)
+
+- **D1 — carrier.** `useState<boolean | null>('admin-mode', () => null)`, owned by `useAdminAuth`
+  alone. This is not a new idea: [`useSignedIn`](../../app/composables/useSignedIn.ts) already does
+  exactly this shape for the *signed-in* seed (`useState('signed-in')`, per-request on the server, a
+  plain ref across client navigations) and is the reason this needs no new module, file, or plugin.
+- **D2 — only `true` is remembered.** *(Corrected during implementation, 2026-10-07: the version
+  approved at the gate said "cache any resolved answer, both `true` and `false`", because
+  [admin-check.get.ts:9](../../server/api/admin-check.get.ts) answers **200 `{ admin: false }`** for a
+  signed-out caller. That caches a lie. The sequence, read off the shipped code:
+  [index.vue:106](../../app/pages/index.vue) fires `refreshAdminMode()` on a `watch(signedIn, …,
+  { immediate: true })` → a signed-out visitor asks and gets `false` → they SPA-navigate to
+  `/admin/login` (same document, so the state survives) → sign in with real admin credentials →
+  [login.vue:32](../../app/pages/admin/login.vue) `await isAdmin()` reads the cached `false` and prints
+  "unauthorized" **to a legitimate admin**, until a hard reload. That is the primary door and
+  `admin mode turns on` in the harness.)*
+  So: cache a resolved `true`; a resolved `false` and any rejection are not stored. Cost: non-admin and
+  signed-out traffic asks once per mount exactly as today — no saving, but no new failure mode either.
+  The saving lands where the traffic actually is: the desk, and every surface after the answer is known.
+- **D3 — invalidation is one line in the existing hook.** `markSignedOut()` clears `'admin-mode'`
+  beside `'signed-in'`. Both sign-out paths already call it, which is precisely the bug class the
+  harness caught once ("logout clears admin mode", [ARCHITECTURE.md:1163](../../ARCHITECTURE.md)).
+  `index.vue`'s local `isAdminMode.value = false` stays — harmless, and it is the page's own ref.
+- **D4 — the guard routes through `isAdmin()`** so its round trip becomes the one that answers for the
+  page (2 GET → 1 per admin nav). Its server branch is untouched: it still returns after the cookie
+  check, because membership is not readable there without crossing the tier (see Deferred).
+- **D5 — the five `isAdmin()` call sites do not change.** Same name, same signature, same await.
+  Expected diff: **3 files** — `useAdminAuth.ts`, `admin-auth.global.ts`, `useSignedIn.ts`.
+
+### Code style (the whole behaviour, one snippet)
+
+```ts
+// useAdminAuth.ts — `true` is the only answer worth remembering: a cached `false` would outlive a
+// sign-in and refuse a real admin at the login page. A rejected request is never stored either, so
+// the existing fail-closed `catch` retries on the next ask, as it does today.
+const adminMode = useState<boolean>('admin-mode', () => false)
+
+const isAdmin = async () => {
+  if (adminMode.value) return true
+  try {
+    adminMode.value = (await $fetch<{ admin: boolean }>('/api/admin-check')).admin
+  } catch {
+    return false
+  }
+  return adminMode.value
+}
+```
+
+Comments follow the house style: they name *why* the line is load-bearing, and cite the measured fact
+or the failure it prevents. No new i18n keys — nothing here is user-facing copy.
+
+### Commands
+
+```bash
+bun run lint                                                # after every edit (~2 s)
+bun run typecheck                                           # after every edit (~4 s, vue-tsc reads .vue templates)
+bun run build                                               # after every edit (~7 s)
+bun run test                                                # unchanged suite; must stay green (~0.2 s)
+bun run verify                                              # ONCE, before claiming it works (~3 m 37 s, needs Chrome)
+```
+
+### Structure — files this touches
+
+| File | Change |
+|---|---|
+| `app/composables/useAdminAuth.ts` | owns `useState('admin-mode')`; `isAdmin()` reads-or-asks per D1/D2 |
+| `app/middleware/admin-auth.global.ts` | client branch calls `isAdmin()` instead of its own `$fetch` (D4) |
+| `app/composables/useSignedIn.ts` | `markSignedOut()` also clears `'admin-mode'` (D3) |
+| `scripts/verify-ui.mjs` | one check per acceptance item below, in the existing admin section |
+| `ARCHITECTURE.md` | the four `doc-truth` edits below, **same commit** as the code (G3) |
+
+No new file. No migration, no dependency, no CI change, no schema change.
+
+### Testing strategy
+
+Unit tests: **none added** — the logic is "read state, else fetch, store only on success", which is a
+composable against Vue state and the network, not a pure rule. `tests/unit/*` stays as it is.
+
+The harness is the right level, and it already records every request the browser makes
+(`allW()` / `writes()`, [verify-ui.mjs:551](../../scripts/verify-ui.mjs)), including
+`/api/admin-check`.
+
+1. **The walk, bounded** — `walking the admin desk asks the gate at most once, never once per view`.
+   `resetW()` before the desk's `Admin tools` click, then four client navigations between admin views,
+   then a count of `/api/admin-check` that must be **≤ 1**. The bound is 1 rather than 0 because the
+   answer may already be cached when the walk starts (the storefront's own mount asks once the session
+   lands). Measured: **0** with the change, **4** with D4 reverted — which is the decisive half, since
+   a guard that keeps its own copy pays it on every navigation.
+2. **A refused answer is not remembered** *(pinned 2026-10-07, in the shape that needed no stub
+   change)* — on `/admin/login` in one fresh document, submit twice against an unseeded session and
+   assert the recorder shows **1 then 2** asks. This pins the D2 correction directly: an implementation
+   that stores `false` answers the second submit from the cache and locks the door — and the sabotage
+   run proved it, because with the gate-approved D2 the shipped checks `login lands back on the
+   catalog` and `admin mode turns on` go red too. A rejection takes the same "do not store" branch, so
+   the same assertion covers it; the transport-failure stub flag the plan first proposed is not needed.
+3. **Regression, not new.** `login asked the admin gate and wrote no data`, `admin mode turns on` and
+   `logout clears admin mode` stay green — the last one is the proof D3 is real.
+
+### Boundaries
+
+- **Always** — fast gates after each edit; one `bun run verify` before any "it works" claim; every
+  doc sentence re-derived from a `file:line` in the tree, never copied from the old doc.
+- **Ask first** — touching `app/middleware/*.global.ts` beyond D4 (it is on the
+  [TOUCH_RESTRICTIONS](../../docs/rules/TOUCH_RESTRICTIONS.md) list of auto-imported surfaces);
+  changing the stub's `__admin_session` shape in the harness; any edit to a pushed migration.
+- **Never** — no browser read of `admin_users`, no `isAdmin` decision moved into clerk-js state
+  (ARCHITECTURE.md's P6 note forbids it and the guard's comment names the race it caused), no broader
+  Supabase/Neon client to "fix" a permission error, no `as any`, no cache written on a rejected request.
+
+### `doc-truth` items — what to change and what it must say
+
+| # | Where (HEAD `1f8dae5`) | Claim | Code says |
+|---|---|---|---|
+| T1 | [ARCHITECTURE.md:1149-1158](../../ARCHITECTURE.md) | "P2 (`server/utils/payway.ts`) is green and imported by nothing. P3–P5 (routes, **Pay-now UI**, sandbox E2E, secret audit) wait on G2" | Routes exist and are called: `/api/payments/payway/{create,verify,return,webhook}.post.ts`, from [payway-checkout.ts:10](../../app/utils/payway-checkout.ts), `useCheckout`'s `payNow`, `checkout/{index,success,pay-result}.vue`, `account/orders/[id].vue`. HEAD *is* the pay-now/pay-later commit. Rewrite as: live loop, plus what genuinely remains (secret audit, the production `G2` account) |
+| T2 | [ARCHITECTURE.md:1221-1223](../../ARCHITECTURE.md) | the `/api/**` enumeration omits payments | add `/api/payments/**` |
+| T3 | [ARCHITECTURE.md:109-110](../../ARCHITECTURE.md) | "the one page that still [holds a Supabase client] is `admin/login.vue`" | `grep useSupabaseClient` → two holders, neither a page: [useCatalog.ts:55](../../app/composables/useCatalog.ts) (storage URL builder, pending the plans/005 P3 R2 flip) and [useAdminProductEditor.ts:109](../../app/features/admin/composables/useAdminProductEditor.ts) (image upload). `admin/login.vue` holds none |
+| T4 | [ARCHITECTURE.md:1159-1163](../../ARCHITECTURE.md) | "one gate and one client question" | true but incomplete: the question is asked six times. Extend with D1–D3 so nobody re-adds a per-page fetch, and record that the answer is per-navigation state, not a decision |
+
+**Finding F1 (recorded, deliberately not in scope).** `mark_payment_refunded` is in the live schema
+(`db/migrations/0001_schema.sql`) and typed in [database.ts:375](../../app/types/database.ts), and
+SPEC-payments.md's acceptance criterion 5 requires the refund flow — but **no route and no admin
+affordance calls it**. That is `payments` module work with an owner decision attached (is v1
+portal-only by design, or is an admin refund button owed?), so it is *not* folded into `doc-truth`
+quietly. Answer needed; until then T1's rewrite must say "the marker has no handle", not "refunds shipped".
+
+### Success criteria
+
+1. The whole desk walk — four client navigations between admin views — costs **at most one**
+   `GET /api/admin-check`, measured **0** because the answer is already known by then. Before the
+   change the same walk cost one per view.
+2. The door still opens the way it does today: a visitor who arrived signed out, asked, and got `false`
+   can sign in as an admin **in the same document** and is let in. (This is the criterion D2's
+   correction exists for; it is the one that would fail if `false` were ever cached.)
+3. A signed-out or non-admin caller still issues 1 per mount and is still redirected by the guard —
+   unchanged behaviour, deliberately not optimised (see the `ponytail:` ceiling).
+4. Sign-out clears the cached answer (harness check 3 green) and a rejected request is never cached
+   (harness check 2 green).
+5. No `app/**` file besides the three in the table changes; `git diff --stat` on the code half ≤ 3 files.
+6. `lint` / `typecheck` / `build` / `test` green; `bun run verify` green **once** at the checkpoint.
+7. T1–T4 corrected in the same commit as the code, each traceable to a `file:line`, and F1 either
+   answered or written as an explicit gap — not left implying refunds work.
+
+**Measured at implementation (full suite):** `bun run verify` → **527/527 checks passed**; the admin
+slice alone 97/97. `lint` 0 errors (17 documented pre-existing warnings), `typecheck` exit 0, `build`
+exit 0, `bun run test` 52 pass / 0 fail.
+
+### Deferred, with the reason attached
+
+- **SSR membership seed** (so `/admin/*` paints its real affordances server-side and the cold-load
+  badge transient at `index.vue:83-84` dies). Two named blockers, neither invented: the read needs
+  `appSql`, which is `server/` code, and an app-side global middleware importing it crosses the tier;
+  and the harness's fetch stub is browser-level, so SSR reads leave it
+  ([ARCHITECTURE.md:1226](../../ARCHITECTURE.md) keeps that note). A Nitro middleware seeding
+  `event.context` would fix both but puts a Neon query on every signed-in SSR request. Trigger: a
+  measured complaint about the desk's first paint.
+- **Stale `false` after a grant.** Gone with the D2 correction: `false` is never stored, so a session
+  granted mid-flight is recognised on its very next ask — no reload, and no `ponytail:` comment needed.
+  The ceiling that *is* left: a non-admin re-asks per mount, which is today's cost. Keying the answer to
+  the session id would remove it, and is the upgrade path if that traffic ever shows in a trace —
+  deliberately not done here, because a cache whose key is a session re-invites the clerk-js-state
+  decision this module's own note forbids.
+- **Nothing else from Known gaps.** The `tel:` digit rule, `SearchDock`'s scroll-rule copy, the three
+  headers, the ~80 harness sleeps, `bun run test` in CI, the R2 flip and the `categories: null` fixture
+  are all real and all out of the two modules you approved.
+
+### Open questions
+
+1. F1: portal-only refunds (doc says so, RPC stays a door with no handle) or an admin refund button
+   (then it is a `payments` amendment, not this one)?
+2. Should the storefront's badge (`index.vue`) stop asking `isAdmin()` on every mount even when the
+   answer is cached — i.e. keep the `watch`, or gate it on `signedIn` alone? Behaviour-preserving
+   either way; I'd keep the watch as-is.

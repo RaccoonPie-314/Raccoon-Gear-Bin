@@ -19,5 +19,13 @@ export const useSignedIn = () => {
   return computed(() => Boolean(user.value) || seeded.value)
 }
 
-/** Called by every sign-out path (useCustomerAuth, useAdminAuth) beside `clerk.signOut()`. */
-export const markSignedOut = () => { useState<boolean>('signed-in').value = false }
+/**
+ * Called by every sign-out path (useCustomerAuth, useAdminAuth) beside `clerk.signOut()`.
+ * `admin-mode` rides along because clearing the cookies does not change a `useState` — a cached admin
+ * answer would outlive the session it came from, which is the failure "logout clears admin mode"
+ * measures. Coupled to `useAdminAuth` by literal, so neither key may be invalidated alone.
+ */
+export const markSignedOut = () => {
+  useState<boolean>('signed-in').value = false
+  useState<boolean>('admin-mode').value = false
+}

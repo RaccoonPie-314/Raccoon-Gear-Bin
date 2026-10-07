@@ -3584,6 +3584,31 @@ const run = async () => {
     // the stub's `/api/admin-check` answers admin while `__admin_session` is set (sessionStorage
     // carries it across the section's documents; the guest walk never sets it).
     await waitFor('!!document.querySelector("main form input")')
+    // A refused gate must not be remembered (plans/007, D2). The storefront badge asks this same
+    // question on the document's first mount, so a cached `false` would be handed back to the next
+    // `isAdmin()` — and the login page reads it right after `signIn`, which is how a real admin gets
+    // "unauthorized" without ever reloading. Refusing twice in ONE document is the proof: the second
+    // attempt still asked. The recorder is in the page, so `__W` is the completion signal — waiting on
+    // the path alone would race the fetch and read a count that has not landed yet.
+    const setGateFields = (mail, pwd) => '(() => { const [m, p] = document.querySelectorAll("main form '
+      + 'input"); if (!m || !p) return false; const set = (el, v) => { Object.getOwnPropertyDescriptor'
+      + '(HTMLInputElement.prototype, "value").set.call(el, v); el.dispatchEvent(new Event("input", { '
+      + 'bubbles: true })) }; set(m, ' + JSON.stringify(mail) + '); set(p, ' + JSON.stringify(pwd) + ')'
+      + '; return true })()'
+    await ev(setGateFields('verify@example.test', 'verify-password'))
+    await clickByText('form button[type="submit"]', 'Sign in', 'window.__W.filter(w => w.p === "/api/admin-check").length === 1')
+    const gateRefused = await allW()
+    check('a refused admin login asks the gate once and keeps the door shut',
+      gateRefused.filter(w => w.p === '/api/admin-check').length === 1 && await ev('location.pathname') === '/admin/login',
+      seqOf(gateRefused))
+    await clickByText('form button[type="submit"]', 'Sign in', 'window.__W.filter(w => w.p === "/api/admin-check").length === 2')
+    const gateRefusedTwice = await allW()
+    check('a refused gate is not remembered — the second attempt asks again',
+      gateRefusedTwice.filter(w => w.p === '/api/admin-check').length === 2, seqOf(gateRefusedTwice))
+    // Back to empty fields: the walk below types with `Input.insertText`, which inserts at the caret
+    // rather than replacing, so leftover text here would corrupt the real login.
+    await ev(setGateFields('', ''))
+    await resetW()
     await ev('sessionStorage.setItem("__admin_session", "1"); true')
     const email = (await ev(boxesExpr('main form input')))[0]
     const pass = (await ev(boxesExpr('main form input')))[1]
@@ -3937,13 +3962,33 @@ const run = async () => {
 
     // ---- the admin order desk (phase 3: orders) ---------------------------------------------------
     // The buyer's half of the flow runs in the guest slice (it needs a session and a cart); this half
-    // is the desk. The stub answers the order read newest-first with the cancelled fixture on top,
-    // so the row order below proves the desk's own pending-first sort rather than the server's.
+    // is the desk. The stub answers the order read newest-first with the cancelled fixture on top, so
+    // the row order below proves the desk's own pending-first sort rather than the server's.
+    //
+    // The recorder is emptied here on purpose: the admin navigations between this line and the check
+    // below are what plans/007 is about, and counting them needs a clean starting point.
+    await resetW()
     await clickByText('header button', 'Admin tools', `location.pathname === "/admin/site-info" && !!document.querySelector('[data-admin-tabs]')`)
     check('the orders tab opens the desk', await clickSelector('[data-admin-tab="orders"]', 'location.pathname === "/admin/orders" && !!document.querySelector("[data-order-filters]")'))
     await waitFor('!!document.querySelector("[data-admin-order-row]")')
     const deskRows = await ev('[...document.querySelectorAll("[data-admin-order-row]")].map(r => (r.querySelector("[data-order-status]") || {}).textContent?.trim())')
     check('the desk lists both orders with the pending one first', JSON.stringify(deskRows) === JSON.stringify(['Pending', 'Cancelled']), deskRows)
+
+    // The gate question, once at most for the whole walk (plans/007, D1 + D4). Each `clickSelector`
+    // above and below asserts its own route and form first, because a request count on a page that
+    // never mounted would pass by idleness — the trap this file documents for the locale sweeps.
+    //
+    // The bound is 1 rather than 0 because the answer may or may not already be cached when the walk
+    // starts (the storefront's own mount asks after the session lands), and it is measured over FOUR
+    // navigations so the difference is decisive: reverting the composable's cache (D1) or the guard's
+    // use of it (D4) makes this 4, because the guard then keeps its own copy and pays it every time.
+    // Measured: 0 here, 4 with the guard reverted.
+    await clickSelector('[data-admin-tab="site-info"]', `location.pathname === "/admin/site-info" && !!document.querySelector(${JSON.stringify(SITE_FORM)})`)
+    await clickSelector('[data-admin-tab="categories"]', `location.pathname === "/admin/categories" && !!document.querySelector(${JSON.stringify(CAT_FORM)})`)
+    const gateWalk = await allW()
+    const gateAsks = gateWalk.filter(w => w.p === '/api/admin-check')
+    check('walking the admin desk asks the gate at most once, never once per view', gateAsks.length <= 1, seqOf(gateWalk))
+    await clickSelector('[data-admin-tab="orders"]', 'location.pathname === "/admin/orders" && !!document.querySelector("[data-admin-order-row]")')
 
     // The desk's search: client-side over the loaded list, across identity, delivery and item
     // names — whatever a phone call gives you. Queries come from the fixtures ('siem reap' is the
