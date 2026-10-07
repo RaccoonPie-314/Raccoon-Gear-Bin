@@ -129,23 +129,30 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
               <ColorModeToggle />
               <LanguageSwitcher />
               <CartControl :count="cartCount" />
-              <!-- The account entry, for everyone (the admin controls below are mode-gated). A text
-                   pill rather than an icon: "Sign in" has to be findable on sight. -->
+              <!-- The account entry, for everyone at every width (the admin controls below are
+                   mode-gated). A text pill rather than an icon: "Sign in" has to be findable on
+                   sight, and signed in it is the mobile path to the profile + sign-out. Signed in,
+                   a phone wears the short label: "My account" (and its much longer Khmer form)
+                   is what tips the cluster over its one-line budget at 390px. -->
               <NuxtLink
                 :to="localePath(signedIn ? '/account' : '/login')"
                 class="inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
                 :class="locale === 'km' ? '' : 'tracking-wider'"
               >
-                {{ signedIn ? t('myAccount') : t('signIn') }}
+                <template v-if="signedIn"><span class="sm:hidden">{{ t('account') }}</span><span class="hidden sm:inline">{{ t('myAccount') }}</span></template>
+                <template v-else>{{ t('signIn') }}</template>
               </NuxtLink>
               <!-- Orders, signed in only: there is nothing to list otherwise, and the account
                    pill above already carries the sign-in path. An admin's points at the desk —
                    their own account has no purchases to read — everyone else's at their own
-                   history. Same pill shape as the account entry. -->
+                   history. Same pill shape as the account entry. A phone drops it: the cluster's
+                   one-line budget at 390px fits the account pill but not both (measured: the
+                   pair overlays the row, 144 → 244px tall), and /account carries the orders
+                   entry plus the sign-out the phone otherwise loses. -->
               <NuxtLink
                 v-if="signedIn"
                 :to="isAdminMode ? '/admin/orders' : localePath('/account/orders')"
-                class="relative inline-flex items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
+                class="relative hidden items-center rounded-full border border-zinc-200/80 bg-zinc-100/90 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 shadow-xs transition-[color,background-color,scale] duration-200 hover:text-zinc-950 motion-safe:active:scale-[0.97] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-zinc-950 sm:inline-flex dark:border-zinc-800/80 dark:bg-zinc-900/90 dark:text-zinc-300 dark:hover:text-white dark:focus-visible:ring-white"
                 :class="locale === 'km' ? '' : 'tracking-wider'"
               >
                 {{ t('orders') }}
@@ -166,12 +173,16 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 {{ t('adminMode') }}
               </span>
               <!-- One entry for the admin tools, not one per tool: the editors each keep their own
-                   page and section, and `AdminTabs` is what moves between them. -->
+                   page and section, and `AdminTabs` is what moves between them. A phone drops the
+                   two admin buttons — with them the cluster wraps the whole header onto a second
+                   row (live phone report, 2026-10-06); the editors are a desk workflow, and
+                   sign-out lives on /account, which the account pill above reaches. -->
               <UButton
                 v-if="isAdminMode"
                 size="xs"
                 color="neutral"
                 variant="ghost"
+                class="hidden sm:inline-flex"
                 @click="navigateTo('/admin/site-info')"
               >
                 {{ t('adminTools') }}
@@ -181,6 +192,7 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
                 size="xs"
                 color="neutral"
                 variant="ghost"
+                class="hidden sm:inline-flex"
                 :loading="isSigningOut"
                 @click="logout"
               >
