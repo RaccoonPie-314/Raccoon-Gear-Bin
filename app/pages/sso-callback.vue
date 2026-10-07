@@ -5,11 +5,14 @@
 // (1) completion waits for clerk-js (`watch`); (2) `#clerk-captcha` must be mounted — an OAuth
 // that resolves as a sign-up/transfer trips bot protection; (3) a transferable attempt is
 // completed explicitly (`signUp.create({ transfer: true })`); (4) **never declare NO_SESSION
-// immediately** — clerk-js's own load-time pass may be consuming the same callback in parallel,
-// and the session can land a beat later (declaring failure early is how a valid session got
-// orphaned); (5) when it does fail, the card carries the whole trail — params seen, callback
-// result, transfer status — so one screenshot names the cause.
+// early** — clerk-js's own load-time pass may be consuming the same callback in parallel, and
+// the session can land seconds later (the 2026-10-07 run declared failure after a 3-second
+// window and flashed the card on a sign-in that then succeeded — the transfer was still in
+// flight). The page now waits 15 seconds, and a session that lands after the card shows still
+// converts it into the destination; (5) when it truly fails, the card carries the whole trail —
+// params seen, callback result, transfer status, wait length — so one screenshot names the cause.
 const { t } = useI18n()
+const localePath = useLocalePath()
 const clerk = useClerk()
 const failure = ref('')
 
@@ -25,8 +28,74 @@ const safe = (value: unknown) => {
   }
 }
 
+// The `@landing` sentinel: the Google click happened signed-out, so the login page could not
+// read the profile and could only guess '/account'. With the session present the verdict is
+// answerable, and a nicknamed account belongs on the storefront, not back in onboarding (the
+// live report of 2026-10-06). The read can face the same cookie-settle lag the order pages
+// fight, so it retries; a failed read keeps the guess. Shared by the main wait and the
+// late-arrival watcher — a session is a session no matter which beat it lands on.
+const resolveLanding = async (stored: string | null, fallback: string) => {
+  let landing = fallback
+  if (stored === '@landing') {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const profile = await $fetch<{ display_name: string | null } | null>('/api/profile')
+        if (profile?.display_name?.trim()) landing = localePath('/')
+        break
+      } catch {
+        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
+  }
+  return landing
+}
+
+// clerk-js may already have navigated (the plugin's routerPush); only land if still here.
+const landIfStillHere = async (stored: string | null, to: string) => {
+  const landing = await resolveLanding(stored, to)
+  if (window.location.pathname.includes('sso-callback')) {
+    await navigateTo(landing, { replace: true })
+  }
+}
+
+// The failure card is not the last word: clerk-js's own pass can outlive the grace window below
+// by an arbitrary margin, and its session deserves adoption whenever it lands. Poll while the
+// card shows (bounded — a minute is beyond any measured transfer, and after that the card's
+// retry path takes over) and convert a late session into the destination.
+let latePoll: ReturnType<typeof setInterval> | undefined
+let lateBusy = false
+onUnmounted(() => clearInterval(latePoll))
+watch(failure, (value) => {
+  if (!value || latePoll) return
+  let ticks = 0
+  latePoll = setInterval(async () => {
+    const instance = clerk.value
+    ticks += 1
+    if (!instance || ticks > 60 || lateBusy) return
+    if (!instance.user && instance.client?.sessions?.length) {
+      const pendingSession = instance.client.sessions[0]
+      if (pendingSession) {
+        lateBusy = true
+        try {
+          await instance.setActive({ session: pendingSession.id })
+        } catch (error) {
+          console.warn('[sso-callback] late setActive failed:', error)
+        } finally {
+          lateBusy = false
+        }
+      }
+    }
+    if (!instance.user) return
+    clearInterval(latePoll)
+    const stored = sessionStorage.getItem('sso-to')
+    const to = stored && stored.startsWith('/') ? stored : '/account'
+    await landIfStillHere(stored, to)
+  }, 1000)
+})
+
 watch(clerk, async (instance) => {
   if (!instance) return
+  const startedAt = Date.now()
   const stored = sessionStorage.getItem('sso-to')
   const to = stored && stored.startsWith('/') ? stored : '/account'
   const trail: string[] = [
@@ -41,26 +110,39 @@ watch(clerk, async (instance) => {
       })
       console.warn('[sso-callback] handleRedirectCallback:', result)
       trail.push(`cb=${safe(result)}`)
-      if (!instance.user && instance.client) {
-        const attempt = await instance.client.signUp.create({ transfer: true })
-        console.warn('[sso-callback] transfer status:', attempt.status, attempt.missingFields)
-        trail.push(`transfer=${attempt.status} missing=${safe(attempt.missingFields)}`)
-        if (attempt.status === 'complete' && attempt.createdSessionId) {
-          await instance.setActive({ session: attempt.createdSessionId })
-        }
-      }
     }
   } catch (error) {
-    console.warn('[sso-callback] completion failed:', error)
-    failure.value = `${(error as Error)?.message || String(error)}\n${trail.join(' | ')}`
-    return
+    console.warn('[sso-callback] callback failed:', error)
+    trail.push(`cbErr=${safe((error as Error)?.message)}`)
   }
-  // Give clerk-js's own load-time pass a grace window before calling this a failure — the two
-  // passes race, and the session can arrive a beat after ours looked.
+  // Complete a transferable sign-up even when the `__clerk` params are already gone. An
+  // UNREGISTERED Google account resolves as a transfer, and clerk-js's own load-time pass can
+  // consume and strip those params while leaving the transferable attempt behind — so `params=no`
+  // no longer means "nothing to transfer" (that gate is what orphaned unregistered sign-ins,
+  // 2026-10-07). The throw is swallowed on purpose: a registered sign-in has no transferable
+  // attempt and its session lands through clerk-js's pass, caught by the grace window below.
+  if (!instance.user && instance.client) {
+    try {
+      const attempt = await instance.client.signUp.create({ transfer: true })
+      console.warn('[sso-callback] transfer status:', attempt.status, attempt.missingFields)
+      trail.push(`transfer=${attempt.status} missing=${safe(attempt.missingFields)}`)
+      if (attempt.status === 'complete' && attempt.createdSessionId) {
+        await instance.setActive({ session: attempt.createdSessionId })
+      }
+    } catch (error) {
+      console.warn('[sso-callback] transfer failed:', error)
+      trail.push(`transferErr=${safe((error as Error)?.message)}`)
+    }
+  }
+  // Give clerk-js's own load-time pass a generous grace window before calling this a failure —
+  // the two passes race, and the measured failure (2026-10-07) landed its session seconds AFTER
+  // a 3-second window expired: the card flashed on a sign-in that then succeeded. 15 seconds
+  // covers the transfer (captcha widget load + FAPI roundtrips); anything later is still caught
+  // by the late-arrival watcher, so a longer wait is the only cost of the wider window.
   if (!instance.user) {
-    const until = Date.now() + 3000
+    const until = Date.now() + 15000
     while (!instance.user && Date.now() < until) {
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise(resolve => setTimeout(resolve, 200))
     }
   }
   // The measured failure (2026-10-06): the FAPI created the session and this client can see it,
@@ -79,11 +161,9 @@ watch(clerk, async (instance) => {
     trail.push(`clientSessions=${instance.client?.sessions?.length ?? '?'}`)
   }
   if (instance.user) {
-    // clerk-js may already have navigated (the plugin's routerPush); only land if still here.
-    if (window.location.pathname.includes('sso-callback')) {
-      await navigateTo(to, { replace: true })
-    }
+    await landIfStillHere(stored, to)
   } else {
+    trail.push(`waited=${Math.round((Date.now() - startedAt) / 1000)}s`)
     failure.value = `NO_SESSION\n${trail.join(' | ')}`
   }
 }, { immediate: true })

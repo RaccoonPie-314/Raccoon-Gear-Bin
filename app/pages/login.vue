@@ -124,7 +124,11 @@ const beginGoogle = async () => {
   errorMessage.value = ''
   isSubmitting.value = true
   try {
-    await signInWithGoogle(await landingTarget())
+    // Only the explicit redirect is decided pre-auth. The storefront-vs-onboarding verdict needs
+    // the profile read, which answers null without a session — judging it here is what sent every
+    // nicknamed Google sign-in back to /account (live report, 2026-10-06). Empty = "no explicit
+    // destination"; the callback judges once the session exists.
+    await signInWithGoogle(safeRedirectPath(route.query.redirect, ''))
   } catch (error) {
     console.warn('[google] sign-in failed:', error)
     errorMessage.value = t('invalidLogin')
@@ -150,7 +154,14 @@ const beginTelegram = async () => {
   telegramWaiting.value = true
   try {
     const { nonce, deepLink } = await startTelegram('login')
-    window.open(deepLink, '_blank', 'noopener')
+    // `window.open` after an await has lost the user gesture, and mobile browsers refuse it
+    // silently — the live phone report (2026-10-06) was exactly this: the button did nothing.
+    // Desktop opens the tab; a refused open falls back to a same-tab navigation, the mobile-native
+    // path (t.me opens the Telegram app; this tab keeps polling underneath). No `noopener` here:
+    // its presence makes the return value null by spec, which the check below would read as
+    // "blocked" and double-navigate.
+    const telegramTab = window.open(deepLink, '_blank')
+    if (!telegramTab) window.location.href = deepLink
     const until = Date.now() + 10 * 60 * 1000
     telegramTimer = setInterval(async () => {
       if (Date.now() > until) { stopTelegram(t('telegramExpired')); return }

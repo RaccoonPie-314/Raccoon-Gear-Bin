@@ -120,7 +120,7 @@ export const useCustomerAuth = () => {
       // dev-browser lag, measured: this branch removed a live session seconds after its adoption).
       // Server blindness is the guard's problem — `useSignedIn` or-s the client user in, so the
       // landing renders; nothing here may destroy a session.
-      await navigateTo(target, { replace: true })
+      await navigateTo(target || '/account', { replace: true })
       return
     }
     if (!signInResource.value) throw new Error('AUTH_NOT_LOADED')
@@ -128,12 +128,22 @@ export const useCustomerAuth = () => {
     // `<SignIn routing="path">` relocates callback params into hash routing and renders an
     // EMPTY page when anything is malformed — a void with no diagnostics. Our page completes
     // explicitly (handleRedirectCallback + grace + adoption) and renders the whole trail on
-    // failure. The destination survives the round trip in sessionStorage.
-    sessionStorage.setItem('sso-to', target)
+    // failure. The destination survives the round trip in sessionStorage. An empty target means
+    // "no explicit destination": the sentinel `@landing` marks it for sso-callback.vue, which can
+    // judge storefront-vs-onboarding with the session actually present — a pre-auth judgment can
+    // only ever guess /account (the live report, 2026-10-06: every nicknamed Google sign-in
+    // landed back in onboarding).
+    sessionStorage.setItem('sso-to', target || '@landing')
+    // BOTH legs land on our callback page, even the complete leg. The clerk-js plugin can
+    // navigate to `redirectUrlComplete` on its own (its routerPush — the trap the callback page
+    // already documents), and pointing that leg at the guessed target skipped the callback's
+    // judgement entirely — which is why the sentinel alone did not change the live behaviour
+    // (report 2026-10-06). On the page, an explicit stored path wins; `@landing` re-judges with
+    // the session actually present.
     await signInResource.value.authenticateWithRedirect({
       strategy: 'oauth_google',
       redirectUrl: `${window.location.origin}/sso-callback`,
-      redirectUrlComplete: `${window.location.origin}${target}`
+      redirectUrlComplete: `${window.location.origin}/sso-callback`
     })
   }
 
