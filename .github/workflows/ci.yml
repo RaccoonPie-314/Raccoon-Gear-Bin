@@ -83,7 +83,7 @@ jobs:
       # scripts/verify-ui.mjs runs on Node and needs Node 24 for global
       # `WebSocket`; it has no dependencies of its own.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
