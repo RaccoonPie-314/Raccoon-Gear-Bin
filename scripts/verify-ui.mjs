@@ -1186,9 +1186,23 @@ const run = async () => {
     const mbox = await ev(boxesExpr('nav[aria-label="Mobile product categories"] button'))
     const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(p => ({ x: p.x, y: p.y, radiusX: 10, radiusY: 10, force: 1 })) })
     await touch('touchStart', [{ x: mbox[0].x, y: mbox[0].y }])
+    // Drag-select is now gated behind a long-press (a quick flick scrolls natively instead), so
+    // hold still past LONG_PRESS_MS (220) before moving to arm it.
+    await sleep(260)
     for (let i = 1; i <= 8; i++) { await touch('touchMove', [{ x: mbox[0].x + (mbox[3].x - mbox[0].x) * i / 8, y: mbox[0].y }]); await sleep(45) }
     await touch('touchEnd', [])
     check('mobile drag selects its target', await waitFor(`(document.querySelector(\'nav[aria-label="Mobile product categories"] [aria-selected="true"]\').textContent || "").trim() === ${JSON.stringify(mbox[3].t)}`), { want: mbox[3].t })
+
+    // The other half of the split: a quick flick (no hold) is the browser's scroll, not a select.
+    // It must leave the chosen category alone — the gesture that used to be captured as drag-select
+    // now belongs to the native scroller.
+    const flickBefore = await ev(`(document.querySelector(\'nav[aria-label="Mobile product categories"] [aria-selected="true"]\').textContent || "").trim()`)
+    await touch('touchStart', [{ x: mbox[3].x, y: mbox[3].y }])
+    for (let i = 1; i <= 6; i++) { await touch('touchMove', [{ x: mbox[3].x - i * 14, y: mbox[3].y }]); await sleep(16) }
+    await touch('touchEnd', [])
+    await sleep(140)
+    const flickAfter = await ev(`(document.querySelector(\'nav[aria-label="Mobile product categories"] [aria-selected="true"]\').textContent || "").trim()`)
+    check('a quick flick scrolls without selecting', flickBefore === flickAfter, { flickBefore, flickAfter })
 
     // The bar no longer relies on tapping the last item to cycle: a long list overflows the
     // phone-width bar, and dragging a category into the right edge must pan it. Seed the overflow,
@@ -1213,6 +1227,7 @@ const run = async () => {
     const START_PILL_FRAMES = '(() => { window.__PF = []; window.__PFstop = false; const t0 = performance.now(); const tick = function () { if (window.__PFstop) return; const nav = document.querySelector(\'nav[aria-label="Mobile product categories"]\'); const p = nav && nav.firstElementChild; if (p) { const m = new DOMMatrixReadOnly(getComputedStyle(p).transform); window.__PF.push({ e: +m.e.toFixed(1), w: +m.d.toFixed(1), sl: Math.round(nav.scrollLeft) }) } if (performance.now() - t0 < 3000) requestAnimationFrame(tick) }; requestAnimationFrame(tick); return true })()'
     await ev(START_PILL_FRAMES)
     await touch('touchStart', [{ x: mbox2[0].x, y: mbox2[0].y }])
+    await sleep(260)
     for (let i = 1; i <= 10; i++) { await touch('touchMove', [{ x: mbox2[0].x + (mEdge.right - 6 - mbox2[0].x) * i / 10, y: mbox2[0].y }]); await sleep(30) }
     for (let i = 0; i < 6; i++) { await touch('touchMove', [{ x: mEdge.right - 4, y: mbox2[0].y }]); await sleep(30) }
     const mScrolled = await ev('document.querySelector(\'nav[aria-label="Mobile product categories"]\').scrollLeft')
@@ -3225,7 +3240,7 @@ const run = async () => {
     // fires when the module's async user state lands, so wait for the evidence, not for a clock.
     await nav(appUrl)
     await waitFor('!localStorage.getItem("raccoon-cart:v1:guest")')
-    const mergeState = await ev('(() => ({ guest: !!localStorage.getItem("raccoon-cart:v1:guest"), user: JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "null"), pill: ([...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim() === "My account") || {}).textContent?.trim() || null, signed: document.cookie.indexOf("__harness_clerk") !== -1 }))()')
+    const mergeState = await ev('(() => ({ guest: !!localStorage.getItem("raccoon-cart:v1:guest"), user: JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "null"), pill: ([...document.querySelectorAll("header a")].find(l => (l.innerText || "").trim() === "My account") || {}).innerText?.trim() || null, signed: document.cookie.indexOf("__harness_clerk") !== -1 }))()')
     check('signing in merges the guest cart into the account cart', !mergeState.guest && !!mergeState.user && mergeState.user.items.length === 1 && mergeState.user.items[0].productId === cartProductId && mergeState.user.items[0].quantity === 1, mergeState)
     check('the merged cart badges the masthead', await waitFor('(document.querySelector("[data-cart-badge]") || {}).textContent?.trim() === "1"'), { badge: await ev('(document.querySelector("[data-cart-badge]") || {}).textContent') })
     // Back to /account client-side: a full page load would hit the SSR guard, which the in-browser
@@ -3348,7 +3363,7 @@ const run = async () => {
     check('placing the order lands on the success page with the returned reference', await clickSelector('[data-checkout-submit]', 'location.pathname === "/checkout/success" && !!document.querySelector("[data-order-number]")'))
     const placed = (await allW()).filter(w => w.method === 'POST' && w.p === '/api/orders')
     const placedBody = JSON.parse(placed[placed.length - 1]?.body || '{}')
-    const wantBody = { items: [{ productId: cartProductId, quantity: 1 }], delivery: { name: DELIVERY.name, phone: DELIVERY.phone, address: DELIVERY.address, location: pinUrl, note: null }, locale: 'en' }
+    const wantBody = { items: [{ productId: cartProductId, quantity: 1 }], delivery: { name: DELIVERY.name, phone: DELIVERY.phone, address: DELIVERY.address, location: pinUrl, note: null }, locale: 'en', payNow: false }
     const ref = await ev('(document.querySelector("[data-order-number]") || {}).textContent?.trim()')
     const cartAfterOrder = await ev('(JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "{}").items || []).length')
     check('the placed body is the clamped cart, the delivery form and the locale — exactly', placed.length === 2 && JSON.stringify(placedBody) === JSON.stringify(wantBody), { placedBody })
@@ -3519,7 +3534,10 @@ const run = async () => {
     // scrollIntoView starts a smooth scroll under its own feet (trap 9 — observed as a pill click
     // that never navigated, `accountHop: false, accountUrl: "/"`). These are links; a programmatic
     // click is position-independent and the router still handles it.
-    const accountHop = await ev('(() => { const a = [...document.querySelectorAll("header a")].find(l => (l.textContent || "").trim() === "My account"); if (a) a.click(); return !!a })()')
+    // innerText, not textContent: the account pill carries a responsive label (short "Account"
+    // on phones, "My account" here) as two spans, so textContent concatenates both. innerText is
+    // the visible text — what the walker actually clicks.
+    const accountHop = await ev('(() => { const a = [...document.querySelectorAll("header a")].find(l => (l.innerText || "").trim() === "My account"); if (a) a.click(); return !!a })()')
     const accountHere = await waitFor('location.pathname === "/account"')
     await resetW()
     await ev('(() => { const a = [...document.querySelectorAll("main a")].find(el => (el.getAttribute("href") || "") === "/"); if (a) a.click(); return !!a })()')

@@ -34,9 +34,13 @@ export interface OrderPushInput {
   id: string
   currency: string
   total: number | string
+  payment_status: string
+  /** The buyer chose Pay now at checkout: payment is in flight, so the line must not read Unpaid. */
+  paying?: boolean
   delivery_name: string | null
   delivery_phone: string | null
   delivery_address: string | null
+  delivery_location: string | null
   delivery_note: string | null
   items: Array<{ quantity: number, name: string, sku: string }>
 }
@@ -44,16 +48,23 @@ export interface OrderPushInput {
 /**
  * The order push's message body — `order_telegram_text`'s TS port (the SQL function retired with
  * the Supabase project; its fixture is the parity test's `tests/unit/order-telegram.test.ts`).
- * Plain text only: no Telegram markup, so buyer-entered text can never break the message.
+ * Plain text only: no Telegram markup, so buyer-entered text can never break the message. Labelled
+ * lines, so the seller's phone reads as a form — the shop calls the phone and a courier follows the
+ * location link; both were previously undistinguishable from the address.
  */
 export function orderTelegramText(order: OrderPushInput): string {
   const total = Number(order.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const items = order.items.length
-    ? order.items.map(item => `${item.quantity}× ${item.name} [${item.sku}]`).join('\n')
-    : '(no items)'
-  const note = order.delivery_note !== null ? `\nNote: ${order.delivery_note}` : ''
-  return `New order #${order.id.slice(0, 8).toUpperCase()} — ${order.currency} ${total}\n`
-    + `${order.delivery_name ?? '(no name)'} · ${order.delivery_phone ?? '-'}\n`
-    + `${order.delivery_address ?? '(no address)'}${note}\n`
-    + items
+  const lines = [
+    `New order #${order.id.slice(0, 8).toUpperCase()} — ${order.currency} ${total}`,
+    `Buyer:  ${order.delivery_name ?? '(no name)'} · ${order.delivery_phone ?? '-'}`,
+    `Address: ${order.delivery_address ?? '(no address)'}`,
+    `Location: ${order.delivery_location ?? '-'}`
+  ]
+  lines.push(`Payment: ${order.paying ? 'Paying online' : order.payment_status === 'paid' ? 'Paid' : order.payment_status === 'refunded' ? 'Refunded' : 'Unpaid'}`)
+  if (order.delivery_note) lines.push(`Note: ${order.delivery_note}`)
+  lines.push(`Items (${order.items.length}):`)
+  lines.push(order.items.length
+    ? order.items.map(item => `  ${item.quantity}× ${item.name} [${item.sku}]`).join('\n')
+    : '  (no items)')
+  return lines.join('\n')
 }

@@ -22,6 +22,23 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const localePath = useLocalePath()
   const signedOutTarget = () => navigateTo(localePath({ path: '/login', query: { redirect: to.fullPath } }), { replace: true })
 
+  // The fourth face of the same defect: Back from PayWay hard-loads the guarded /checkout with a
+  // stale __session JWT and would bounce through /login. `startPaywayCheckout` drops a 10-minute
+  // marker carrying the order id, so that one return lands on the order's pay-result page — the
+  // page that answers paid vs not-completed — instead of the emptied checkout. Forward guest loads
+  // of the checkout still redirect; the marker is consumed on arrival, and its shape is checked
+  // before it becomes a query param (the cookie is client-set; the read behind the page is
+  // owner-scoped anyway). The API's `requireUser` stays the boundary — this guard is UX.
+  if (path === '/checkout') {
+    const hop = useCookie('payway-hop').value
+    if (hop) {
+      useCookie('payway-hop').value = null
+      if (/^[0-9a-f-]{36}$/.test(hop)) {
+        return navigateTo(localePath({ path: '/checkout/pay-result', query: { order: hop } }), { replace: true })
+      }
+    }
+  }
+
   // On the server the session is known from the request's Clerk cookies (@clerk/nuxt's Nitro
   // middleware runs on every request), so a signed-out hard load is a plain 302 — the same shape
   // the Supabase-era guard had. The decision deliberately does not wait for clerk-js here: a

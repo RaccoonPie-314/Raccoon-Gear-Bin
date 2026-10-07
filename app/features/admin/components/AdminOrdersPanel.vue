@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { OrderStatus } from '~/types/database'
-import { ORDER_STATUS_KEYS, ORDER_STATUS_TONES, PAYMENT_STATUS_KEYS, orderTransitions } from '~/utils/order-status'
+import { ORDER_STATUS_KEYS, ORDER_STATUS_TONES, PAYMENT_STATUS_KEYS, PAYMENT_STATUS_TONES, orderTransitions } from '~/utils/order-status'
 import { formatOrderDate } from '~/utils/orders'
 
 /**
@@ -104,6 +104,7 @@ const shortRef = (id: string) => id.slice(0, 8).toUpperCase()
             <span class="text-xs font-medium text-zinc-500">{{ formatOrderDate(order.createdAt, locale) }}</span>
             <span v-if="order.deliveryName" class="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ order.deliveryName }}</span>
             <span class="ml-auto flex shrink-0 items-center gap-3">
+              <UBadge :color="PAYMENT_STATUS_TONES[order.paymentStatus]" variant="soft" data-payment-status>{{ t(PAYMENT_STATUS_KEYS[order.paymentStatus]) }}</UBadge>
               <UBadge :color="ORDER_STATUS_TONES[order.status]" variant="soft" data-order-status>{{ t(ORDER_STATUS_KEYS[order.status]) }}</UBadge>
               <span class="text-sm font-semibold tabular-nums text-zinc-950 dark:text-white">{{ order.currency }} {{ order.total.toFixed(2) }}</span>
               <svg

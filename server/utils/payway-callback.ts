@@ -9,6 +9,7 @@
  */
 import type { H3Event } from 'h3'
 import type { NeonQueryFunction } from '@neondatabase/serverless'
+import { sendTelegramMessage } from './telegram'
 import {
   PAYWAY_BASE,
   PAYWAY_CHECK_PATH,
@@ -111,6 +112,24 @@ export const processPaywayCallback = async (
   if (!orderId) {
     const rows = await sql`select order_id from public.payments where provider_txn_id = ${tranId}`
     orderId = (rows[0] as { order_id?: string } | undefined)?.order_id ?? null
+  }
+
+  // A fresh paid transition is the one moment the seller's Telegram learns the order is paid (the
+  // creation push announces it as Unpaid) — `paid` is returned only by the FIRST callback to flip
+  // the row, so replays and the return/webhook pair push exactly once. Exception-wrapped like the
+  // creation push: the payment is the money path, the push is decoration.
+  if (outcome === 'paid' && orderId) {
+    try {
+      const chatId = (useRuntimeConfig(event) as { telegramChatId?: string }).telegramChatId
+      if (chatId) {
+        const [row] = await sql`select currency, total from public.orders where id = ${orderId}::uuid`
+        const order = row as { currency?: string, total?: string | number } | undefined
+        const total = Number(order?.total ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        await sendTelegramMessage(event, chatId, `Payment received — #${orderId.slice(0, 8).toUpperCase()}, ${order?.currency ?? 'USD'} ${total}`)
+      }
+    } catch (error) {
+      console.warn('[payway] payment push skipped:', error instanceof Error ? error.message : error)
+    }
   }
   return { ok: true, outcome, orderId }
 }

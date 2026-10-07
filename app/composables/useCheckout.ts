@@ -1,6 +1,7 @@
 import { cartTotals } from '~/utils/cart-totals'
 import { locateDeliveryAddress } from '~/utils/geolocation'
 import { shake } from '~/utils/motion'
+import { startPaywayCheckout } from '~/utils/payway-checkout'
 
 /**
  * The client mirror of `create_order`'s delivery validation — same bounds, one predicate per
@@ -24,8 +25,9 @@ const deliveryFieldValid = (field: DeliveryField, values: DeliveryValues): boole
 
 /**
  * The checkout flow (specs/ecommerce/SPEC-orders.md): fresh product rows → the clamped cart lines
- * → the `create_order` RPC → clear the cart → the success page. The RPC is the authority on price
- * and stock; everything here is display state, profile prefill, and one in-flight guard.
+ * → the `create_order` RPC → clear the cart → PayWay (pay now) or the success page (pay later, the
+ * default — the page that still offers the pay-now hop). The RPC is the authority on price and
+ * stock; everything here is display state, profile prefill, and one in-flight guard.
  */
 export const useCheckout = () => {
   const { locale, t } = useI18n()
@@ -38,6 +40,10 @@ export const useCheckout = () => {
   const loadError = ref(false)
   const isSubmitting = ref(false)
   const errorMessage = ref('')
+
+  // Pay now sends the buyer into PayWay the moment the order exists; pay later is the default — it
+  // preserves the COD-first flow, and the success page still offers the pay-now hop.
+  const paymentChoice = ref<'now' | 'later'>('later')
 
   const name = ref('')
   const phone = ref('')
@@ -168,11 +174,23 @@ export const useCheckout = () => {
             location: locationLink.value.trim(),
             note: note.value.trim() || null
           },
-          locale: locale.value
+          locale: locale.value,
+          // Push decoration only — the order row stays `unpaid` until PayWay settles, and the
+          // create route ignores this for everything except the Telegram line.
+          payNow: paymentChoice.value === 'now'
         }
       })
 
       clear()
+      if (paymentChoice.value === 'now') {
+        try {
+          await startPaywayCheckout(String(orderId))
+          return true
+        } catch {
+          // PayWay refused (config or the order is no longer payable) — the order IS placed, so
+          // land on the success page, whose pay button offers the same hop again.
+        }
+      }
       await navigateTo(localePath({ path: '/checkout/success', query: { order: String(orderId) } }))
       return true
     } catch (error: any) {
@@ -185,5 +203,5 @@ export const useCheckout = () => {
     }
   }
 
-  return { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, load, submit }
+  return { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, load, submit }
 }

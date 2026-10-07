@@ -10,5 +10,9 @@ export const startPaywayCheckout = async (orderId: string): Promise<void> => {
     '/api/payments/payway/create',
     { method: 'POST', body: { orderId } }
   )
+  // Back from PayWay hard-loads the guarded /checkout with a stale __session JWT, which bounces
+  // the buyer through /login (the defect the post-payment trio already excludes). This marker
+  // carries the order id for 10 minutes, so that one return lands on the order's pay-result page.
+  document.cookie = `payway-hop=${orderId}; path=/; max-age=600; samesite=lax`
   window.location.href = checkoutUrl
 }

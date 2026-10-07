@@ -10,8 +10,16 @@ export default defineEventHandler(async (event) => {
   const userId = requireUser(event)
 
   const sql = appSql(event)
-  const body = await readBody<{ items?: unknown, delivery?: unknown, locale?: string }>(event)
+  const body = await readBody<{ items?: unknown, delivery?: unknown, locale?: string, payNow?: unknown }>(event)
   try {
+    // `orders.user_id` FKs to `profiles(id)`, so a signed-in identity needs a profiles row before
+    // an order can reference it. Telegram and phone sign-up mint theirs at auth time; a Clerk
+    // OAuth (Google) sign-in has no server hook, so the row was missing and the order INSERT died
+    // on the FK — a non-P0001 that the handler below re-throws as a 500, which the checkout maps
+    // to the generic "could not be placed". Bootstrap it here on the owner connection so the
+    // money path holds for every provider, present or future.
+    await sql`insert into public.profiles (id) values (${userId}) on conflict (id) do nothing`
+
     const [, , rows] = await userTx(sql, userId, [
       sql`select public.create_order(
         ${JSON.stringify(body?.items ?? [])}::jsonb,
@@ -28,11 +36,17 @@ export default defineEventHandler(async (event) => {
     try {
       const chatId = (useRuntimeConfig(event) as { telegramChatId?: string }).telegramChatId
       if (chatId) {
-        const [order] = await sql`select id, currency, total, delivery_name, delivery_phone, delivery_address, delivery_note
+        const [order] = await sql`select id, currency, total, payment_status, delivery_name, delivery_phone, delivery_address, delivery_location, delivery_note
           from public.orders where id = ${created.id}`
         const items = await sql`select quantity, name_snapshot as name, sku_snapshot as sku
           from public.order_items where order_id = ${created.id}`
-        await sendTelegramMessage(event, chatId, orderTelegramText({ ...(order as OrderPushInput), items: items as OrderPushInput['items'] }))
+        await sendTelegramMessage(event, chatId, orderTelegramText({
+          ...(order as OrderPushInput),
+          // The buyer's payment intent rides the push only (never the row — `payment_status` stays
+          // the DB's truth until settlement): a pay-now order must not announce itself as Unpaid.
+          paying: body?.payNow === true,
+          items: items as OrderPushInput['items']
+        }))
       }
     } catch (error) {
       console.warn('[orders] push skipped:', error instanceof Error ? error.message : error)

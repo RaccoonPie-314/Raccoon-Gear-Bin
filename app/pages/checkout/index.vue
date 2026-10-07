@@ -7,11 +7,13 @@
  *
  * Layout: a locked full-height frame at every width (`h-dvh` — it tracks a phone's URL bar;
  * `lg:h-screen` because `dvh` mis-measures in the harness viewport). On a phone the summary
- * pane takes 48% and its title hides below `sm` — a real phone is ~715 px tall, not the
- * harness's 844, and dropping the 52 px header is what keeps **two item rows** visible there —
- * while the form pane's fields scroll and the submit block (settlement note, submit, back)
- * rides as `shrink-0`, pinned at the pane's bottom so the button can never fall behind a fold.
- * At `lg` the frame splits into two columns.
+ * card HUGS its content (`grid-rows-[auto…]` + a `45dvh` cap) instead of stretching over a
+ * fixed share of the pane — the old split left a one-item card mostly dead space (live phone
+ * report, 2026-10-06) while the form starved. Short carts give the delivery form every
+ * remaining pixel; a long cart scrolls inside the capped card. The form pane's fields scroll
+ * and the submit block (settlement note, submit, back) rides as `shrink-0`, pinned at the
+ * pane's bottom so the button can never fall behind a fold. At `lg` the frame splits into two
+ * equal-height columns as before.
  *
  * `index.vue`, not `checkout.vue`, deliberately: Nuxt nests `checkout.vue` + `checkout/` as parent
  * and child routes, and a parent that renders no `<NuxtPage/>` swallows `/checkout/success` — the
@@ -20,7 +22,7 @@
  */
 const { locale, t } = useI18n()
 const localePath = useLocalePath()
-const { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, load, submit } = useCheckout()
+const { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, load, submit } = useCheckout()
 
 onMounted(load)
 
@@ -45,7 +47,7 @@ useHead({ title: pageTitle })
         </div>
       </header>
 
-      <h1 class="mt-5 text-2xl font-black text-zinc-950 lg:mt-6 lg:text-3xl dark:text-white" :class="locale === 'km' ? '' : 'tracking-tight'">
+      <h1 class="mt-4 text-2xl font-black text-zinc-950 sm:mt-5 lg:mt-6 lg:text-3xl dark:text-white" :class="locale === 'km' ? '' : 'tracking-tight'">
         {{ t('checkoutTitle') }}
       </h1>
 
@@ -64,18 +66,18 @@ useHead({ title: pageTitle })
 
       <Transition name="reveal"><form
         v-if="!isLoading && !loadError && activeLines.length"
-        class="mt-4 grid min-h-0 flex-1 grid-rows-[minmax(0,48fr)_minmax(0,52fr)] gap-4 lg:mt-6 lg:grid-cols-[minmax(0,45fr)_minmax(0,55fr)] lg:grid-rows-1 lg:gap-8" data-checkout-form @submit.prevent="submit">
+        class="mt-4 grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3 lg:mt-6 lg:grid-cols-[minmax(0,45fr)_minmax(0,55fr)] lg:grid-rows-1 lg:gap-8" data-checkout-form @submit.prevent="submit">
         <!-- LEFT: the order summary, shaped like the cart rows the shopper just reviewed. The
              card clips; only the list inside it scrolls, and only when the cart is long. -->
-        <section class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white dark:border-zinc-800/80 dark:bg-zinc-900/40">
+        <section class="flex max-h-[45dvh] min-h-0 flex-col overflow-hidden rounded-2xl border border-zinc-200/80 bg-white lg:max-h-none dark:border-zinc-800/80 dark:bg-zinc-900/40">
           <h2 class="hidden shrink-0 px-5 py-4 text-sm font-bold text-zinc-950 sm:block dark:text-white">{{ t('checkoutSummary') }}</h2>
           <ul class="min-h-0 flex-1 divide-y divide-zinc-200/80 overflow-y-auto dark:divide-zinc-800/80" data-checkout-lines>
-            <li v-for="view in activeLines" :key="view.line.productId" class="flex gap-4 px-5 py-3 sm:py-4" data-checkout-line>
+            <li v-for="view in activeLines" :key="view.line.productId" class="flex gap-4 px-5 py-2.5 sm:py-4" data-checkout-line>
               <img
                 v-if="view.product?.images[0]"
                 :src="view.product.images[0].thumbUrl"
                 :alt="view.product.name"
-                class="h-16 w-16 shrink-0 rounded-2xl border border-zinc-200/60 object-cover sm:h-20 sm:w-20 dark:border-zinc-800/60"
+                class="h-14 w-14 shrink-0 rounded-2xl border border-zinc-200/60 object-cover sm:h-20 sm:w-20 dark:border-zinc-800/60"
               >
               <div class="min-w-0 flex-1">
                 <div class="flex items-start justify-between gap-4">
@@ -95,7 +97,7 @@ useHead({ title: pageTitle })
               </div>
             </li>
           </ul>
-          <div class="shrink-0 space-y-2 border-t border-zinc-200/80 px-5 py-4 dark:border-zinc-800/80">
+          <div class="shrink-0 space-y-1.5 border-t border-zinc-200/80 px-5 py-3 sm:space-y-2 sm:py-4 dark:border-zinc-800/80">
             <div class="flex items-center justify-between text-sm text-zinc-500">
               <span>{{ t('cartSubtotal') }}</span>
               <span class="tabular-nums">{{ totals.currency }} {{ totals.subtotal.toFixed(2) }}</span>
@@ -115,7 +117,7 @@ useHead({ title: pageTitle })
           <!-- The red/hint layer is the library's own error affordance: `error` on the field
                renders the small hint under the input, `color` reds the input itself. Both read
                the live `invalidFields`, so they clear as the buyer types. -->
-          <div class="mt-4 grid min-h-0 flex-1 gap-4 overflow-y-auto sm:grid-cols-2">
+          <div class="mt-3 grid min-h-0 flex-1 gap-3 overflow-y-auto sm:mt-4 sm:grid-cols-2 sm:gap-4">
             <UFormField
               :label="t('deliveryName')"
               name="checkout-name"
@@ -187,11 +189,35 @@ useHead({ title: pageTitle })
             </UFormField>
           </div>
 
-          <div class="mt-4 flex shrink-0 flex-col gap-3">
-            <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400">{{ t('costSettlementNote') }}</p>
+          <div class="mt-3 flex shrink-0 flex-col gap-2.5 sm:mt-4 sm:gap-3">
             <Transition name="reveal">
               <UAlert v-if="errorMessage" data-checkout-error color="error" variant="soft" :title="errorMessage" />
             </Transition>
+            <!-- The one choice the submit honours: pay now walks into PayWay the moment the order
+                 exists, pay later (the default) just places it — the success page still offers the
+                 pay-now hop. -->
+            <div class="grid grid-cols-2 gap-2" data-checkout-payment-choice>
+              <UButton
+                type="button"
+                color="neutral"
+                :variant="paymentChoice === 'now' ? 'solid' : 'outline'"
+                data-checkout-pay-now
+                class="h-11 justify-center rounded-full px-4 font-semibold text-sm cursor-pointer"
+                @click="paymentChoice = 'now'"
+              >
+                {{ t('payNow') }}
+              </UButton>
+              <UButton
+                type="button"
+                color="neutral"
+                :variant="paymentChoice === 'later' ? 'solid' : 'outline'"
+                data-checkout-pay-later
+                class="h-11 justify-center rounded-full px-4 font-semibold text-sm cursor-pointer"
+                @click="paymentChoice = 'later'"
+              >
+                {{ t('payLater') }}
+              </UButton>
+            </div>
             <UButton
               type="submit"
               color="neutral"

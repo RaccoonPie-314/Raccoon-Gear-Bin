@@ -56,7 +56,7 @@ app/
 │   ├── useAdminCategoryEditor.ts admin category editor: row list, two-table save, delete
 │   ├── useCustomerAuth.ts       the client's only `profiles` touch (phase 1)
 │   ├── useCart.ts               cart state + per-scope storage; no rules (phase 2)
-│   ├── useCheckout.ts           the checkout flow: drift re-check, create_order, redirect (phase 3)
+│   ├── useCheckout.ts           the checkout flow: drift re-check, create_order, pay-now/pay-later split (phase 3)
 │   ├── useCustomerOrders.ts     buyer order reads (phase 3)
 │   └── useAdminAuth.ts          admin identity
 ├── components/       presentational; never import a data composable
@@ -521,7 +521,9 @@ The `identity` module (specs/ecommerce/SPEC-identity.md) adds the first non-admi
 ```
 signup/login → useCustomerAuth().signUp()/signIn() → GoTrue session → waitForUser() → redirect
 /account     → useCustomerAuth().fetchProfile()/updateProfile() — the client's only `profiles` touch
-any route    → middleware/customer-auth.global.ts — session-only, /account + /checkout (locale-stripped)
+any route    → middleware/customer-auth.global.ts — session-only, /account + /checkout (locale-stripped);
+               the post-payment trio is unguarded, and Back from PayWay re-enters /checkout through a
+               10-minute `payway-hop` cookie that redirects to that order's pay-result page
 ```
 
 - **`profiles` is app-written on the claims path.** Migration 0002 added the insert-own policy, so
@@ -551,12 +553,15 @@ any route    → middleware/customer-auth.global.ts — session-only, /account +
   why the orders view itself is the notification's body. An admin's pill counts the desk's
   **pending queue** instead — a work list that clears by being worked, so it needs no marker.
   The between-devices path is a real push: every new order is POSTed to the shop's Telegram bot
-  by a **deferred constraint trigger** on `orders` (`20261005120000_order_telegram_push.sql` —
-  deferred to commit because `create_order` inserts the row before its items, and a rolled-back
-  order is never announced; the body is exception-wrapped because at commit an unhandled error
-  would roll back the buyer's order). It is inert until the Vault secrets (`telegram_bot_token` /
-  `telegram_chat_id`) exist, and its format — labeled lines, one product link per item — is
-  fixture-pinned inside the migrations. No email:
+  from the Worker (`server/utils/telegram.ts`, exception-wrapped because the order is the money
+  path and the push is decoration), carrying the order's payment status on a `Payment:` line —
+  `Paying online` when the buyer chose pay now at checkout (the intent rides the push only; the row
+  stays `unpaid` until settlement) and `Unpaid` for pay-later orders. A fresh PayWay settlement
+  adds a second "Payment received" push from the callback pipeline (`processPaywayCallback` fires
+  it only on the first paid transition, so
+  return/webhook replays never double-push). The push is inert until the Worker secrets
+  (`telegram_bot_token` / `telegram_chat_id`) exist, and its format — labeled lines, one line per
+  item — is fixture-pinned in `tests/unit/order-telegram.test.ts`. No email:
   that needs custom SMTP (see the known gaps), and the marker being per-browser means a second
   device re-notifies once.
 - **Legal pages are `/privacy` and `/terms`** (EN/KM, sectioned `t()` keys; the warranty/returns

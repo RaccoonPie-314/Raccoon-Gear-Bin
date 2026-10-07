@@ -38,9 +38,16 @@ export const ORDER_STATUS_TONES: Record<OrderStatus, 'warning' | 'primary' | 'su
   cancelled: 'error'
 }
 
-/** The same, for `orders.payment_status`. Only `unpaid` is reachable until the payments phase. */
+/** The same, for `orders.payment_status` — `paid` lands via PayWay settlement, `refunded` via the
+ * refund marker; `unpaid` is the placed state every order starts in (pay-later orders stay there). */
 export const PAYMENT_STATUS_KEYS: Record<PaymentStatus, string> = {
   unpaid: 'paymentUnpaid',
   paid: 'paymentPaid',
   refunded: 'paymentRefunded'
+}
+
+export const PAYMENT_STATUS_TONES: Record<PaymentStatus, 'neutral' | 'success' | 'error'> = {
+  unpaid: 'neutral',
+  paid: 'success',
+  refunded: 'error'
 }
