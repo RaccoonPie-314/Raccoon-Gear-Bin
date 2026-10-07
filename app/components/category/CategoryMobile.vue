@@ -53,6 +53,16 @@ let grabOffsetX = 0
 let lastDragClientX = 0
 let dragVelocityX = 0
 let dragJustFinished = false
+// Swipe vs. drag-select on ONE horizontal axis, told apart by time. A quick flick scrolls the
+// strip natively — `touch-pan-x` hands the horizontal gesture to the browser, which gives free
+// finger-follow + momentum. Holding the finger still for LONG_PRESS_MS and then moving arms the
+// tuned drag-select instead. Tap still selects through `@click`. Moving past the slop before the
+// hold elapses disarms drag-select so the two never fight over the same swipe.
+let longPressTimer: ReturnType<typeof setTimeout> | undefined
+let longPressArmed = false
+let touchScrolled = false
+const LONG_PRESS_MS = 220
+const MOVE_CANCEL_PX = 8
 
 const isVisualActive = (item: CategoryItem, index: number) => {
   if (isTouchDragging.value && dragHighlightIndex.value !== null) {
@@ -134,6 +144,22 @@ const updateMobileDragPosition = (clientX: number) => {
   }
 }
 
+const armDragSelect = () => {
+  // The hold elapsed with the finger still: grab the pill. Same offset rule the immediate drag
+  // used — on the active item keep the pill under the finger, elsewhere centre it on the finger.
+  if (!isTouchDown || !longPressArmed) return
+  isTouchDragging.value = true
+  const initialIndex = findMobileItemIndex(touchStartX)
+  if (initialIndex === activeIndex.value && mobileNavRef.value) {
+    const navRect = mobileNavRef.value.getBoundingClientRect()
+    grabOffsetX = touchStartX - navRect.left + mobileNavRef.value.scrollLeft - mobileIndicatorStyle.value.left
+  } else {
+    grabOffsetX = mobileIndicatorStyle.value.width / 2
+  }
+  lastDragClientX = touchStartX
+  updateMobileDragPosition(touchStartX)
+}
+
 const handleTouchStart = (event: TouchEvent) => {
   if (event.touches.length !== 1) return
   const touch = event.touches[0]
@@ -144,7 +170,11 @@ const handleTouchStart = (event: TouchEvent) => {
   dragVelocityX = 0
   dragStretch.value = 0
   isTouchDown = true
+  touchScrolled = false
   isTouchDragging.value = false
+  longPressArmed = true
+  clearTimeout(longPressTimer)
+  longPressTimer = setTimeout(armDragSelect, LONG_PRESS_MS)
 }
 
 const handleTouchMove = (event: TouchEvent) => {
@@ -152,35 +182,27 @@ const handleTouchMove = (event: TouchEvent) => {
   const touch = event.touches[0]
   if (!touch) return
 
-  const dx = touch.clientX - touchStartX
-  const dy = touch.clientY - touchStartY
-
-  if (!isTouchDragging.value) {
-    if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) {
-      isTouchDragging.value = true
-      lastDragClientX = touch.clientX
-      const initialIndex = findMobileItemIndex(touchStartX)
-      if (initialIndex === activeIndex.value && mobileNavRef.value) {
-        const navRect = mobileNavRef.value.getBoundingClientRect()
-        grabOffsetX = touchStartX - navRect.left + mobileNavRef.value.scrollLeft - mobileIndicatorStyle.value.left
-      } else {
-        grabOffsetX = mobileIndicatorStyle.value.width / 2
-      }
-    } else if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
-      isTouchDown = false
-      return
-    }
+  // Drag-select already owns the gesture: stop the browser scrolling and move the pill.
+  if (isTouchDragging.value) {
+    longPressArmed = false
+    if (event.cancelable) event.preventDefault()
+    updateMobileDragPosition(touch.clientX)
+    return
   }
 
-  if (isTouchDragging.value) {
-    if (event.cancelable) {
-      event.preventDefault()
-    }
-    updateMobileDragPosition(touch.clientX)
+  // Still deciding. A move past the slop before the hold elapsed means this is a scroll (or a
+  // vertical page scroll) — disarm drag-select and let the browser own the gesture natively.
+  const dx = touch.clientX - touchStartX
+  const dy = touch.clientY - touchStartY
+  if (Math.abs(dx) > MOVE_CANCEL_PX || Math.abs(dy) > MOVE_CANCEL_PX) {
+    longPressArmed = false
+    clearTimeout(longPressTimer)
+    if (Math.abs(dx) > Math.abs(dy)) touchScrolled = true
   }
 }
 
 const handleTouchEnd = () => {
+  clearTimeout(longPressTimer)
   if (isTouchDragging.value) {
     dragJustFinished = true
     setTimeout(() => {
@@ -204,9 +226,16 @@ const handleTouchEnd = () => {
       updateMobileIndicator()
       scrollActiveMobileItemIntoView()
     })
+  } else if (touchScrolled) {
+    // A native scroll's trailing click must not read as a select.
+    dragJustFinished = true
+    setTimeout(() => {
+      dragJustFinished = false
+    }, 80)
   }
   isTouchDown = false
-  isTouchDragging.value = false
+  longPressArmed = false
+  touchScrolled = false
 }
 
 // ==========================================
@@ -322,6 +351,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  clearTimeout(longPressTimer)
   window.removeEventListener('resize', updateMobileIndicator)
   if (mobileNavRef.value) {
     mobileNavRef.value.removeEventListener('scroll', updateMobileIndicator)
@@ -360,7 +390,7 @@ watch(computedItems, () => {
         <nav
           ref="mobileNavRef"
           :aria-label="t('mobileProductCategories')"
-          class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto touch-pan-y select-none"
+          class="relative flex flex-row items-center overflow-x-auto no-scrollbar gap-1.5 px-1 py-1 max-w-lg mx-auto touch-pan-x select-none"
           tabindex="-1"
         >
           <!-- Mobile Shared Sliding Selection Indicator -->
