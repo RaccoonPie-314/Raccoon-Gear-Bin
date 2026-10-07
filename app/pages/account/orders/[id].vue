@@ -104,13 +104,27 @@ const loadOrder = async () => {
 
 const { user } = useUser()
 
+// Mobile Back/Forward from the same-tab PayWay excursion restores this page from bfcache, which
+// does NOT re-run `onMounted` — the frozen heap is thawed as-is. If the read had exhausted its
+// retries while clerk-js was still booting (a multi-minute excursion on a slow radio), the stale
+// "order not found" would otherwise stick forever. `pageshow` with `persisted` is the one signal
+// that fires on a bfcache restore; re-run the load then, but only from the error state so a page
+// that already resolved is left untouched.
+const onPageShow = (event: PageTransitionEvent) => {
+  if (event.persisted && loadError.value) loadOrder()
+}
+
 onMounted(async () => {
+  window.addEventListener('pageshow', onPageShow)
   await loadOrder()
   // Auxiliary, the product page's policy: a failed contact read costs the channels, not the order.
   try { await fetchSiteInfo() } catch (error) { console.error('Site info load failed:', error) }
 })
 
-onBeforeUnmount(() => clearTimeout(dotPopAt))
+onBeforeUnmount(() => {
+  clearTimeout(dotPopAt)
+  window.removeEventListener('pageshow', onPageShow)
+})
 
 // The late-session case — previously a false "order not found" right after returning from
 // PayWay: the reads can exhaust their retries while clerk-js is still fresh-loading, and then
