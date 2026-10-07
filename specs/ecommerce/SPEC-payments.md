@@ -269,3 +269,24 @@ mark_payment_refunded(p_order_id uuid, p_note text) returns void   -- admin-gate
   G2; the webhook route ships regardless (harmless if unused) because it is the retry-safe path.
 - Paid-then-cancelled orders: money is returned manually; the DB keeps `paid` on the payment and
   `cancelled` on the order — the refund marker is the admin's explicit act.
+
+## Amendment 2026-10-07 — criterion 5 is met: the refund marker has a caller
+
+Status: **applied** (plans/009). Audit of the criterion found it unmet — `mark_payment_refunded` was
+live in the schema and typed in `app/types/database.ts`, but **no route and no affordance called it**,
+so a refund left no trace in our tables. What now reaches it:
+
+- `POST /api/orders/:id/refund`, body `{ note? }` — `requireUser` + `userTx`, P0001 → 400 carrying the
+  RPC's own machine code (`NOT_ADMIN`), anything else → 500. The RPC stays the authority: it re-checks
+  `admin_users` and guards both updates on `status = 'paid'`, so a replayed refund is a no-op.
+- `canRefund(paymentStatus)` in `app/utils/order-status.ts` — the one owner of "may the desk offer
+  this" (`paid` alone).
+- The desk's button, in the expanded row of `AdminOrdersPanel.vue`, **beside** the transition row
+  rather than in it: `ORDER_TRANSITIONS` is fulfilment and money is a separate axis, which is what the
+  paid-then-cancelled case above requires (a terminal order renders no transitions and still offers
+  the marker).
+
+**Pinned, not asserted:** with `canRefund` loosened, the unit table and the harness's "an unpaid order
+offers no refund marker" both go red. **Still manual by decision:** the money moves in the ABA portal;
+this records the act. `payments.refund_note` is written by the RPC and has no reader yet — a refund
+note row in the desk's detail is the change to make if the shop wants to read it back.

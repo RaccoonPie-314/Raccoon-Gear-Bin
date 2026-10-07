@@ -51,3 +51,14 @@ export const PAYMENT_STATUS_TONES: Record<PaymentStatus, 'neutral' | 'success' |
   paid: 'success',
   refunded: 'error'
 }
+
+/**
+ * The refund marker's own rule, and the reason it is not a row in `ORDER_TRANSITIONS`: money is a
+ * separate axis from fulfilment, so a paid order can be refunded whether it is open, delivered or
+ * cancelled — the SPEC-payments case is "paid then cancelled, money returned manually".
+ *
+ * `mark_payment_refunded` is the authority: it guards both of its updates on `status = 'paid'`, so
+ * this function only decides whether the desk may *offer* the button. An unpaid order has nothing to
+ * refund and a refunded one has already been marked, which is exactly the set it excludes.
+ */
+export const canRefund = (paymentStatus: PaymentStatus): boolean => paymentStatus === 'paid'

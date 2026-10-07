@@ -74,11 +74,29 @@ export const useAdminOrders = (options: { canMutate?: () => boolean } = {}) => {
     }
   }
 
+  // The refund marker — the payment half of the desk, deliberately not one of `setStatus`'s
+  // transitions (see `canRefund`): a paid order is refundable whether it is open, delivered or
+  // cancelled. Same one-write-at-a-time guard and same reload-after, so a refund can never race a
+  // status change on the same row.
+  const refundOrder = async (orderId: string, note: string | null = null) => {
+    if (!canMutate() || busyOrderId.value) return
+    busyOrderId.value = orderId
+    actionError.value = ''
+    try {
+      await $fetch(`/api/orders/${orderId}/refund`, { method: 'POST', body: { note } })
+      await loadOrders()
+    } catch {
+      actionError.value = t('refundError')
+    } finally {
+      busyOrderId.value = ''
+    }
+  }
+
   // The masthead badge's read: the desk's work queue, counted without the heavy select. It clears
   // by being worked (confirm, cancel), not by being looked at — which is why it needs no marker.
   const fetchPendingCount = async (): Promise<number> => {
     return await $fetch<number>('/api/orders/pending')
   }
 
-  return { orders, visibleOrders, isLoading, loadError, actionError, filter, search, busyOrderId, loadOrders, setStatus, fetchPendingCount }
+  return { orders, visibleOrders, isLoading, loadError, actionError, filter, search, busyOrderId, loadOrders, setStatus, refundOrder, fetchPendingCount }
 }

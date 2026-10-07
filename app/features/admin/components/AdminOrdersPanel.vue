@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { OrderStatus } from '~/types/database'
-import { ORDER_STATUS_KEYS, ORDER_STATUS_TONES, PAYMENT_STATUS_KEYS, PAYMENT_STATUS_TONES, orderTransitions } from '~/utils/order-status'
+import { ORDER_STATUS_KEYS, ORDER_STATUS_TONES, PAYMENT_STATUS_KEYS, PAYMENT_STATUS_TONES, canRefund, orderTransitions } from '~/utils/order-status'
 import { formatOrderDate } from '~/utils/orders'
 
 /**
@@ -13,7 +13,7 @@ import { formatOrderDate } from '~/utils/orders'
 const props = defineProps<{ isAdminMode: boolean }>()
 
 const { locale, t } = useI18n()
-const { orders, visibleOrders, isLoading, loadError, actionError, filter, search, busyOrderId, loadOrders, setStatus }
+const { orders, visibleOrders, isLoading, loadError, actionError, filter, search, busyOrderId, loadOrders, setStatus, refundOrder }
   = useAdminOrders({ canMutate: () => props.isAdminMode })
 
 onMounted(loadOrders)
@@ -25,25 +25,41 @@ const FILTERS: Array<'all' | OrderStatus> = ['all', 'pending', 'confirmed', 'del
 const openRowId = ref('')
 const toggleRow = (id: string) => { openRowId.value = openRowId.value === id ? '' : id }
 
-// Cancel restores stock, so it confirms first — same modal idiom the product editor's delete uses.
-// The confirmation carries an optional reason/note, which the cancel transition stores on the
-// order for the buyer and the desk to read.
-const cancelTarget = ref('')
-const cancelNote = ref('')
+// Cancel restores stock and a refund moves money, so both confirm first — same modal idiom the
+// product editor's delete uses, and one dialog for both arms: they differ only in copy and in which
+// write they fire, so a second copy of this markup would be the thing that drifts. The confirmation
+// carries an optional note, which each write stores in its own column (cancellation note / refund note).
+const confirmKind = ref<'' | 'cancelled' | 'refunded'>('')
+const confirmTarget = ref('')
+const confirmNote = ref('')
+const openConfirm = (orderId: string, kind: 'cancelled' | 'refunded') => {
+  confirmTarget.value = orderId
+  confirmKind.value = kind
+  confirmNote.value = ''
+}
 const requestStatus = (orderId: string, status: OrderStatus) => {
   if (status === 'cancelled') {
-    cancelTarget.value = orderId
-    cancelNote.value = ''
+    openConfirm(orderId, 'cancelled')
     return
   }
   void setStatus(orderId, status)
 }
-const confirmCancel = async () => {
-  const orderId = cancelTarget.value
-  const note = cancelNote.value.trim()
-  cancelTarget.value = ''
-  if (orderId) await setStatus(orderId, 'cancelled', note || null)
+const requestRefund = (orderId: string) => openConfirm(orderId, 'refunded')
+const confirmAction = async () => {
+  const orderId = confirmTarget.value
+  const kind = confirmKind.value
+  const note = confirmNote.value.trim()
+  confirmTarget.value = ''
+  confirmKind.value = ''
+  if (!orderId) return
+  if (kind === 'refunded') await refundOrder(orderId, note || null)
+  else await setStatus(orderId, 'cancelled', note || null)
 }
+// The dialog's copy per arm. The refund's body names the ABA portal step on purpose: this records
+// the act, it does not perform it.
+const confirmCopy = computed(() => confirmKind.value === 'refunded'
+  ? { title: t('refundOrder'), body: t('refundOrderConfirm'), label: t('refundNote'), color: 'warning' as const, action: t('refundOrder') }
+  : { title: t('cancelOrder'), body: t('cancelOrderConfirm'), label: t('cancelReason'), color: 'error' as const, action: t('cancelOrder') })
 
 const transitionLabel = (status: OrderStatus) =>
   status === 'confirmed' ? t('confirmOrder') : status === 'delivered' ? t('markDelivered') : t('cancelOrder')
@@ -176,34 +192,54 @@ const shortRef = (id: string) => id.slice(0, 8).toUpperCase()
                 {{ transitionLabel(next) }}
               </UButton>
             </div>
+
+            <!-- The payment marker, not a transition: a paid order stays refundable whether it is
+                 open, delivered or cancelled, so this button stands beside the transition row rather
+                 than inside it — and a terminal order, which renders no transitions at all, still
+                 gets this one (SPEC-payments.md criterion 5: the money moves in the ABA portal). -->
+            <div v-if="canRefund(order.paymentStatus)" class="mt-4 flex flex-wrap gap-2" data-order-refund>
+              <UButton
+                type="button"
+                size="sm"
+                color="warning"
+                variant="outline"
+                data-order-action="refund"
+                :loading="busyOrderId === order.id"
+                :disabled="!!busyOrderId"
+                @click="requestRefund(order.id)"
+              >
+                {{ t('refundOrder') }}
+              </UButton>
+            </div>
           </div>
         </li>
       </ul>
     </div></Transition>
 
-    <!-- Cancelling restores stock, so it is the one transition that confirms first. Same `modal`
-         transition and shape as the product editor's delete confirmation. -->
+    <!-- Cancelling restores stock and a refund moves money, so both confirm first. Same `modal`
+         transition and shape as the product editor's delete confirmation, and the same dialog for
+         both arms so the two can never drift apart. -->
     <Transition name="modal"><div
-      v-if="cancelTarget"
+      v-if="confirmTarget"
       class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-      @click.self="cancelTarget = ''"
+      @click.self="confirmTarget = ''"
     >
       <section
         class="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800/80 p-6 sm:p-8"
         role="alertdialog"
         aria-modal="true"
       >
-        <h2 class="text-xl font-black text-zinc-950 dark:text-white">{{ t('cancelOrder') }}</h2>
-        <p class="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{{ t('cancelOrderConfirm') }}</p>
-        <UFormField :label="t('cancelReason')" name="cancel-reason" class="mt-4">
-          <UInput v-model="cancelNote" data-order-cancel-note type="text" class="w-full" />
+        <h2 class="text-xl font-black text-zinc-950 dark:text-white">{{ confirmCopy.title }}</h2>
+        <p class="mt-3 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{{ confirmCopy.body }}</p>
+        <UFormField :label="confirmCopy.label" name="order-confirm-note" class="mt-4">
+          <UInput v-model="confirmNote" data-order-confirm-note type="text" class="w-full" />
         </UFormField>
         <div class="mt-6 flex justify-end gap-3">
-          <UButton color="neutral" variant="ghost" size="sm" @click="cancelTarget = ''">
+          <UButton color="neutral" variant="ghost" size="sm" @click="confirmTarget = ''">
             {{ t('cancel') }}
           </UButton>
-          <UButton color="error" size="sm" :loading="!!busyOrderId" data-order-cancel-confirm @click="confirmCancel">
-            {{ t('cancelOrder') }}
+          <UButton :color="confirmCopy.color" size="sm" :loading="!!busyOrderId" data-order-confirm @click="confirmAction">
+            {{ confirmCopy.action }}
           </UButton>
         </div>
       </section>

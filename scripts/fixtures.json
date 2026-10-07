@@ -292,7 +292,7 @@
       "subtotal": "45.00",
       "total": "45.00",
       "currency": "USD",
-      "payment_status": "unpaid",
+      "payment_status": "paid",
       "confirmed_at": null,
       "delivered_at": null,
       "cancelled_at": "2026-10-04T03:00:00.000Z",

@@ -197,6 +197,10 @@ const stubSource = [
   '    if (new RegExp("^/api/orders/[0-9a-f-]+$").test(p) && method === "GET") { var oid = p.split("/").pop(); return json(ORDERS.filter(function (x) { return x.id === oid })[0] || null, 200) }',
   '    if (p === "/api/orders" && method === "POST") { if (window.__ORDERS_FAIL) { var fail = window.__ORDERS_FAIL; window.__ORDERS_FAIL = null; return json({ statusCode: 400, statusMessage: fail, message: fail }, 400) } return json(ORDER_ID, 200) }',
   '    if (new RegExp("^/api/orders/[0-9a-f-]+/status$").test(p) && method === "POST") return json(null, 204);',
+  // The refund marker, and the one order mutation this stub makes: the marker flips the fixture row
+  // so the desk's reload can be read back (the same reason `site_settings` above is mutable in-stub).
+  // Without it a check could only assert the request, never that the desk re-reads the new state.
+  '    if (new RegExp("^/api/orders/[0-9a-f-]+/refund$").test(p) && method === "POST") { var rid = p.split("/")[3]; var ro = ORDERS.filter(function (x) { return x.id === rid })[0]; if (ro) ro.payment_status = "refunded"; return json(null, 200) }',
   '    if (method === "PATCH" || method === "DELETE") return json(null, 204);',
   '    if (method === "POST") return json([], 201);',
   '    return json([], 200);',
@@ -620,6 +624,7 @@ const run = async () => {
   const CANCELLED_NOTE = FIXTURES.orders.filter(o => o.status === 'cancelled')[0].cancel_note
   // The reason the cancel arm types into the desk's modal; asserted on the RPC body it sends.
   const CANCEL_NOTE = 'Out of stock at the supplier.'
+  const REFUND_NOTE = 'Bank transfer reversed.'
   // The fixture row behind a product id, for assertions that have to name what the page was given
   // (message lines, og:image, the CTA's stock band) without reading it back out of the app.
   const row = id => FIXTURES.products.find(p => p.id === id)
@@ -4019,10 +4024,10 @@ const run = async () => {
 
     // The cancel arm: its confirmation asks for an optional reason, and confirming sends it with
     // the transition in the same one RPC. The row is still open from the confirm above.
-    check('the cancel confirmation asks for an optional reason', await clickSelector('[data-order-action="cancelled"]', '!!document.querySelector("[data-order-cancel-note]")'))
-    await ev(setInput('[data-order-cancel-note]', CANCEL_NOTE))
+    check('the cancel confirmation asks for an optional reason', await clickSelector('[data-order-action="cancelled"]', '!!document.querySelector("[data-order-confirm-note]")'))
+    await ev(setInput('[data-order-confirm-note]', CANCEL_NOTE))
     await resetW()
-    await clickSelector('[data-order-cancel-confirm]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/status") !== -1).length === 1')
+    await clickSelector('[data-order-confirm]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/status") !== -1).length === 1')
     const cancelWrites = await writes()
     const cancelBody = JSON.parse(cancelWrites[0]?.body || '{}')
     check('cancelling sends the note with the transition', cancelWrites.length === 1 && cancelBody.status === 'cancelled' && cancelBody.note === CANCEL_NOTE, seqOf(cancelWrites))
@@ -4032,6 +4037,29 @@ const run = async () => {
     check('the desk shows the recorded cancellation note', cancelledDeskBody.includes(CANCELLED_NOTE), { hasNote: cancelledDeskBody.includes(CANCELLED_NOTE) })
     const cancelledLocation = await ev('(document.querySelector(' + JSON.stringify('[data-order-body="' + CANCELLED_ORDER_ID + '"] [data-order-location]') + ') || {}).href || null')
     check('the desk links the cancelled order\'s map pin', cancelledLocation === EXP.orders.cancelledLocation, { cancelledLocation })
+
+    // ---- the refund marker (plans/009) -----------------------------------------------------------
+    // Money is its own axis: the paid fixture is also the cancelled one, which is the SPEC's "paid
+    // then cancelled, returned manually" case — a terminal order renders no transition buttons at
+    // all, and the refund is still offered. That is the whole reason it is not one of them.
+    check('a paid order offers the refund marker even with no transitions left',
+      await ev('!!document.querySelector(' + JSON.stringify(`[data-order-body="${CANCELLED_ORDER_ID}"] [data-order-action="refund"]`) + ') && !document.querySelector("[data-order-actions]")'))
+    check('an unpaid order offers no refund marker',
+      await clickSelector(`[data-order-toggle="${ORDER_ID}"]`, `!!document.querySelector(${JSON.stringify(`[data-order-body="${ORDER_ID}"]`)}) && !document.querySelector(${JSON.stringify(`[data-order-body="${ORDER_ID}"] [data-order-refund]`)})`))
+    await clickSelector(`[data-order-toggle="${CANCELLED_ORDER_ID}"]`, `!!document.querySelector(${JSON.stringify(`[data-order-body="${CANCELLED_ORDER_ID}"] [data-order-action="refund"]`)})`)
+    check('the refund confirmation asks for an optional note', await clickSelector('[data-order-action="refund"]', '!!document.querySelector("[data-order-confirm-note]")'))
+    await ev(setInput('[data-order-confirm-note]', REFUND_NOTE))
+    await resetW()
+    await clickSelector('[data-order-confirm]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/refund") !== -1).length === 1')
+    const refundWrites = await writes()
+    const refundBody = JSON.parse(refundWrites[0]?.body || '{}')
+    check('refunding posts exactly one marker carrying its note',
+      refundWrites.length === 1 && refundWrites[0].p === `/api/orders/${CANCELLED_ORDER_ID}/refund` && refundBody.note === REFUND_NOTE,
+      seqOf(refundWrites))
+    check('the desk re-reads and shows the payment as refunded',
+      await waitFor(`(document.querySelector(${JSON.stringify(`[data-order-toggle="${CANCELLED_ORDER_ID}"] [data-payment-status]`)}) || {}).textContent?.trim() === "Refunded"`))
+    check('the marker is gone once the payment is refunded',
+      await ev(`!document.querySelector(${JSON.stringify(`[data-order-body="${CANCELLED_ORDER_ID}"] [data-order-refund]`)})`))
     check('the cancelled chip narrows the desk to that status', await clickSelector('[data-order-filter="cancelled"]', '[...document.querySelectorAll("[data-admin-order-row]")].length === 1 && (document.querySelector("[data-order-status]") || {}).textContent?.trim() === "Cancelled"'))
 
     // Back to the catalog through the header's own back link, the way the blocks below expect it.
