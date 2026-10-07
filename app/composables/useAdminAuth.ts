@@ -20,7 +20,8 @@ export const useAdminAuth = () => {
   // per view to learn what the previous view already knew. Keyed by the literal, coupled to
   // `markSignedOut` by string (the house pattern — `useSignedIn`'s `'signed-in'` seed is the same pair).
   //
-  // Only `true` is stored. A cached `false` would be a lie with consequences: `index.vue` asks on a
+  // Only a truthy answer short-circuits (a `false` may be stored and is re-asked on every call). A
+  // cached `false` would be a lie with consequences: `index.vue` asks on a
   // `watch(signedIn, …, { immediate: true })`, so a visitor who arrived signed out stores `false`, then
   // SPA-navigates to `/admin/login` in the SAME document, signs in with real admin credentials, and
   // `login.vue`'s `await isAdmin()` would hand back the stale `false` — "unauthorized" to a legitimate

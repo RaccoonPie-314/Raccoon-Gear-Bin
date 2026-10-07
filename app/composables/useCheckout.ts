@@ -98,10 +98,12 @@ export const useCheckout = () => {
     isLoading.value = true
     loadError.value = false
     try {
-      await fetchProducts()
-      // The profile prefill is auxiliary: a failed read costs the convenience, not the checkout
-      // (the same policy the product page applies to its site-info read).
-      const profile = await fetchProfile().catch(() => null)
+      // Both reads are independent; the profile prefill is auxiliary — a failed read costs the
+      // convenience, not the checkout (the same policy the product page applies to its site-info read).
+      const [profile] = await Promise.all([
+        fetchProfile().catch(() => null),
+        fetchProducts()
+      ])
       if (profile?.display_name) name.value = profile.display_name
       if (profile?.phone) phone.value = profile.phone
     } catch {

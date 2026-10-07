@@ -1,4 +1,6 @@
 // Cloudflare Workers. `bun run deploy` builds the Nitro output this points at and uploads it.
+// Deploy only through `bun run deploy`: it rebuilds with the Workers preset and runs
+// scripts/check-deploy-preset.mjs, which refuses a local (node-server) `.output`.
 // The free plan is enough: 1.9 MB bundle (limit 64 MiB), 55 assets (limit 20k), 100k req/day.
 {
   "$schema": "https://unpkg.com/wrangler/config-schema.json",

@@ -25,6 +25,11 @@ export default defineEventHandler(async (event) => {
     const attemptRows = await sql`select provider_txn_id from public.payments
       where provider_txn_id = ${tranId} and created_at > now() - interval '24 hours'`
     if (!attemptRows.length) throw createError({ statusCode: 404, statusMessage: 'PAYMENT_NOT_FOUND' })
+    // Each hit with a live tran costs one provider read; 60/min is far above the result page's own
+    // poll (~15 calls over 30 s), and the key is the tran — CGNAT neighbours keep their own bucket.
+    if (!await withinRateLimit(sql, `payway-verify:${tranId}`, 60, 60)) {
+      throw createError({ statusCode: 429, statusMessage: 'THROTTLED' })
+    }
     const result = await check(tranId)
     if (result) {
       await applyPaywayResult(storeFor(sql), { tranId, code: result.code, amount: result.amount, payload: result.raw })

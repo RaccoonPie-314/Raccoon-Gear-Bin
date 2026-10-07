@@ -409,6 +409,15 @@ const run = async () => {
     }
   }
 
+  // Baseline security headers ride nitro's `routeRules` (nuxt.config.ts) — the real server's
+  // answer, read from Node because the browser stub owns /api inside the page. Asserted on the
+  // document response; the same rule covers /api/** (a Node fetch of an /api path would need the
+  // database this rig deliberately runs without).
+  const docHeaders = (await fetch(appUrl)).headers
+  const SECURITY_HEADERS = ['x-content-type-options', 'x-frame-options', 'referrer-policy', 'strict-transport-security']
+  const missingHeaders = SECURITY_HEADERS.filter(h => !docHeaders.get(h))
+  check('the document response carries the baseline security headers', missingHeaders.length === 0, { missing: missingHeaders })
+
   // 2. launch headless Chrome with a private profile on a debug port.
   // A unique profile per run: a previous aborted run can leave a SingletonLock behind, and
   // sharing one then looks exactly like "Chrome refused to start".

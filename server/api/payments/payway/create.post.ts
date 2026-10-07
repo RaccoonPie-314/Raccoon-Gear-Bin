@@ -18,6 +18,10 @@ export default defineEventHandler(async (event) => {
   if (!UUID_RE.test(orderId)) throw createError({ statusCode: 400, statusMessage: 'INVALID_ORDER' })
 
   const sql = appSql(event)
+  // Each create mints a tran, adds a payments row and runs one signed provider round trip.
+  if (!await withinRateLimit(sql, `payway-create:${userId}`, 5, 60)) {
+    throw createError({ statusCode: 429, statusMessage: 'THROTTLED' })
+  }
   // userTx answers [set_config, set_role, ...queries] — two leading entries, not one.
   const [, , orderRows, itemRows] = await userTx(sql, userId, [
     sql`select id, total, currency, status, payment_status from public.orders where id = ${orderId}::uuid`,

@@ -7,7 +7,7 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "deploy": "NITRO_PRESET=cloudflare_module nuxt build && bunx wrangler deploy",
+    "deploy": "NITRO_PRESET=cloudflare_module nuxt build && node scripts/check-deploy-preset.mjs && bunx wrangler deploy",
     "lint": "eslint app server",
     "verify": "node scripts/verify-ui.mjs",
     "test": "bun test tests",

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { createHmac } from 'node:crypto'
 import {
   PAYWAY_CODES,
@@ -151,9 +151,12 @@ const result = (code: number, amount: number | null) =>
 
 describe('applyPaywayResult', () => {
   test('approved + matching amount marks the attempt paid and the order paid', async () => {
+    const warn = spyOn(console, 'warn')
     const { store, calls } = makeStore({ id: 'p1', orderId: 'o1', status: 'initiated' }, 123.45)
     expect(await applyPaywayResult(store, result(PAYWAY_PAYMENT_CODE.approved, 123.45))).toBe('paid')
     expect(calls).toEqual([{ markPayment: ['p1', 'paid'] }, { markOrderPaid: 'o1' }])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
   test('a replay is a no-op: the second apply changes nothing', async () => {
@@ -165,9 +168,12 @@ describe('applyPaywayResult', () => {
   })
 
   test('an amount mismatch marks the attempt failed and never the order', async () => {
+    const warn = spyOn(console, 'warn')
     const { store, calls } = makeStore({ id: 'p1', orderId: 'o1', status: 'initiated' }, 123.45)
     expect(await applyPaywayResult(store, result(PAYWAY_PAYMENT_CODE.approved, 100))).toBe('amount-mismatch')
     expect(calls).toEqual([{ markPayment: ['p1', 'failed'] }])
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 
   test('an unknown tran_id is rejected without any write', async () => {

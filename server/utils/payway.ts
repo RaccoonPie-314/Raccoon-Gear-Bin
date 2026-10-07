@@ -6,7 +6,7 @@
  *
  * No `~` imports on purpose: the unit test imports this file relatively, and the root tsconfig
  * cannot resolve Nuxt aliases under `bun test`. DB access in `applyPaywayResult` arrives as an
- * injected store; the routes (P3) wire the typed Supabase client into it.
+ * injected store; the routes wire `storeFor` on the owner connection (`payway-callback.ts`).
  */
 
 /** Production and sandbox bases (P0: the sandbox host is `checkout-sandbox`, not `checkout-uat`). */
@@ -197,9 +197,9 @@ export const PAYWAY_PAYMENT_CODE = {
 } as const
 
 /**
- * The DB seam, injected. The routes build it from the typed Supabase client; the tests build it
- * from a mutable fake — which is what makes the idempotency cases (double-apply, replay) honest
- * without a live project.
+ * The DB seam, injected. The routes build it with `storeFor` (owner connection,
+ * `payway-callback.ts`); the tests build it from a mutable fake — which is what makes the
+ * idempotency cases (double-apply, replay) honest without a live project.
  */
 export type PaywayResultStore = {
   findPayment: (tranId: string) => Promise<{ id: string, orderId: string, status: string } | null>
@@ -221,7 +221,7 @@ export type ApplyOutcome =
  * The one place a provider result changes state — idempotent by design, because the return URL and
  * the webhook both land here and PayWay retries. Rules (SPEC-payments): an unknown tran_id is
  * rejected (the caller logs the payload); an already-paid attempt is a no-op; the provider amount
- * must equal `orders.total` or the attempt is marked `failed` and **never** `paid`; only
+ * must equal `orders.total` or the attempt is marked `failed` (and logged) and **never** `paid`; only
  * `approved` flips the order. `pending` waits; `refunded` is owned by the admin marker in v1.
  * Epsilon comparison, not `===`: both sides are 2-dp decimals that travel through JSON numbers.
  */
@@ -238,6 +238,9 @@ export const applyPaywayResult = async (
     const total = await store.orderTotal(payment.orderId)
     const matches = total !== null && result.amount !== null && Math.abs(total - result.amount) < 0.005
     if (!matches) {
+      // The one tamper/race signal on the money path must be visible in the Worker log stream —
+      // the routes that call this door log transport faults alone and discard the outcome.
+      console.warn('[payway] amount-mismatch', { tranId: result.tranId, orderTotal: total, paidAmount: result.amount })
       await store.markPayment(payment.id, { status: 'failed', resultPayload: result.payload })
       return 'amount-mismatch'
     }

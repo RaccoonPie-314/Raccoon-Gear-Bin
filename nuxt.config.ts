@@ -62,6 +62,20 @@ export default defineNuxtConfig({
   nitro: {
     sourceMap: false
   },
+  // Baseline security headers on everything nitro serves — the SSR documents and /api/**. A CSP
+  // is deliberately absent: it needs an allowlist study (Clerk's CDN script, Nuxt's inline
+  // payload) and a report-only rollout of its own, and a wrong CSP breaks auth silently. Static
+  // assets served by the CF ASSETS layer bypass the Worker and keep the platform's defaults.
+  routeRules: {
+    '/**': {
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Strict-Transport-Security': 'max-age=31536000'
+      }
+    }
+  },
   // A feature keeps its UI and the logic only it uses in one folder. Neither half is reachable by
   // auto-import from `app/features` on its own, so each is registered: the component dir with no
   // directory prefix (the file name is the component name) and the composable dir exactly like

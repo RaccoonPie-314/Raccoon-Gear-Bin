@@ -638,7 +638,9 @@ success     → the RPC's returned id only — the page never fetches; "View ord
   (`INSUFFICIENT_STOCK`/`PROMO_LIMIT` carry the remainder), writes `orders` + `order_items`
   snapshots and decrements `stock_quantity` / `promo_quantity` in one transaction. The browser holds
   no insert/update policy on either table — RLS default-deny plus select-only policies is the read
-  model, and two deliberate submits are two orders (there is no idempotency key).
+  model, and two deliberate submits are two orders (there is no idempotency key). The route itself is
+    per-user throttled (`orders-create:<uid>`, 10/min through `withinRateLimit`) — request hygiene
+    above the RPC, which stays the price/stock authority.
 - **Pricing parity is pinned twice, not trusted once.** `public.effective_unit_price` mirrors
   `app/utils/product-pricing.ts` rule-for-rule; the same four hand-written fixtures are asserted by
   `tests/unit/pricing-parity.test.ts` (TS) and by a `do $$` block inside the migration (SQL, run on
@@ -1106,6 +1108,10 @@ accidents if you don't know they are deliberate:
   Node entry — setting the preset in config makes the CI harness measure a build that cannot run.
   The same reason `wrangler.jsonc` is hand-written: nitro only generates a deploy config when
   `cloudflare.deployConfig` is on, and reading ours is also how `nodejs_compat` reaches the build.
+  Since the local loop (`build`, `verify`) leaves a **node-server** `.output` on disk, `bun run
+  deploy` chains `scripts/check-deploy-preset.mjs` between the build and wrangler — it refuses any
+  artifact that is not a `cloudflare_module` build. Deploy only through `bun run deploy`: a raw
+  `wrangler deploy` would upload whatever the last local build wrote.
 - **`nitro.sourceMap: false` is global.** The Cloudflare preset cannot bundle server sourcemaps at
   all (`Multiple conflicting contents for sourcemap source i18n.config.ts`), and nothing here reads
   production server traces, so no preset gets them.
@@ -1114,7 +1120,8 @@ The Supabase project URL + anon key are still inlined from `.env` at build into
 `runtimeConfig.public` for the legacy storage client, and the old bucket's policies remain its
 authority — which the Clerk session cannot satisfy, so the product editor's upload arm is a known
 P3 gap (the row writes still complete; uploads-first ordering means nothing partial). The Neon
-pivot adds server-side secrets the Worker carries at deploy (P9): `DATABASE_URL`,
+pivot adds server-side secrets the Worker carries at deploy (P9): `NUXT_DATABASE_URL` (the
+runtime's env override name — the migrator scripts read the plain `DATABASE_URL` from `.env`),
 `NUXT_CLERK_SECRET_KEY`, the Telegram token/chat id. The owner connection *does* bypass RLS by
 design — `appSql` is confined to system bookkeeping (login codes, handshakes, rate limits, admin
 gate reads) — while everything a user's data touches runs as `userTx` (claims + `set local role`),
@@ -1133,6 +1140,13 @@ fixed-name file has to be small: `rgb-logo-*.png` are resampled to 512px (the 12
 `/api` responses are edge-cached, and that is deliberate — the HTML is locale-dependent and the
 catalog carries stock and promo windows the shop edits. Cache the catalog in memory for a session,
 not at the edge, and revisit HTML caching only if a measured TTFB complaint arrives.
+
+**Baseline security headers are config, not middleware.** `nuxt.config.ts`'s `routeRules` puts
+`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` and HSTS on everything nitro serves —
+the SSR documents and `/api/**` — and `verify` asserts them on the served document before the
+browser starts. A CSP is deliberately absent: it needs an allowlist study (Clerk's CDN script,
+Nuxt's inline payload) and a report-only rollout of its own, and a wrong CSP breaks auth silently.
+Static assets served by the CF ASSETS layer bypass the Worker and keep the platform's defaults.
 
 ## Known gaps (Phase 2+ targets, not current behaviour)
 
@@ -1158,7 +1172,11 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   only payment path the browser has, `startPaywayCheckout` is its one door and it has three callers
   (`useCheckout` at placement, `checkout/success.vue`, and the order detail's pay button), and
   `checkout/pay-result.vue` re-reads the **order row**
-  as the verdict rather than trusting what the return carried. So what still waits on the owner is not
+  as the verdict rather than trusting what the return carried. Create is per-user throttled (5/min)
+  and the session-free `verify` branch per recent attempt id (60/min — the result page polls it ~15
+  times and an IP bucket would punish CGNAT neighbours); a mismatched amount now logs
+  `[payway] amount-mismatch`, the tamper/race signal that previously survived only in
+  `payments.result_payload`. So what still waits on the owner is not
   code: production registration (`paywaysales@ababank.com`) plus the return-URL whitelist, and the
   secret audit.
   **The refund marker has a handle now (2026-10-07).** `mark_payment_refunded` stays the boundary —
@@ -1180,8 +1198,9 @@ not at the edge, and revisit HTML caching only if a measured TTFB complaint arri
   runs before the page mounts, so the trip it pays is the trip the page was about to make. Six surfaces
   used to ask per mount (the guard, the storefront badge, the login page, the three editors) — an admin
   walking the desk paid a round trip per view to learn a boolean the previous view already had.
-  **Only `true` is stored.** A cached `false` is a lie with a lock behind it: `index.vue` asks on a
-  `watch(signedIn, …, { immediate: true })`, so a visitor who arrived signed out would hand the cached
+  **Only a truthy answer short-circuits.** A stored `false` is never trusted — a cached `false` is a
+  lie with a lock behind it: `index.vue` asks on a `watch(signedIn, …, { immediate: true })`, so a
+  visitor who arrived signed out would hand the cached
   `false` to `login.vue`'s check right after signing in for real — refused without a reload. That is
   harness-pinned (`a refused gate is not remembered`, and the walk that follows it proves the door
   still opens). A rejected request is not stored either, so a blip retries instead of sticking.

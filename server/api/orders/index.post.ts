@@ -10,6 +10,10 @@ export default defineEventHandler(async (event) => {
   const userId = requireUser(event)
 
   const sql = appSql(event)
+  // Request hygiene above the RPC: each order write decrements stock and fires the Telegram push.
+  if (!await withinRateLimit(sql, `orders-create:${userId}`, 10, 60)) {
+    throw createError({ statusCode: 429, statusMessage: 'THROTTLED' })
+  }
   const body = await readBody<{ items?: unknown, delivery?: unknown, locale?: string, payNow?: unknown }>(event)
   try {
     // `orders.user_id` FKs to `profiles(id)`, so a signed-in identity needs a profiles row before
