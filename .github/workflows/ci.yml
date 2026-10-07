@@ -23,7 +23,10 @@ jobs:
   # of in front of it. Fails only on new hard errors — the pre-existing debt is
   # documented in eslint.config.mjs.
   lint:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04, not `ubuntu-latest`: GitHub migrates the `latest` label to Ubuntu 26 on
+    # 2026-10-19, and this job's toolchain (Bun, node, the eslint/prettier versions' output) has only
+    # ever been measured on 24.04. Moving is a deliberate change with its own run, not a surprise.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -39,7 +42,7 @@ jobs:
       # speed win. `bun install --frozen-lockfile` remains the gate that
       # package.json and bun.lock agree.
       - name: Cache Bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
@@ -52,13 +55,27 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # The unit suite belongs here rather than beside the harness: it needs no
+      # Chrome and no `.output`, it runs in a fraction of a second, and it is the
+      # only gate covering the pure rules the harness stubs past (pricing parity,
+      # order transitions, PayWay request hashing, the Telegram push body).
+      - name: Test
+        run: bun run test
+
+      # vue-tsc reads .vue templates, which no other gate does — a mistyped prop or a missing variable
+      # in a template compiles and paints wrong. It was kept out of CI for wall time until 2026-10-07;
+      # it runs here beside lint because it needs neither Chrome nor `.output`.
+      - name: Typecheck
+        run: bun run typecheck
+
   # `bun run verify` serves the `.output` that `bun run build` produces, so the
   # two stay in one job. No build cache: it measured ~1 MB against a 26 s build,
   # which is noise next to verify's ~6 min — and it was the one step here that
   # could have served a stale Vite/Nuxt entry. The wall clock lives in the
   # harness' fixed waits, not in anything CI can cache.
   build-and-verify:
-    runs-on: ubuntu-latest
+    # Same pin as `lint`, same reason (the `latest` label moves to Ubuntu 26 on 2026-10-19).
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -76,7 +93,7 @@ jobs:
           bun-version: latest
 
       - name: Cache Bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}

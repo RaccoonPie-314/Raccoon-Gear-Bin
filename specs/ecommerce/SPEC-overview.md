@@ -55,7 +55,7 @@ Existing (unchanged):
 bun install
 bun run dev                        # dev server; 3000, falls back to 3001
 bun run build                      # compile (CI)
-bun run lint                       # eslint app (CI)
+bun run lint                       # eslint app server (CI); fails only on new hard errors
 bun run verify                     # scripts/verify-ui.mjs, headless Chrome (CI)
 bun run typecheck                  # vue-tsc via `nuxt typecheck`
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit

@@ -72,11 +72,11 @@ selects collapse to `never`.
 ```bash
 bun install
 bun run build                                                 # compiles (CI)
-bun run lint                                                  # eslint app (CI — fails on new errors; scoped to app/)
+bun run lint                                                  # eslint app server (CI — fails on new errors; the whole tree since 2026-10-07)
 bun run verify                                                # scripts/verify-ui.mjs (CI) — needs Chrome
-bun run test                                                  # tests/unit — 51 checks, not in CI, ~0.2 s
+bun run test                                                  # tests/unit — pure rules, in CI since 2026-10-07, ~0.2 s
 ./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit     # .ts only (add tsconfig.server.json for server/)
-bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too
+bun run typecheck                                              # vue-tsc via `nuxt typecheck` — checks .vue templates too (CI since 2026-10-07)
 ```
 
 **Budget by cost, not by order.** Measured 2026-10-03 on the M-series dev machine, warm:
@@ -87,11 +87,16 @@ Its two `--only` slices are independent and each owns a scratch dir under `.nuxt
 so they can be run at once — worth ~30 s of the 217 s, because the guest slice is
 86 % of the run and `--only` cannot split it further.
 
-`build`, `lint` and `verify` all run in CI on every push. A green `build` still means it
-compiled, not that it works; the unit suite (`bun run test`, 51 checks) is small and runs in CI-able
-time but is not wired there. `bun run typecheck` (vue-tsc) does
+`build`, `lint`, `test`, `typecheck` and `verify` all run in CI on every push (`test` and `typecheck` ride
+the `lint` job, which needs no Chrome and no `.output`).
+A green `build` still means it
+compiled, not that it works; the unit suite (`bun run test`) covers the pure rules — pricing parity,
+order transitions, PayWay hashing, the Telegram push body — and is the cheapest gate in the pipeline.
+`bun run typecheck` (vue-tsc) does
 mechanically check template bindings — a mistyped prop or missing variable in a `.vue` template
-fails on it. It is NOT in CI (it adds wall time); it exits 0 since 2026-10-03 (the `app.config.ts`
+fails on it, and it has been a CI gate since 2026-10-07 (the wall-time objection was measured and
+weighed against the one thing nothing else catches: a template binding compiles and paints wrong). It
+exits 0 since 2026-10-03 (the `app.config.ts`
 slot classes, the `useHead` meta in `[id].vue` and the dead `nuxt.config.ts` cookie options were
 root-caused and fixed), so treat any error it reports as real. `tsc` alone cannot parse `.vue`,
 so the remaining backstops for what typecheck misses are `verify`'s painted-geometry asserts and

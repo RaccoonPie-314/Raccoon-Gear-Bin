@@ -9,14 +9,22 @@ works, and before extending `scripts/verify-ui.mjs`.
 |---|---|
 | `bun install` | Deps resolve against the committed `bun.lock`. |
 | `bun run build` (`nuxt build`) | It compiled. It does not start the app, does not type-check, and says nothing about the tuned interactions or the admin write path. CI runs this **and** `bun run verify` on every push. |
+| `bun run lint` (`eslint app server`) | The whole deployed tree, a CI gate. Fails only on new hard errors; the pre-existing warning debt is documented in `eslint.config.mjs`. |
+| `bun run test` (`bun test tests`) | The pure rules the harness stubs past — a CI gate since 2026-10-07, in the `lint` job. Prints its own `N pass / 0 fail`. |
 | `bun run verify` (`node scripts/verify-ui.mjs`) | The tuned interactions, the conversion flow and the whole admin flow still behave, measured in a real browser against a stubbed backend. A CI gate since 2026-09-28: `.github/workflows/ci.yml` runs it after Build with `CHROME_PATH=/usr/bin/google-chrome` and Node 24 (the harness needs global `WebSocket`; Bun's bundled Node is older). |
 | `./node_modules/.bin/tsc -p .nuxt/tsconfig.app.json --noEmit` | `.ts` files only. `tsc` cannot parse `.vue`. |
-| `bun run typecheck` (`nuxt typecheck` → vue-tsc) | Template bindings too: a mistyped prop or missing variable in a `.vue` template fails on it (verified 2026-09-30 by mistyping `<StockStatus :quantity>` — caught as `ProductCard.vue(60,8)`). Not a CI gate (it adds wall time). Exits 0 since 2026-10-03 — the script-side errors in `app.config.ts`, `nuxt.config.ts` and `[id].vue`'s `useHead` meta were root-caused and fixed (behavior-preserving; `verify` green after) — so treat every error it reports as real. |
+| `bun run typecheck` (`nuxt typecheck` → vue-tsc) | Template bindings too: a mistyped prop or missing variable in a `.vue` template fails on it (verified 2026-09-30 by mistyping `<StockStatus :quantity>` — caught as `ProductCard.vue(60,8)`). **A CI gate since 2026-10-07**, in the `lint` job beside `test` (the wall-time objection was weighed against the one class of defect no other gate sees). Exits 0 since 2026-10-03 — the script-side errors in `app.config.ts`, `nuxt.config.ts` and `[id].vue`'s `useHead` meta were root-caused and fixed (behavior-preserving; `verify` green after) — so treat every error it reports as real. |
 
-There is **no test suite**. Template bindings ARE mechanically checked by `bun run typecheck`
+There is **no browser-level test suite to write** — but there *is* a unit suite, and since 2026-10-07
+it is a CI gate. `bun run test` (`tests/unit/**`, Bun's runner, ~0.2 s) covers the pure rules the
+browser harness stubs past: pricing parity, order transitions and status legality, PayWay request
+hashing, the Telegram push body, cart totals. It runs as a step in CI's `lint` job, which needs no
+Chrome and no `.output`. Template bindings ARE mechanically checked by `bun run typecheck`
 (vue-tsc, added 2026-09-30 — the 2026-09-28 note that no route existed is obsolete: `nuxt
-typecheck` works once `vue-tsc` is a devDependency). CI runs build + lint + verify on every
-push; `bun run lint`
+typecheck` works once `vue-tsc` is a devDependency). CI runs build + lint + test + typecheck + verify on
+every push, on a **pinned `ubuntu-24.04`** (the `latest` label moves to Ubuntu 26 on 2026-10-19, and
+that migration is not something to discover from a red run); `bun run lint` covers `app` and `server`
+(2026-10-07) and
 fails only on new hard errors (the pre-existing debt — 17 `any` casts, custom-class warnings — is
 documented in `eslint.config.mjs`; the `no-explicit-any` rule being off does **not** relax
 AGENTS.md's Supabase `as any` prohibition, which stays a review rule). Run `bun run verify`
@@ -130,7 +138,7 @@ Covered (this list is the shape of the run, not its check count — the run prin
 ```bash
 bun install
 bun run build
-bun run lint                                  # eslint app; CI fails only on new errors
+bun run lint                                  # eslint app server; CI fails only on new errors
 bun run verify                                # all checks against the existing .output
 bun run verify --only=guest                   # or --only=admin (fewer checks than the full run)
 bun run verify --only=guest & bun run verify --only=admin & wait   # both at once: independent, own scratch dir each

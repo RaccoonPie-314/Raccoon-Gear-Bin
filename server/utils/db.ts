@@ -28,7 +28,9 @@ export function appSql(event: H3Event): NeonQueryFunction<false, false> {
 export function userTx(
   sql: NeonQueryFunction<false, false>,
   userId: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // `any[]` is the honest shape here: these are Neon tagged-template fragments whose type is not
+  // exported. The `no-explicit-any` rule is off in eslint.config.mjs, so the disable directive that
+  // used to sit here was stale — and now that `server/` is linted, a stale one is a failure signal.
   queries: any[]
 ): Promise<unknown[]> {
   return sql.transaction([

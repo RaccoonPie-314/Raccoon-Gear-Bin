@@ -61,7 +61,9 @@ export const checkTransaction = async (
   type CheckPayload = { data?: Record<string, unknown>, status?: { code?: string } }
   const fields = { req_time: utcTimestamp(), merchant_id: merchantId, tran_id: tranId }
   const hash = await signPurchaseFields(fields, apiKey)
-  let payload: CheckPayload | null = null
+  // No initializer: every path either assigns it or returns, which is exactly what the
+  // `no-useless-assignment` rule reads as "the `= null` was never used".
+  let payload: CheckPayload
   try {
     const response = await fetch(`${base}${PAYWAY_CHECK_PATH}`, {
       method: 'POST',
