@@ -63,7 +63,9 @@ Phase F added tactile motion without touching either engine: buttons are `<motio
   filmstrip's min-content), which the overflow sweep catches.
 - **The admin entry's one button and the rail's hooks** — the storefront header carries a single
   `Admin tools` button (its English text is what `verify` clicks), and `[data-admin-tabs]` /
-  `[data-admin-tab="site-info"|"categories"]` are what the tab checks aim at. Renaming the button text or
+  `[data-admin-tab="site-info"|"categories"|"orders"|"stock"]` are what the tab checks aim at, and the stock
+  desk's checks aim at its hooks the same way: `[data-stock-form]`, `[data-stock-row]`, `[data-stock-sku]`,
+  `[data-stock-input]`, `[data-stock-save]` and `[data-stock-search]`. Renaming the button text or
   a `data-admin-tab` id, or moving a page's route, breaks those checks in the same commit.
 - **`[data-switch-caption]`** and **`[data-language-switcher]`** — measurement hooks, not style hooks.
   `[data-switch-caption]` sits on each `max-w-[6.5rem]` switch caption in the two admin editors, because

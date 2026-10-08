@@ -241,6 +241,7 @@ useHead(() => {
           <h1 class="mt-3 text-3xl font-black sm:text-4xl lg:text-5xl text-zinc-950 dark:text-white" :class="hasKhmerText(product.name) ? '' : 'tracking-tight'">
             {{ product.name }}
           </h1>
+          <p class="mt-1.5 text-xs text-zinc-500">{{ t('sku') }}: {{ product.sku }}</p>
           <ProductPrice :product="product" class="mt-4 text-2xl sm:text-3xl font-bold text-zinc-950 dark:text-white" />
 
           <div class="mt-4">

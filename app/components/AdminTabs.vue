@@ -20,7 +20,8 @@ const { locale, t } = useI18n()
 const TABS = [
   { id: 'site-info', to: '/admin/site-info', labelKey: 'siteInfo' },
   { id: 'categories', to: '/admin/categories', labelKey: 'categories' },
-  { id: 'orders', to: '/admin/orders', labelKey: 'orders' }
+  { id: 'orders', to: '/admin/orders', labelKey: 'orders' },
+  { id: 'stock', to: '/admin/stock', labelKey: 'stock' }
 ] as const
 
 const route = useRoute()

@@ -305,7 +305,7 @@ useHead({ title: pageTitle })
                   {{ item.name }}
                   <span class="ml-2 inline-block rounded-full bg-zinc-100 px-1.5 py-0.5 align-middle text-[11px] font-bold tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">×{{ item.quantity }}</span>
                 </p>
-                <p class="mt-0.5 text-xs text-zinc-500">{{ item.sku }}</p>
+                <p class="mt-0.5 text-xs text-zinc-500">{{ t('sku') }}: {{ item.sku }}</p>
                 <p v-if="item.promoLabel" class="mt-0.5 text-[11px] font-semibold text-zinc-400 dark:text-zinc-500">{{ item.promoLabel }}</p>
               </div>
               <div class="shrink-0 text-right">

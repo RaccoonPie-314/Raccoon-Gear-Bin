@@ -128,6 +128,7 @@ useHead({ title: pageTitle })
                     >
                       {{ view.product.name }}
                     </NuxtLink>
+                    <p v-if="view.product" class="mt-0.5 text-xs text-zinc-500">{{ t('sku') }}: {{ view.product.sku }}</p>
                     <div v-if="view.product" class="mt-1 flex flex-wrap items-center gap-3 text-sm">
                       <ProductPrice :product="view.product" />
                       <StockStatus :quantity="view.product.stockQuantity" />

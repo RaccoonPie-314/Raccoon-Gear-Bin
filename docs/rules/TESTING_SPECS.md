@@ -127,11 +127,12 @@ Covered (this list is the shape of the run, not its check count — the run prin
   clip box **while held and dragged** (it scales ~25px past its row — this is what caught the first
   version of the scroll box chopping the pill's rounded ends). On the admin side, one header button opens
   the tools, each `[data-admin-tab]` moves to its own page, only the tab whose route is on screen carries
-  `aria-current="page"`, and on **both** tool pages the rail is measured as a sidebar: the two entries
+  `aria-current="page"`, and on **every** tool page the rail is measured as a sidebar: the entries
   stacked vertically, entirely to the left of the form.
 - **Admin flow**: login, add, image upload, save/update, cancel, delete, the site-info editor
   (seed, field edits, link add/toggle/reorder/remove, the singleton upsert body, and the public
-  header reflecting it), logout.
+  header reflecting it), the stock desk (rows seeded with sold counts and bands; one number edited,
+  saved as a single batch and read back), logout.
 
 ### Flags
 

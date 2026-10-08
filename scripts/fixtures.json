@@ -355,6 +355,11 @@
       ]
     }
   ],
+  "stock": [
+    { "id": "aaaaaaaa-0000-4000-8000-000000000001", "sku": "VERIFY-KB-01", "name": "Verify Keyboard", "status": "published", "stock_quantity": 7, "sold": 12 },
+    { "id": "aaaaaaaa-0000-4000-8000-000000000002", "sku": "VERIFY-MS-01", "name": "Verify Mouse", "status": "published", "stock_quantity": 3, "sold": 4 },
+    { "id": "aaaaaaaa-0000-4000-8000-000000000099", "sku": "VERIFY-SS-01", "name": "Verify Sketch Stand", "status": "draft", "stock_quantity": 0, "sold": 0 }
+  ],
   "expectations": {
     "_comment": "What the synthetic data must produce, asserted independently of the fixtures so a bad fixture edit fails loudly instead of silently changing the test.",
     "cards": 7,
@@ -443,6 +448,12 @@
         { "action": "confirmed", "text": "Confirm order" },
         { "action": "cancelled", "text": "Cancel order" }
       ]
+    },
+    "stockDesk": {
+      "_comment": "The stock desk's written contract: the read's rows cover all three bands against LOW_STOCK_THRESHOLD 5 (7 in, 3 low, 0 out) and include a draft the storefront would hide; saving the second row to 9 must come back through the reload as In Stock — the band moving is what proves the desk read the write back instead of re-rendering its own draft.",
+      "editRowIndex": 1,
+      "savedQuantity": 9,
+      "savedBand": "in"
     }
   }
 }

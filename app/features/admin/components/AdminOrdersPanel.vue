@@ -133,8 +133,11 @@ const shortRef = (id: string) => id.slice(0, 8).toUpperCase()
 
           <div v-if="openRowId === order.id" class="border-t border-zinc-200/80 px-4 py-4 dark:border-zinc-800/80" :data-order-body="order.id">
             <ul class="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
-              <li v-for="item in order.items" :key="item.id" class="flex items-center justify-between gap-4 py-1.5 text-sm">
-                <span class="min-w-0 truncate text-zinc-700 dark:text-zinc-300">{{ item.name }} ×{{ item.quantity }}</span>
+              <li v-for="item in order.items" :key="item.id" class="flex items-start justify-between gap-4 py-1.5 text-sm">
+                <span class="min-w-0">
+                  <span class="block truncate text-zinc-700 dark:text-zinc-300">{{ item.name }} ×{{ item.quantity }}</span>
+                  <span class="block text-xs text-zinc-500">{{ t('sku') }}: {{ item.sku }}</span>
+                </span>
                 <span class="shrink-0 font-semibold tabular-nums text-zinc-950 dark:text-white">{{ order.currency }} {{ item.lineTotal.toFixed(2) }}</span>
               </li>
             </ul>

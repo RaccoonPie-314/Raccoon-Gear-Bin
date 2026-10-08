@@ -60,7 +60,7 @@ app/
 │   ├── useCustomerOrders.ts     buyer order reads (phase 3)
 │   └── useAdminAuth.ts          admin identity
 ├── components/       presentational; never import a data composable
-│   ├── AdminTabs.vue  the left rail both admin editor pages carry, in the category sidebar's shape
+│   ├── AdminTabs.vue  the left rail the admin tool pages carry, in the category sidebar's shape
 │   ├── ContactDock.vue  the desktop corner contact control + its panel (`lg` and up only, teleported)
 │   ├── category/     CategoryNav (facade) + CategoryDesktop + CategoryMobile
 │   ├── site-info/    SiteInfoContact + SiteInfoSocials (the masthead's two levels)
@@ -153,7 +153,9 @@ shared component silently stops resolving (the build stays green; the page rende
    the boundary; migration 0003 added the table grants those policies needed. Two facts worth
    keeping: the editor mints the uuid for a new row (it is what keeps the transaction's
    statements independent), and a RESTRICT FK refusal arrives as SQLSTATE **23001**, not 23503 —
-   the delete route translates it to a 409 the way PostgREST used to.
+   the delete route translates it to a 409 the way PostgREST used to. The stock desk (2026-10-08)
+   rides the same path: `/api/admin/stock` reads non-archived products with their non-cancelled
+   sold aggregate, and one batch transaction saves absolute `stock_quantity` values.
    **P8 (2026-10-05): the verify harness runs on the new stack** — the browser stub answers the
    port-era `/api/**` set (catalog, site-info, orders, admin, profile, admin-check) instead of the
    Supabase trio, and a **scripted clerk-js** (served over CDP Fetch beside the photo generator;
@@ -215,7 +217,7 @@ shared component silently stops resolving (the build stays green; the page rende
    the detail page used to do both, and the two copies of the line parser had already
    drifted into different rules. `CatalogSpecification` in `types/catalog.ts` is the shape
    all three agree on.
-6. **The admin product editor owns every catalog write.** `app/features/admin/composables/useAdminProductEditor.ts`
+6. **The admin product editor owns the catalog writes — the stock desk holds the one exception.** `app/features/admin/composables/useAdminProductEditor.ts`
    holds the form model, the multi-table save (product → English translation → storage objects →
    image rows), the image-file selection and the delete confirmation, and
    `app/features/admin/components/AdminProductEditor.vue` is the only thing that renders them. It
@@ -223,6 +225,9 @@ shared component silently stops resolving (the build stays green; the page rende
    catalog: it takes `categories` and `products` as input and reports back through `mutated`, so
    `index.vue` remains the only place the public list is fetched. Authorisation stays in RLS — the
    `canMutate` argument is a UI guard, not a security boundary, and must never be treated as one.
+   The exception is the stock desk (2026-10-08): `useAdminStock` + `AdminStockPanel.vue` batch-save
+   absolute `stock_quantity` values through `POST /api/admin/stock`, same `requireAdmin` + `userTx`
+   path — the only module besides the editor allowed to write a catalog column.
 7. **Public site info is fetched and mapped only in `useSiteInfo`.** The `site_settings`
    singleton — phone, location, and the `social_links` / `location_translations` jsonb — is
    read, parsed and re-serialised in exactly that module; a page must not `.from('site_settings')`

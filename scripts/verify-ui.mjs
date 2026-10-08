@@ -129,6 +129,9 @@ const stubSource = [
   // refusal arm — it makes `create_order` answer the RPC's documented machine code shape.
   `  var ORDERS = ${JSON.stringify(FIXTURES.orders)};`,
   '  var ORDER_ID = (ORDERS.filter(function (o) { return o.status === "pending" })[0] || ORDERS[0]).id;',
+  // The stock desk's rows: the read answers from this array and the batch POST below mutates it,
+  // so the desk's reload reads the write back — the same record-back pattern `SITE` and `ORDERS` use.
+  `  var STOCK = ${JSON.stringify(FIXTURES.stock)};`,
   '  window.__W = [];',
   // Aliases for the two fixture collections the stub answers from. They are handed out on purpose:
   // a test that needs a *different* shop configuration — no contact channels at all, a product with
@@ -178,6 +181,10 @@ const stubSource = [
   '    if (new RegExp("^/api/admin/categories/[0-9a-f-]+$").test(p) && method === "DELETE") return json(null, 204);',
   '    if (p === "/api/admin/products" && method === "POST") { var pid = ""; try { pid = JSON.parse(raw || "{}").id || "" } catch (e) {} return json({ id: pid || NEW_ROW_ID }, 200); }',
   '    if (new RegExp("^/api/admin/products/[0-9a-f-]+$").test(p) && method === "DELETE") return json(null, 204);',
+  // The stock desk: one read and one batch save. The save applies absolute numbers in-stub so the
+  // desk's reload can be read back (the same record-back reason `SITE` and `ORDERS` mutate).
+  '    if (p === "/api/admin/stock" && method === "GET") return json(STOCK, 200);',
+  '    if (p === "/api/admin/stock" && method === "POST") { var applied = 0; try { (JSON.parse(raw || "{}").items || []).forEach(function (item) { var srow = STOCK.filter(function (x) { return x.id === item.id })[0]; if (srow) { srow.stock_quantity = item.stock_quantity; applied++ } }) } catch (e) {} return json({ updated: applied }, 200) }',
   // The account's profile row (P6): readable and writable in-stub, mirroring the site-settings
   // pattern, so the account save can read back what it wrote.
   '    if (p === "/api/profile" && method === "GET") { var prof = PROFILE; if (window.__PROFILE_EMPTY) { window.__PROFILE_EMPTY = false; prof = Object.assign({}, PROFILE, { display_name: null }) } return json(prof, 200); }',
@@ -628,12 +635,15 @@ const run = async () => {
 
   const EXP = FIXTURES.expectations
   const ORDER_ID = FIXTURES.orders.filter(o => o.status === 'pending')[0].id
+  const PENDING_ITEM_SKU = FIXTURES.orders.filter(o => o.status === 'pending')[0].order_items[0].sku_snapshot
   const CANCELLED_ORDER_ID = FIXTURES.orders.filter(o => o.status === 'cancelled')[0].id
   // The fixture note the cancelled row carries — what the buyer's detail and the desk must render.
   const CANCELLED_NOTE = FIXTURES.orders.filter(o => o.status === 'cancelled')[0].cancel_note
   // The reason the cancel arm types into the desk's modal; asserted on the RPC body it sends.
   const CANCEL_NOTE = 'Out of stock at the supplier.'
   const REFUND_NOTE = 'Bank transfer reversed.'
+  const STOCK_EDIT_ROW = FIXTURES.stock[EXP.stockDesk.editRowIndex]
+  const STOCK_SAVED_QUANTITY = EXP.stockDesk.savedQuantity
   // The fixture row behind a product id, for assertions that have to name what the page was given
   // (message lines, og:image, the CTA's stock band) without reading it back out of the app.
   const row = id => FIXTURES.products.find(p => p.id === id)
@@ -3219,6 +3229,9 @@ const run = async () => {
     const drift = await ev('(() => ({ qty: (document.querySelector("[data-cart-qty]") || {}).textContent?.trim(), issue: !!document.querySelector("[data-cart-issue]"), subtotal: (document.querySelector("[data-cart-subtotal]") || {}).textContent?.trim() }))()')
     check('the cart page clamps a drift-dropped line and says so', drift.qty === '1' && drift.issue === true, drift)
     check('the subtotal is the live price at the clamped quantity', drift.subtotal === 'USD ' + cartPrice.toFixed(2), { subtotal: drift.subtotal, cartPrice })
+    // Every surface that lists an item line carries its SKU; the cart is the buyer's first one.
+    const cartLineText = await ev('(document.querySelector("[data-cart-line]") || {}).textContent || ""')
+    check('the cart line names the item by its SKU', cartLineText.includes(row(cartProductId).sku), { sku: row(cartProductId).sku })
     await nav(appUrl)
     check('the badge follows the written-back clamp', await waitFor('(document.querySelector("[data-cart-badge]") || {}).textContent?.trim() === "1"'))
     await stopForNextDocument(cartDriftArm)
@@ -3305,6 +3318,8 @@ const run = async () => {
     await waitFor('(() => document.documentElement.scrollHeight - innerHeight <= 1 && Math.round(window.scrollY) === 0)()', 2000)
     const oneScreen = await ev('(() => { const b = document.querySelector("[data-checkout-submit]"); if (!b) return null; const r = b.getBoundingClientRect(); const deep = [...document.querySelectorAll("body *")].filter(el => el.getBoundingClientRect().bottom > innerHeight + 1).map(el => el.tagName.toLowerCase() + "." + (typeof el.className === "string" ? el.className.split(" ").slice(0, 3).join(".") : "") + "@" + Math.round(el.getBoundingClientRect().bottom)).slice(0, 6); return { overflow: document.documentElement.scrollHeight - innerHeight, scrollY: Math.round(window.scrollY), submitBottom: Math.round(r.bottom), vh: innerHeight, visible: r.top >= 0 && r.bottom <= innerHeight + 1, deep } })()')
     check('the checkout fits one screen: no page scroll and the submit is on-screen', !!oneScreen && oneScreen.overflow <= 1 && oneScreen.scrollY === 0 && oneScreen.visible, oneScreen)
+    const checkoutLineText = await ev('(document.querySelector("[data-checkout-line]") || {}).textContent || ""')
+    check('the checkout summary names each line by its SKU', checkoutLineText.includes(row(cartProductId).sku), { sku: row(cartProductId).sku })
     // The global press idiom (the button base in app.config), asserted here on the checkout
     // submit: hold the control and read the standalone `scale` Tailwind v4 writes on `:active` —
     // then release OUTSIDE the button so this probe never submits the form. Reduced motion is
@@ -3766,7 +3781,7 @@ const run = async () => {
     // One header entry for the admin tools, then the tab strip moves between the editors. Each tool is
     // still its own page, so the flow asserts the route changed, not just that something rendered.
     check('the admin tools button opens the editors', await clickByText('header button', 'Admin tools', `location.pathname === "/admin/site-info" && !!document.querySelector('[data-admin-tabs]')`))
-    check('the Categories tab is the current one only on its own page', await ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")]; const on = tabs.filter(t => t.getAttribute("aria-current") === "page"); return tabs.length === 3 && on.length === 1 && on[0].getAttribute("data-admin-tab") === "site-info" })()'))
+    check('the Categories tab is the current one only on its own page', await ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")]; const on = tabs.filter(t => t.getAttribute("aria-current") === "page"); return tabs.length === 4 && on.length === 1 && on[0].getAttribute("data-admin-tab") === "site-info" })()'))
     await clickSelector('[data-admin-tab="categories"]', `location.pathname === "/admin/categories" && !!document.querySelector('${CAT_FORM}')`)
     check('the Categories tab opens the category editor', await ev(`!!document.querySelector('${CAT_FORM}')`))
     const catSeed = await ev('(() => { const f = document.querySelector(' + JSON.stringify(CAT_FORM) + '); if (!f) return null; const rows = [...f.querySelectorAll("[data-category-row]")]; const val = (r, k) => { const el = r.querySelector(k); return el ? el.value : null }; return { rows: rows.length, names: rows.map(r => val(r, "[data-category-en]")), slugs: rows.map(r => val(r, "[data-category-slug]")), on: rows.map(r => r.querySelector("[data-category-active]").getAttribute("aria-checked")) } })()')
@@ -3839,7 +3854,7 @@ const run = async () => {
 
     // The rail must be a sidebar beside the tool — an eyebrow over a vertical column, to the left of
     // the form — because that is the shape the storefront's category sidebar taught the owner.
-    const railShape = contentSel => ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")].map(t => t.getBoundingClientRect()); const content = document.querySelector(' + JSON.stringify(contentSel) + '); if (tabs.length !== 3 || !content) return null; const c = content.getBoundingClientRect(); return { stacked: tabs[1].top >= tabs[0].bottom - 0.5, leftOfContent: tabs[0].right <= c.left + 0.5 } })()')
+    const railShape = contentSel => ev('(() => { const tabs = [...document.querySelectorAll("[data-admin-tab]")].map(t => t.getBoundingClientRect()); const content = document.querySelector(' + JSON.stringify(contentSel) + '); if (tabs.length !== 4 || !content) return null; const c = content.getBoundingClientRect(); return { stacked: tabs[1].top >= tabs[0].bottom - 0.5, leftOfContent: tabs[0].right <= c.left + 0.5 } })()')
     const catRail = await railShape(CAT_FORM)
     check('the admin tools rail is a sidebar beside the category editor', !!catRail && catRail.stacked && catRail.leftOfContent, catRail)
 
@@ -4029,6 +4044,8 @@ const run = async () => {
     check('a pending order expands to its detail', await clickSelector('[data-order-toggle]', '!!document.querySelector("[data-order-actions]")'))
     const pendingActions = await ev('[...document.querySelectorAll("[data-order-actions] [data-order-action]")].map(b => ({ action: b.getAttribute("data-order-action"), text: (b.textContent || "").trim() }))')
     check('a pending order offers exactly the two written transitions', JSON.stringify(pendingActions) === JSON.stringify(EXP.orders.pendingActions), pendingActions)
+    const deskItemText = await ev('[...document.querySelectorAll("[data-order-body] li")].map(li => (li.textContent || "")).join(" | ")')
+    check('the desk lists each order item with its SKU', deskItemText.includes(PENDING_ITEM_SKU), { deskItemText, PENDING_ITEM_SKU })
 
     await resetW()
     await clickSelector('[data-order-action="confirmed"]', 'window.__W.filter(w => w.method === "POST" && w.p.indexOf("/status") !== -1).length === 1')
@@ -4077,6 +4094,51 @@ const run = async () => {
       await ev(`!document.querySelector(${JSON.stringify(`[data-order-body="${CANCELLED_ORDER_ID}"] [data-order-refund]`)})`))
     check('the cancelled chip narrows the desk to that status', await clickSelector('[data-order-filter="cancelled"]', '[...document.querySelectorAll("[data-admin-order-row]")].length === 1 && (document.querySelector("[data-order-status]") || {}).textContent?.trim() === "Cancelled"'))
 
+    // ---- the stock desk (this change) ------------------------------------------------------------
+    // One row per product — drafts included — with units sold read-only and one editable number; the
+    // save is a single batch POST carrying only the rows the owner changed, and the stub mutates its
+    // STOCK fixture on that POST, so the reload below proves the desk reads the write back rather
+    // than echoing its own draft.
+    check('the stock tab opens the desk', await clickSelector('[data-admin-tab="stock"]', 'location.pathname === "/admin/stock" && !!document.querySelector("[data-stock-form]")'))
+    await waitFor('document.querySelectorAll("[data-stock-row]").length === 3')
+    const stockSeed = await ev('[...document.querySelectorAll("[data-stock-row]")].map(r => ({ sku: (r.querySelector("[data-stock-sku]") || {}).textContent, sold: (r.querySelector("[data-stock-sold]") || {}).textContent, band: (r.querySelector("[data-stock-status]") || {}).getAttribute("data-stock-state"), status: ((r.querySelector("[data-stock-product-status]") || {}).textContent || "").trim(), value: (r.querySelector("[data-stock-input]") || {}).value }))')
+    check('the desk seeds each row with its SKU, sold count, status and live band', !!stockSeed && stockSeed.length === 3
+      && JSON.stringify(stockSeed.map(r => r.sku)) === JSON.stringify(['VERIFY-KB-01', 'VERIFY-MS-01', 'VERIFY-SS-01'])
+      && JSON.stringify(stockSeed.map(r => r.sold)) === JSON.stringify(['12', '4', '0'])
+      && JSON.stringify(stockSeed.map(r => r.band)) === JSON.stringify(['in', 'low', 'out'])
+      && JSON.stringify(stockSeed.map(r => r.status)) === JSON.stringify(['Published', 'Published', 'Draft'])
+      && JSON.stringify(stockSeed.map(r => r.value)) === JSON.stringify(['7', '3', '0']), stockSeed)
+    // The desk's search: client-side over the loaded rows, matching the name and the SKU printed on
+    // the box — the two things a stock count is actually done against. Lowercase queries against
+    // uppercase fixture SKUs keep case-insensitivity part of the contract, like the order desk's.
+    await ev(setInput('[data-stock-search]', 'sketch'))
+    const stockNameHit = await waitFor('[...document.querySelectorAll("[data-stock-row]")].length === 1 && ((document.querySelector("[data-stock-sku]") || {}).textContent || "").includes("VERIFY-SS-01")')
+    await ev(setInput('[data-stock-search]', 'ms-01'))
+    const stockSkuHit = await waitFor('[...document.querySelectorAll("[data-stock-row]")].length === 1 && ((document.querySelector("[data-stock-sku]") || {}).textContent || "").includes("VERIFY-MS-01")')
+    await ev(setInput('[data-stock-search]', 'no-such-item'))
+    const stockNoHit = await waitFor('[...document.querySelectorAll("[data-stock-row]")].length === 0 && (document.body.textContent || "").includes("No products match this view.")')
+    await ev(setInput('[data-stock-search]', ''))
+    const stockRestored = await waitFor('[...document.querySelectorAll("[data-stock-row]")].length === 3')
+    check('search narrows the desk by name and SKU, says so when nothing matches, and clearing restores the list', stockNameHit && stockSkuHit && stockNoHit && stockRestored, { stockNameHit, stockSkuHit, stockNoHit, stockRestored })
+    const stockRail = await railShape('[data-stock-form]')
+    check('the same rail heads the stock desk too', !!stockRail && stockRail.stacked && stockRail.leftOfContent, stockRail)
+    check('the save button starts disabled with nothing changed', await ev('document.querySelector("[data-stock-save]").disabled === true'))
+
+    const STOCK_INPUT = `[data-stock-input="${STOCK_EDIT_ROW.id}"]`
+    await ev(setInput(STOCK_INPUT, String(STOCK_SAVED_QUANTITY)))
+    check('editing one number arms the save', await waitFor('document.querySelector("[data-stock-save]").disabled === false'))
+    await resetW()
+    await clickSelector('[data-stock-save]', 'window.__W.filter(w => w.method === "POST" && w.p === "/api/admin/stock").length === 1')
+    const stockWrites = await writes()
+    const stockBody = JSON.parse(stockWrites[0]?.body || '{}')
+    check('saving posts one batch carrying exactly the changed row',
+      stockWrites.length === 1 && stockWrites[0].p === '/api/admin/stock'
+      && JSON.stringify(stockBody.items) === JSON.stringify([{ id: STOCK_EDIT_ROW.id, stock_quantity: STOCK_SAVED_QUANTITY }]),
+      seqOf(stockWrites))
+    check('the desk reloads and reads the saved number back, band included', await waitFor(
+      '(() => { const rows = document.querySelectorAll("[data-stock-row]"); const input = document.querySelector(' + JSON.stringify(STOCK_INPUT) + '); const band = rows[1] && rows[1].querySelector("[data-stock-status]"); return !!input && input.value === ' + JSON.stringify(String(STOCK_SAVED_QUANTITY)) + ' && !!band && band.getAttribute("data-stock-state") === ' + JSON.stringify(EXP.stockDesk.savedBand) + ' })()'))
+    check('the desk confirms the save in words', await ev('(document.body.textContent || "").includes("Stock saved.")'))
+
     // Back to the catalog through the header's own back link, the way the blocks below expect it.
     await ev('(() => { const links = document.querySelectorAll("header a"); if (links.length) links[links.length - 1].click(); return true })()')
     await waitFor('location.pathname === "/" && !!document.querySelector(\'main article h2 a\')', 10000)
@@ -4104,6 +4166,9 @@ const run = async () => {
     const headingNow = await ev('(document.querySelector("main h1") || {}).textContent?.trim()')
     const canonicalHere = await ev('(() => { const l = document.querySelector("link[rel=canonical]"); return l ? l.getAttribute("href") : null })()')
     check('the prepared message names this product and ends at this page’s canonical address', !!headingNow && (afterSave.message || '').includes(headingNow) && (afterSave.message || '').split('\n').pop() === here && canonicalHere === here, { headingNow, here, canonicalHere, message: norm(afterSave.message) })
+    const detailSkuText = await ev('(document.querySelector("[data-detail-info-col]") || {}).textContent || ""')
+    const detailFixture = row(here.split('/').pop())
+    check('the detail page shows the item SKU under its name', !!detailFixture && detailSkuText.includes(detailFixture.sku), { sku: detailFixture?.sku })
 
     // --- logout ---
     // Back to the catalog through the detail page's own control first: the logout button lives in

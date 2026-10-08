@@ -91,6 +91,7 @@ useHead({ title: pageTitle })
                 <div class="flex items-start justify-between gap-4">
                   <div class="min-w-0">
                     <p class="truncate text-sm font-semibold text-zinc-950 dark:text-white">{{ view.product?.name }}</p>
+                    <p v-if="view.product" class="mt-0.5 text-xs text-zinc-500">{{ t('sku') }}: {{ view.product.sku }}</p>
                     <div class="mt-1 text-sm">
                       <ProductPrice v-if="view.product" :product="view.product" />
                     </div>
