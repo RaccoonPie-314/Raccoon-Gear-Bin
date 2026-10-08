@@ -27,6 +27,13 @@ const verifying = ref(false)
 const tranId = computed(() => typeof route.query.tran === 'string' && /^[A-Za-z0-9]{6,20}$/.test(route.query.tran) ? route.query.tran : '')
 const tranStatus = ref<string | null>(null)
 
+// The hop marker (`payway-hop`) is armed by `startPaywayCheckout` for the one case the guard needs
+// it — a Back-from-PayWay hard load of /checkout with a stale session. PayWay's own return lands
+// HERE instead, so this page is where the marker's job ends; left armed it stayed live for ten
+// minutes and hijacked the buyer's NEXT checkout visit into this order's result page, announcing
+// the previous payment over a cart that was never ordered (report 2026-10-08).
+useCookie('payway-hop').value = null
+
 onMounted(async () => {
   window.addEventListener('pageshow', onPageShow)
   await load()
@@ -78,11 +85,12 @@ async function load() {
 // A bounded poll, not three quick tries. PayWay settles asynchronously (observed live — an
 // approval stamped ~20s after the browser returned), so a single first read legitimately says
 // PENDING, and a short budget showed a false "not completed" for a payment that WAS coming
-// through. Poll every 2s up to ~30s and break the instant the row flips paid; the `verifying` ring
-// holds the whole window. The catch sits inside the loop so a stale-cookie 401 on one attempt does
-// not abort the rest. `tran` makes the call session-free; then the order read above only enriches
-// the card. Shared by mount and the buyer's "check again", so a page opened before the settle can
-// be re-run without a reload.
+// through. Poll every 2s up to ~30s and break the instant the row flips paid. `verifying` stays on
+// for the whole window because it gates the buttons and "Check again" (two polls must never
+// overlap); the ring it also feeds covers only the FIRST answer — see `showRing`. The catch sits
+// inside the loop so a stale-cookie 401 on one attempt does not abort the rest. `tran` makes the
+// call session-free; then the order read above only enriches the card. Shared by mount and the
+// buyer's "check again", so a page opened before the settle can be re-run without a reload.
 async function reconcile() {
   if (!(tranId.value || (order.value && order.value.paymentStatus !== 'paid'))) return
   verifying.value = true
@@ -118,6 +126,13 @@ function onPageShow(event: PageTransitionEvent) {
 }
 
 const paid = computed(() => (order.value?.paymentStatus ?? tranStatus.value) === 'paid')
+// The ring covers only "we know nothing yet": the order read, and the poll's first answer. It used
+// to hold for the whole 30s window, which is a long stare at a spinner in the commonest way a buyer
+// reaches this page with nothing paid — pressing Back out of PayWay (measured: still spinning after
+// 13.6s, report 2026-10-08). The card behind it was already the honest thing ("Confirming your
+// payment", never a failure verdict), so releasing it as soon as an answer exists costs nothing:
+// the poll keeps running and swaps the card to "Payment received" the moment the row flips.
+const showRing = computed(() => isLoading.value || (verifying.value && !order.value && !tranStatus.value))
 // The unpaid terminal is "still confirming", never a failure verdict, and the result page issues
 // no new charge — so there is no pay-again here (that hazard lives on the order-detail page, where
 // the row is freshly read and can't be confused with a payment still settling). "Check again"
@@ -141,7 +156,7 @@ useHead({ title: pageTitle })
         </div>
       </div>
 
-      <div v-if="isLoading || verifying" class="mt-8 flex flex-col items-center gap-4 py-6" data-pay-checking>
+      <div v-if="showRing" class="mt-8 flex flex-col items-center gap-4 py-6" data-pay-checking>
         <div
           class="h-12 w-12 rounded-full border-[3px] border-zinc-200 border-t-zinc-950 motion-safe:animate-spin motion-reduce:animate-pulse dark:border-zinc-800 dark:border-t-white"
           aria-hidden="true"

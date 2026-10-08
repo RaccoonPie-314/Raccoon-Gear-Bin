@@ -5,6 +5,11 @@
  * for the browser's multipart form submit — the P0-amended flow; PayWay has no "payment URL"
  * mode. One `payments` attempt row per call. `tran_id` collisions are handled where they can
  * actually happen in this flow: the DB's unique index (we never see PayWay's code `4`).
+ *
+ * `tranId` is returned beside the URL on purpose: it is the payer-capability token the buyer's own
+ * return URLs already carry, so handing it to the checkout page exposes nothing new — and it lets
+ * the Back-from-PayWay marker (`payway-hop`) keep the session-free read available on a landing
+ * that has only a stale `__session` (report 2026-10-08).
  */
 export default defineEventHandler(async (event) => {
   const userId = requireUser(event)
@@ -96,7 +101,7 @@ export default defineEventHandler(async (event) => {
     // lives at the bare-root URL; the /checkout/ pair renders the same state as a stripped
     // full-width list (verified live side by side). The old form-POST flow landed on the branded
     // one, so the path is rewritten to keep that look.
-    return { checkoutUrl: location.replace('/checkout/', '/'), deeplink: null }
+    return { checkoutUrl: location.replace('/checkout/', '/'), deeplink: null, tranId: purchase.tranId }
   }
   if (contentType.includes('json')) {
     const payload = await response.json() as {
@@ -108,7 +113,7 @@ export default defineEventHandler(async (event) => {
       console.warn('[payway] purchase refused:', payload.status?.code)
       throw createError({ statusCode: 502, statusMessage: 'PAYWAY_PURCHASE_REFUSED' })
     }
-    return { checkoutUrl: payload.checkout_qr_url, deeplink: payload.abapay_deeplink ?? null }
+    return { checkoutUrl: payload.checkout_qr_url, deeplink: payload.abapay_deeplink ?? null, tranId: purchase.tranId }
   }
   console.warn('[payway] unexpected purchase response:', response.status, contentType)
   throw createError({ statusCode: 502, statusMessage: 'PAYWAY_UNEXPECTED_RESPONSE' })

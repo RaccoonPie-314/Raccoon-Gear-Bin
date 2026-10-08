@@ -1,5 +1,5 @@
 /**
- * `POST /api/orders` — the buyer's only order write. Body: `{ items, delivery, locale }`.
+ * `POST /api/orders` — the buyer's only order write. Body: `{ items, delivery, locale, payNow }`.
  *
  * The `create_order` RPC stays the authority on price, stock, the promo cap and delivery shape;
  * it raises machine codes (P0001), extracted here into the 400's message so the checkout's
@@ -37,20 +37,17 @@ export default defineEventHandler(async (event) => {
     // The order push (order_telegram_text's Worker half — the Supabase trigger + Vault died with
     // the pivot): fire-and-forget AFTER the commit, because the order is the money path and the
     // push is decoration. A missing chat id means the feature is simply not configured.
+    //
+    // A PAY-NOW order is deliberately silent here (owner decision, 2026-10-08): its buyer is on
+    // the gateway at this moment, so a "Paying online / Unpaid" ping is stale before the seller
+    // reads it — the message waits for the result and goes out from `notifyPaymentReceived`,
+    // carrying this same body with `Payment: Paid`. An abandoned attempt therefore sends nothing
+    // at all; the desk's pending queue is where it stays visible. Pay-later announces here, as it
+    // always has: nothing external has to happen before the shop can act on it.
     try {
       const chatId = (useRuntimeConfig(event) as { telegramChatId?: string }).telegramChatId
-      if (chatId) {
-        const [order] = await sql`select id, currency, total, payment_status, delivery_name, delivery_phone, delivery_address, delivery_location, delivery_note
-          from public.orders where id = ${created.id}`
-        const items = await sql`select quantity, name_snapshot as name, sku_snapshot as sku
-          from public.order_items where order_id = ${created.id}`
-        await sendTelegramMessage(event, chatId, orderTelegramText({
-          ...(order as OrderPushInput),
-          // The buyer's payment intent rides the push only (never the row — `payment_status` stays
-          // the DB's truth until settlement): a pay-now order must not announce itself as Unpaid.
-          paying: body?.payNow === true,
-          items: items as OrderPushInput['items']
-        }))
+      if (chatId && body?.payNow !== true) {
+        await sendTelegramMessage(event, chatId, orderTelegramText(await orderPushInput(sql, created.id)))
       }
     } catch (error) {
       console.warn('[orders] push skipped:', error instanceof Error ? error.message : error)

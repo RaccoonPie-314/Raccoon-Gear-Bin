@@ -54,6 +54,14 @@ export const useCheckout = () => {
   const isLocating = ref(false)
   const locationError = ref('')
 
+  // True once the order exists and the buyer is being sent to PayWay. The page keeps painting
+  // until PayWay's document commits — a provider round trip, ~1s — and the cart is already cleared
+  // by then, so without this the last frame of a paid checkout was the EMPTY-CART card sitting
+  // under PayWay's URL: a buyer reads that as a failed order (owner screenshot, 2026-10-08). Never
+  // reset: it exists to cover the document being replaced, and the SPA fall-through unmounts the
+  // page anyway.
+  const hopping = ref(false)
+
   // The live invalid-set: empty until the first submit has shown what is required, then it
   // recomputes as the buyer types — so a field's red and its hint clear the moment it is fixed,
   // without a second round trip or a per-field watcher.
@@ -183,8 +191,10 @@ export const useCheckout = () => {
         }
       })
 
+      const goingToPayway = paymentChoice.value === 'now'
+      if (goingToPayway) hopping.value = true
       clear()
-      if (paymentChoice.value === 'now') {
+      if (goingToPayway) {
         try {
           await startPaywayCheckout(String(orderId))
           return true
@@ -205,5 +215,5 @@ export const useCheckout = () => {
     }
   }
 
-  return { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, load, submit }
+  return { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, hopping, load, submit }
 }

@@ -566,14 +566,26 @@ any route    → middleware/customer-auth.global.ts — session-only, /account +
   fetching the orders list or one order raises that marker (inside `useCustomerOrders`), which is
   why the orders view itself is the notification's body. An admin's pill counts the desk's
   **pending queue** instead — a work list that clears by being worked, so it needs no marker.
-  The between-devices path is a real push: every new order is POSTed to the shop's Telegram bot
-  from the Worker (`server/utils/telegram.ts`, exception-wrapped because the order is the money
-  path and the push is decoration), carrying the order's payment status on a `Payment:` line —
-  `Paying online` when the buyer chose pay now at checkout (the intent rides the push only; the row
-  stays `unpaid` until settlement) and `Unpaid` for pay-later orders. A fresh PayWay settlement
-  adds a second "Payment received" push from the callback pipeline (`processPaywayCallback` fires
-  it only on the first paid transition, so
-  return/webhook replays never double-push). The push is inert until the Worker secrets
+  The between-devices path is a real push (`server/utils/telegram.ts`, exception-wrapped because
+  the order is the money path and the push is decoration), and how many messages a buyer's order
+  earns depends on the method. **Pay later announces itself at once** — nothing external has to
+  happen before the shop can act. **Pay now is silent until the money lands**: its buyer is on the
+  gateway when the row is written, so a "Paying online / Unpaid" ping is stale before it is read
+  (owner decision, 2026-10-08). The one message that order ever gets comes from
+  `notifyPaymentReceived`, fired off `applyPaywayResult`'s first paid transition. Because it is the
+  only one, it carries the WHOLE order — buyer, address, items — under a
+  `Payment received — #REF, CUR total` header, so deferring the ping never trades a stale message
+  for an unusable one. An abandoned attempt therefore sends nothing at all; the desk's pending
+  queue is where it stays visible.
+  The money rides **two** lines because they answer two different questions: `Method:` is how it was
+  paid (`Paying online`, or `Pay on delivery` — the shop's cash default) and `Payment:` is the row's
+  own state (Paid / Unpaid / Refunded). One line carrying both hid each answer behind the other
+  (owner report, 2026-10-08). All three doors that can flip the row send the settlement push (the
+  browser return, the server-to-server webhook, and the buyer's own poll on
+  `/api/payments/payway/verify`) and none of them sends it twice — the `payment-push:<order>` bucket
+  settles the same-instant race. The poll is not a nice-to-have: in dev the return and webhook legs
+  cannot reach localhost at all, so the poll was the only door left and the seller heard nothing
+  (it stays silent for a pay-now order only until that first paid transition). The push is inert until the Worker secrets
   (`telegram_bot_token` / `telegram_chat_id`) exist, and its format — labeled lines, one line per
   item — is fixture-pinned in `tests/unit/order-telegram.test.ts`. No email:
   that needs custom SMTP (see the known gaps), and the marker being per-browser means a second
@@ -1184,7 +1196,11 @@ Static assets served by the CF ASSETS layer bypass the Worker and keep the platf
   only payment path the browser has, `startPaywayCheckout` is its one door and it has three callers
   (`useCheckout` at placement, `checkout/success.vue`, and the order detail's pay button), and
   `checkout/pay-result.vue` re-reads the **order row**
-  as the verdict rather than trusting what the return carried. Create is per-user throttled (5/min)
+  as the verdict rather than trusting what the return carried — with the reconciliation poll running behind
+  it for ~30s (PayWay settles asynchronously, ~20s measured) while the SPINNER only covers the first
+  answer: the card is the honest non-verdict ("Confirming your payment") and appears in ~0.4s on an
+  in-app arrival, because holding the whole window would spin for 30s in the commonest way a buyer
+  reaches this page with nothing paid, pressing Back out of PayWay (report 2026-10-08). Create is per-user throttled (5/min)
   and the session-free `verify` branch per recent attempt id (60/min — the result page polls it ~15
   times and an IP bucket would punish CGNAT neighbours); a mismatched amount now logs
   `[payway] amount-mismatch`, the tamper/race signal that previously survived only in

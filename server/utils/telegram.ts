@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import type { NeonQueryFunction } from '@neondatabase/serverless'
 
 /** The storefront's existing bot — order push and the login handshake share it. */
 export const TELEGRAM_BOT_USERNAME = 'RGBin_Bot'
@@ -35,7 +36,7 @@ export interface OrderPushInput {
   currency: string
   total: number | string
   payment_status: string
-  /** The buyer chose Pay now at checkout: payment is in flight, so the line must not read Unpaid. */
+  /** True when the money arrived online: the settlement push, and (before it) any pay-now intent. */
   paying?: boolean
   delivery_name: string | null
   delivery_phone: string | null
@@ -46,21 +47,50 @@ export interface OrderPushInput {
 }
 
 /**
+ * The push's input, loaded once for both senders — the creation push and the settlement one. The
+ * SELECT shape IS the message's contract, so it lives beside the builder instead of being spelled
+ * twice and drifting apart.
+ */
+export async function orderPushInput(sql: NeonQueryFunction<false, false>, orderId: string): Promise<OrderPushInput> {
+  const [order] = await sql`select id, currency, total, payment_status, delivery_name, delivery_phone, delivery_address, delivery_location, delivery_note
+    from public.orders where id = ${orderId}`
+  const items = await sql`select quantity, name_snapshot as name, sku_snapshot as sku
+    from public.order_items where order_id = ${orderId}`
+  return { ...(order as Omit<OrderPushInput, 'items'>), items: items as OrderPushInput['items'] }
+}
+
+/**
  * The order push's message body — `order_telegram_text`'s TS port (the SQL function retired with
  * the Supabase project; its fixture is the parity test's `tests/unit/order-telegram.test.ts`).
  * Plain text only: no Telegram markup, so buyer-entered text can never break the message. Labelled
  * lines, so the seller's phone reads as a form — the shop calls the phone and a courier follows the
  * location link; both were previously undistinguishable from the address.
+ *
+ * The money rides TWO lines, and they answer different questions on purpose: `Method:` is how it
+ * was paid (online, or the shop's cash-on-delivery default) while `Payment:` is the row's own
+ * state. One line carrying both made each answer hide the other — a pay-now order said "Paying
+ * online" with no way to see that it was still unpaid, and a settled order said "Paid" with no way
+ * to see how it was paid (owner report, 2026-10-08).
+ *
+ * Two kinds, one body: `new` is the order as placed (the pay-later path, announced immediately),
+ * `paid` is the same order re-sent by the settlement door under a "Payment received" header. The
+ * pay-now path only ever sends the second one — its buyer is on the gateway when the order row is
+ * written, so an "Unpaid" line about money already in flight is stale by the time the seller reads
+ * it (owner decision, 2026-10-08). Same body, so nothing the seller needs is lost with the ping.
  */
-export function orderTelegramText(order: OrderPushInput): string {
+export function orderTelegramText(order: OrderPushInput, kind: 'new' | 'paid' = 'new'): string {
   const total = Number(order.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const reference = order.id.slice(0, 8).toUpperCase()
   const lines = [
-    `New order #${order.id.slice(0, 8).toUpperCase()} — ${order.currency} ${total}`,
+    kind === 'paid'
+      ? `Payment received — #${reference}, ${order.currency} ${total}`
+      : `New order #${reference} — ${order.currency} ${total}`,
     `Buyer:  ${order.delivery_name ?? '(no name)'} · ${order.delivery_phone ?? '-'}`,
     `Address: ${order.delivery_address ?? '(no address)'}`,
     `Location: ${order.delivery_location ?? '-'}`
   ]
-  lines.push(`Payment: ${order.paying ? 'Paying online' : order.payment_status === 'paid' ? 'Paid' : order.payment_status === 'refunded' ? 'Refunded' : 'Unpaid'}`)
+  lines.push(`Method: ${order.paying ? 'Paying online' : 'Pay on delivery'}`)
+  lines.push(`Payment: ${order.payment_status === 'paid' ? 'Paid' : order.payment_status === 'refunded' ? 'Refunded' : 'Unpaid'}`)
   if (order.delivery_note) lines.push(`Note: ${order.delivery_note}`)
   lines.push(`Items (${order.items.length}):`)
   lines.push(order.items.length

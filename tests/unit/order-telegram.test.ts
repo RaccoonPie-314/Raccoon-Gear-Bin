@@ -22,6 +22,7 @@ describe('the order push body', () => {
       + 'Buyer:  Test Buyer · 012345678\n'
       + 'Address: Street 271\n'
       + 'Location: https://maps.google.com/?q=11.55,104.92\n'
+      + 'Method: Pay on delivery\n'
       + 'Payment: Unpaid\n'
       + 'Items (2):\n'
       + '  2× Widget [W-1]\n'
@@ -45,8 +46,11 @@ describe('the order push body', () => {
     expect(text).toContain('Payment: Paid\nNote: Leave at the gate\nItems (0):\n  (no items)')
   })
 
-  test('a pay-now order announces "Paying online", never Unpaid', () => {
-    expect(orderTelegramText({
+  test('a pay-now order is named as paying online while its row still says Unpaid', () => {
+    // Both halves matter, and only together: `Method` is the buyer's choice, `Payment` is the
+    // row's state — the split that stopped a pay-now push from hiding the fact that no money had
+    // arrived yet (owner report, 2026-10-08).
+    const text = orderTelegramText({
       id: 'b1b2c3d4-0000-0000-0000-000000000000',
       currency: 'USD',
       total: 9.99,
@@ -58,7 +62,28 @@ describe('the order push body', () => {
       delivery_location: 'L',
       delivery_note: null,
       items: []
-    })).toContain('Payment: Paying online\n')
+    })
+    expect(text).toContain('Method: Paying online\nPayment: Unpaid\n')
+  })
+
+  test('the settlement send is the whole order under a paid header', () => {
+    // For a pay-now order this is the ONLY message the shop ever gets (the creation push is silent
+    // for that path), so it has to carry what fulfilment needs — not a one-line receipt.
+    const text = orderTelegramText({
+      id: 'c1b2c3d4-0000-0000-0000-000000000000',
+      currency: 'USD',
+      total: 22,
+      payment_status: 'paid',
+      paying: true,
+      delivery_name: 'Mi Bombo',
+      delivery_phone: '012345678',
+      delivery_address: 'Takhmao, Kandal',
+      delivery_location: 'https://maps.google.com/?q=11.47,104.95',
+      delivery_note: null,
+      items: [{ quantity: 1, name: 'cvcxvx', sku: 's2e2' }]
+    }, 'paid')
+    expect(text.startsWith('Payment received — #C1B2C3D4, USD 22.00\nBuyer:  Mi Bombo · 012345678\n')).toBe(true)
+    expect(text).toContain('\nMethod: Paying online\nPayment: Paid\nItems (1):\n  1× cvcxvx [s2e2]')
   })
 
   test('nulls fall back and the total keeps to_char-style thousands separators', () => {
@@ -78,6 +103,7 @@ describe('the order push body', () => {
       + 'Buyer:  (no name) · -\n'
       + 'Address: (no address)\n'
       + 'Location: -\n'
+      + 'Method: Pay on delivery\n'
       + 'Payment: Refunded\n'
       + 'Items (0):\n'
       + '  (no items)'

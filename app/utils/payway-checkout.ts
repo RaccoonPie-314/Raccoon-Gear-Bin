@@ -6,13 +6,16 @@
  * mobile, and our tab stays put until PayWay redirects it back to the result page.
  */
 export const startPaywayCheckout = async (orderId: string): Promise<void> => {
-  const { checkoutUrl } = await $fetch<{ checkoutUrl: string }>(
+  const { checkoutUrl, tranId } = await $fetch<{ checkoutUrl: string, tranId: string }>(
     '/api/payments/payway/create',
     { method: 'POST', body: { orderId } }
   )
   // Back from PayWay hard-loads the guarded /checkout with a stale __session JWT, which bounces
   // the buyer through /login (the defect the post-payment trio already excludes). This marker
-  // carries the order id for 10 minutes, so that one return lands on the order's pay-result page.
-  document.cookie = `payway-hop=${orderId}; path=/; max-age=600; samesite=lax`
+  // carries the order id for 10 minutes so that one return lands on the order's pay-result page —
+  // and the attempt id beside it, because the landing's only read that does not need a session is
+  // the one keyed by `tran`; without it a stale session drew "Order not found" over a paid order
+  // (report 2026-10-08). Both halves are uuid/alnum, so neither needs escaping.
+  document.cookie = `payway-hop=${orderId}:${tranId}; path=/; max-age=600; samesite=lax`
   window.location.href = checkoutUrl
 }

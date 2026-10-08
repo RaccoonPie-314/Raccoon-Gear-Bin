@@ -22,7 +22,7 @@
  */
 const { locale, t } = useI18n()
 const localePath = useLocalePath()
-const { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, load, submit } = useCheckout()
+const { isLoading, loadError, isSubmitting, errorMessage, name, phone, address, locationLink, note, isLocating, locationError, locate, invalidFields, totals, paymentChoice, hopping, load, submit } = useCheckout()
 
 onMounted(load)
 
@@ -55,6 +55,14 @@ useHead({ title: pageTitle })
 
       <div v-else-if="loadError" class="mt-8 rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">
         <p class="text-sm font-medium text-zinc-500">{{ t('catalogLoadError') }}</p>
+      </div>
+
+      <!-- The hop's last frame: the order exists and PayWay's document has not committed yet, so
+           the cart is already empty — without this the buyer watches "your cart is empty" under
+           the gateway's URL and reads it as a failed order (owner screenshot, 2026-10-08). Same
+           copy as the submit button, because it is the same moment. -->
+      <div v-else-if="hopping" class="mt-8 rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">
+        <p class="animate-pulse text-sm font-semibold text-zinc-500 dark:text-zinc-400">{{ t('placingOrder') }}</p>
       </div>
 
       <div v-else-if="!activeLines.length" class="mt-8 rounded-2xl border border-dashed border-zinc-200 py-24 text-center dark:border-zinc-800">

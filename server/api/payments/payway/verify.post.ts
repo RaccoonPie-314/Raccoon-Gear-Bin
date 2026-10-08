@@ -6,7 +6,8 @@
  * arriving session can lag, so the payer's own attempt id — minted by us, carried in the return
  * URLs the payer's browser followed — can verify WITHOUT any session. That path is bounded to
  * recent attempts and answers the status alone (no ids, no order data). Both paths apply through
- * the one idempotent door, `applyPaywayResult`.
+ * the one idempotent door, `applyPaywayResult`, and both own the seller's paid notice off its
+ * first-transition answer — this poll is often the door that actually flips the row.
  */
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event) as { paywayMerchantId?: string, paywayApiKey?: string, paywayBase?: string }
@@ -22,7 +23,7 @@ export default defineEventHandler(async (event) => {
   // The payer-capability path: no session, one recent attempt, status-only reply.
   const tranId = typeof body?.tranId === 'string' && /^[A-Za-z0-9]{6,20}$/.test(body.tranId) ? body.tranId : ''
   if (tranId) {
-    const attemptRows = await sql`select provider_txn_id from public.payments
+    const attemptRows = await sql`select provider_txn_id, order_id from public.payments
       where provider_txn_id = ${tranId} and created_at > now() - interval '24 hours'`
     if (!attemptRows.length) throw createError({ statusCode: 404, statusMessage: 'PAYMENT_NOT_FOUND' })
     // Each hit with a live tran costs one provider read; 60/min is far above the result page's own
@@ -32,7 +33,9 @@ export default defineEventHandler(async (event) => {
     }
     const result = await check(tranId)
     if (result) {
-      await applyPaywayResult(storeFor(sql), { tranId, code: result.code, amount: result.amount, payload: result.raw })
+      const outcome = await applyPaywayResult(storeFor(sql), { tranId, code: result.code, amount: result.amount, payload: result.raw })
+      const orderId = (attemptRows[0] as { order_id?: string } | undefined)?.order_id
+      if (outcome === 'paid' && orderId) await notifyPaymentReceived(event, sql, orderId)
     }
     const statusRows = await sql`select o.payment_status from public.orders o
       join public.payments p on p.order_id = o.id
@@ -59,7 +62,8 @@ export default defineEventHandler(async (event) => {
 
   const result = await check(attemptTran)
   if (result) {
-    await applyPaywayResult(storeFor(sql), { tranId: attemptTran, code: result.code, amount: result.amount, payload: result.raw })
+    const outcome = await applyPaywayResult(storeFor(sql), { tranId: attemptTran, code: result.code, amount: result.amount, payload: result.raw })
+    if (outcome === 'paid') await notifyPaymentReceived(event, sql, orderId)
     const [, , freshRows] = await userTx(sql, userId, [
       sql`select payment_status from public.orders where id = ${orderId}::uuid`
     ])
