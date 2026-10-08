@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { accountHasName } from '~/utils/account-name'
 // Clerk's OAuth callback lands here (the FAPI appends its `__clerk_` handshake params to our
 // `redirect_url`, which is kept bare on purpose; the destination rides in sessionStorage).
 // Rules, each from a shipped failure:
@@ -32,22 +33,23 @@ const safe = (value: unknown) => {
 // read the profile and could only guess '/account'. With the session present the verdict is
 // answerable, and a nicknamed account belongs on the storefront, not back in onboarding (the
 // live report of 2026-10-06). The read can face the same cookie-settle lag the order pages
-// fight, so it retries; a failed read keeps the guess. Shared by the main wait and the
+// fight, so it retries — and a read that never lands no longer decides anything on its own, since
+// the name clerk-js already carries answers the same question without the round trip (that lag is
+// what kept nicknamed Gmail accounts on the profile editor: nothing upserts `profiles` for an
+// OAuth sign-in, so the row itself is missing, not just unread). Shared by the main wait and the
 // late-arrival watcher — a session is a session no matter which beat it lands on.
 const resolveLanding = async (stored: string | null, fallback: string) => {
-  let landing = fallback
-  if (stored === '@landing') {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const profile = await $fetch<{ display_name: string | null } | null>('/api/profile')
-        if (profile?.display_name?.trim()) landing = localePath('/')
-        break
-      } catch {
-        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500))
-      }
+  if (stored !== '@landing') return fallback
+  let profile: { display_name: string | null } | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      profile = await $fetch<{ display_name: string | null } | null>('/api/profile')
+      break
+    } catch {
+      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500))
     }
   }
-  return landing
+  return accountHasName(profile, clerk.value?.user?.fullName) ? localePath('/') : fallback
 }
 
 // clerk-js may already have navigated (the plugin's routerPush); only land if still here.

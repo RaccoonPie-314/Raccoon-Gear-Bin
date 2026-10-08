@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { safeRedirectPath } from '~/utils/safe-redirect'
+import { accountHasName } from '~/utils/account-name'
 
 const { locale, t } = useI18n()
 const localePath = useLocalePath()
 const route = useRoute()
 const {
-  signIn, phoneIdentifier, verifyLoginCode,
+  user, signIn, phoneIdentifier, verifyLoginCode,
   startTelegram, pollTelegram, completeOnHosted, completeTicket, signInWithGoogle, waitForUser, fetchProfile
 } = useCustomerAuth()
 
@@ -30,13 +31,15 @@ const errorMessage = ref('')
 // editor every time — that page is the onboarding that sets a nickname, not a destination, so
 // once the profile has one the sign-in lands on the storefront instead. The judge's empty-string
 // form is how "no usable redirect" is spelled without a second copy of its rules; a failed
-// profile read keeps the old landing, where the miss is visible.
+// profile read keeps the old landing, where the miss is visible. It only ever answers once a
+// session exists — `fetchProfile` declines while signed out — which is why the ticket branches
+// below judge after the session rather than before the hop.
 const landingTarget = async () => {
   const judged = safeRedirectPath(route.query.redirect, '')
   if (judged) return judged
   try {
     const profile = await fetchProfile()
-    return profile?.display_name?.trim() ? localePath('/') : localePath('/account')
+    return accountHasName(profile, user.value?.fullName) ? localePath('/') : localePath('/account')
   } catch {
     return localePath('/account')
   }
@@ -81,14 +84,17 @@ const handleSubmit = async () => {
     isSubmitting.value = true
     try {
       // The mint's ticket completes the session in-page (a password sign-in's own mechanism);
-      // Clerk's hosted page is the fallback, and its redirect target is computed before leaving
-      // this document.
+      // Clerk's hosted page is the fallback, and only that fallback has to pick its landing
+      // before leaving this document.
       const mint = await verifyLoginCode(code.value)
-      const landing = await landingTarget()
+      // The ticket first, the verdict after: while signed out there is no name to read, so
+      // judging here used to answer "/account" for every account that already had one (the live
+      // report of 2026-10-07 — it is the same defect the Google leg had, on the other door).
       if (await completeTicket(mint.ticket)) {
-        await navigateTo(landing, { replace: true })
+        await navigateTo(await landingTarget(), { replace: true })
         return
       }
+      const landing = await landingTarget()
       await navigateTo(completeOnHosted(mint.signInUrl, window.location.origin + landing), { external: true })
     } catch (error) {
       errorMessage.value = failFor(error)
@@ -170,14 +176,14 @@ const beginTelegram = async () => {
         if (result.status === 'expired') { stopTelegram(t('telegramExpired')); return }
         if (result.status === 'confirmed') {
           stopTelegram()
-          const landing = await landingTarget()
-          // Ticket first — the session lands here, same as a password sign-in; the hosted page
-          // stays as the fallback for the browsers where in-page completion fails.
+          // Ticket first, verdict after — see the code branch: the name cannot be read while
+          // signed out. The hosted page is the fallback, and it must be aimed before the hop.
           if (result.ticket && await completeTicket(result.ticket)) {
-            await navigateTo(landing, { replace: true })
+            await navigateTo(await landingTarget(), { replace: true })
             return
           }
           if (result.signInUrl) {
+            const landing = await landingTarget()
             await navigateTo(completeOnHosted(result.signInUrl, window.location.origin + landing), { external: true })
           } else {
             telegramError.value = t('telegramFailed')

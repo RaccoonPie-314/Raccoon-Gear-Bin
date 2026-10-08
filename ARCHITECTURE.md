@@ -543,11 +543,23 @@ any route    → middleware/customer-auth.global.ts — session-only, /account +
   off a still-empty user — the harness caught it as a real defect when signup landed on
   `/login?redirect=/account` with a live session, and `/login`/`/signup` await the bounded wait
   before redirecting. The route guards carry the same idea in `waitForClerkLoaded`.
-- **A bare `/login` lands on the storefront once the profile has a nickname** — and on the profile
-  page until then, because that page is the onboarding that sets one. An explicit same-site
+- **A bare `/login` lands on the storefront once the account has a name** — and on the profile
+  page until then, because that page is the onboarding that sets one. The verdict has one owner,
+  `app/utils/account-name.ts`, and counts both places a name can live: `profiles.display_name`
+  (what the buyer typed on `/account`) and the name Clerk carries for the account. Only the column
+  was read until 2026-10-07, which kept sending Gmail accounts to the profile editor forever —
+  Google hands a display name over at first consent and nothing upserts `profiles` for an OAuth
+  sign-in, so for those accounts the row is simply absent rather than empty. An explicit same-site
   `?redirect=` (what the guard writes) still wins, and the fallback is spelled through
-  `safeRedirectPath`'s own empty-string form so the judge stays the only copy of the rules; a
-  failed profile read keeps the old landing, where the miss is visible.
+  `safeRedirectPath`'s own empty-string form so the judge stays the only copy of those rules.
+- **The name is read after the session exists, at every door.** The ticket flows (login code,
+  Telegram) used to compute their landing *before* `completeTicket`, where `fetchProfile` declines
+  to ask at all — so they answered `/account` without issuing a request, for accounts that already
+  had a name. Only the hosted fallback still aims itself before leaving the document, because that
+  hop ends this page and nothing can be judged after it; there an unread profile keeps the
+  onboarding landing, where the miss is visible. `/sso-callback` judges with the same rule and no
+  longer lets a failed `/api/profile` read (the `__session` handshake can still be in flight) speak
+  for the account, since clerk-js already holds its name.
 - **Order notices are badge counts, not a feed** (`app/utils/order-notices.ts`). A buyer's Orders
   pill counts orders whose *latest lifecycle stamp* (the newest of created / confirmed / delivered
   / cancelled — server clocks only, never the visitor's) is newer than a browser-local seen marker;
