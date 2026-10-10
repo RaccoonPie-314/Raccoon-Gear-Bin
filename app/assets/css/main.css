@@ -14,6 +14,22 @@
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans Khmer', 'Khmer OS System', sans-serif;
 }
 
+/* Which viewport counts as desktop. `lg` is deliberately not a plain width: every desktop/mobile
+   swap in this app is a breakpoint class and nothing else — the category rail vs. the teleported
+   bottom bar, the inline Contact CTA vs. the sticky bar (`ProductConversion` mounts both, CSS hides
+   one), the cart and checkout's `lg:h-screen` — so overriding the variant moves the whole tier and
+   no page has to know the rule exists. 744px is an iPad mini's portrait edge (every larger iPad
+   starts at 810); the height floor is what keeps a phone out, because a phone held sideways is 956
+   wide and only ~440 tall, and a sticky rail plus two columns do not fit in that. `width >= 1024px`
+   keeps its old meaning, so no desktop window changes tier. Not `pointer-coarse`: an iPad with a
+   Magic Keyboard reports a fine pointer, so a pointer gate misses the device this is for. And no UA
+   sniff, same reason as the font stack above. */
+@custom-variant lg {
+  @media ((width >= 744px) and (height >= 640px)) or (width >= 1024px) {
+    @slot;
+  }
+}
+
 html {
   scroll-behavior: smooth;
   /* A double tap anywhere on the storefront is two taps, not the browser's viewport zoom.

@@ -684,9 +684,16 @@ const run = async () => {
   })()`
   // The emblem's Tailwind step per viewport: base / sm / md / lg / xl.
   const LOGO_STEP = { 390: 96, 640: 112, 834: 112, 1024: 112, 1280: 128, 1440: 128 }
-  // How far the contact pair lifts off each container margin: none until `lg`, where the line is
-  // wide enough that pinning the two labels to the extremes stops reading as one pair.
-  const CONTACT_INSET = { 390: 0, 640: 0, 834: 0, 1024: 32, 1280: 48, 1440: 48 }
+  // How far the contact pair lifts off each container margin: none until the desktop tier, where the
+  // line is wide enough that pinning the two labels to the extremes stops reading as one pair.
+  // Keyed by width because every sweep row below pairs a width with a tall-enough height; `834` reads
+  // 32 for the same reason `1024` does — the tablet tier in main.css puts it on the desktop side.
+  const CONTACT_INSET = { 390: 0, 640: 0, 834: 32, 1024: 32, 1280: 48, 1440: 48 }
+  // `lg` is width *and* height now (main.css `@custom-variant lg`): 744px is an iPad mini portrait,
+  // the 640px floor is what holds a sideways phone (956x440) out, and 1024px keeps its old meaning.
+  // Restated here rather than read off the page so the two can disagree — a check that asks CSS what
+  // it decided proves nothing about whether that was the intent.
+  const isDesktopTier = (w, h) => (w >= 744 && h >= 640) || w >= 1024
   // Returns the list of things that went wrong, so a failure names itself instead of just
   // re-printing the geometry that already looked right.
   const mastheadFaults = (m, w) => {
@@ -1198,6 +1205,18 @@ const run = async () => {
     const squeeze = await ev('(() => { const s = document.querySelector(\'[data-site-location] span\'); if (!s) return null; s.style.maxWidth = "40px"; const m = ' + MASTHEAD_EXPR + '; const out = { location: m.locationClipped, phone: m.phoneClipped }; s.style.maxWidth = ""; return out })()')
     check('the masthead clip probe fires on a real ellipsis', !!squeeze && squeeze.location === true && squeeze.phone === false, squeeze)
     await ev('document.body.style.fontFamily = ""; true')
+
+    // ---- the tablet tier, asked of the category docks ------------------------------------------
+    // The whole point of `@custom-variant lg` is that an iPad portrait gets the desktop rail and a
+    // phone held sideways does not, and both docks are in the DOM at every width with one of them
+    // `display: none` — so painted rects are the only honest read of which one a visitor is shown.
+    for (const [w, h] of [[834, 1112], [956, 440]]) {
+      await metrics(w, h, w < 500)
+      await sleep(400)
+      const docks = await ev('(() => { const painted = s => { const el = document.querySelector(s); return !!el && el.getClientRects().length > 0 }; return { rail: painted(\'nav[aria-label="Product categories"]\'), bar: painted(\'nav[aria-label="Mobile product categories"]\') } })()')
+      const want = isDesktopTier(w, h) ? 'rail' : 'bar'
+      check(`the ${want === 'rail' ? 'desktop' : 'phone'} dock is the only painted one at ${w}x${h}`, docks.rail === (want === 'rail') && docks.bar === (want === 'bar'), docks)
+    }
 
     // mobile dock: scroll reveal + indicator
     await metrics(390, 844, true)
@@ -3086,7 +3105,7 @@ const run = async () => {
         if (r.ctaW > r.vw - 32) faults.push(`the CTA is ${r.ctaW}px inside a ${r.vw}px viewport`)
         if (!r.ctaText) faults.push('the primary action has no name')
         if (r.ctaBg === r.ctaFg) faults.push('the primary action is invisible: fill equals its own text colour')
-        if (r.barShown !== (w < 1024)) faults.push(`the sticky bar is ${r.barShown ? 'shown' : 'hidden'} at ${w}px`)
+        if (r.barShown !== !isDesktopTier(w, h)) faults.push(`the sticky bar is ${r.barShown ? 'shown' : 'hidden'} at ${w}x${h}`)
         // The two-rung rule: a bar that sits on the page may not be the page's own colour, or in
         // dark mode it is a hairline with a button floating in nowhere. The colour is read off the
         // bar's frost layer — since the material moved to `[data-sticky-frost]`, the wrapper itself

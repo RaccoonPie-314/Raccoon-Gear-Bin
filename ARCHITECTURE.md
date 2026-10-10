@@ -714,6 +714,32 @@ success     → the RPC's returned id only — the page never fetches; "View ord
 `CategoryNav.vue` is a thin facade that renders both variants behind breakpoint classes.
 Keep the split where it reflects a genuinely different input model:
 
+### Which viewport is "desktop"
+
+`lg` is the tier gate, and it is not a plain width: `main.css` overrides the variant with
+`((width >= 744px) and (height >= 640px)) or (width >= 1024px)`. 744px is an iPad mini portrait (every
+larger iPad starts at 810), and the 640px height floor is what keeps a sideways phone out — 956x440 is
+wide, but a sticky rail plus two columns do not fit in 440px of height. `width >= 1024px` keeps its old
+meaning, so no desktop window changes tier.
+
+This works because **no page decides the tier in JS**: every swap is a breakpoint class and both mounts
+exist in the DOM with one `display: none` (`ProductConversion.vue` mounts the inline CTA and the sticky
+bar, `CategoryNav.vue` the rail and the bottom bar). Overriding the variant therefore moves the whole
+tier — layout, `lg:h-screen` frames, and all — with no markup touched. `pointer-coarse` is not the
+alternative: an iPad with a Magic Keyboard reports a fine pointer, so a pointer gate misses the device
+the tier is for.
+
+**Known gap, by decision:** on a touch-only iPad the desktop rail is *functional but inert* — its
+fish-eye and drag run on `mousemove`/`mousedown` (`CategoryDesktop.vue`), which touch never streams, so
+the magnification stays at rest and only tap-selection fires. Making it touch-live is a separate,
+measured change to a hands-off engine (see TOUCH_RESTRICTIONS: the two dock engines are deliberately
+different, and merging them is a regression), not something to fold into a breakpoint edit. The gallery
+arrows have no such gap — their `@media (hover: hover)` gate means touch pointers see them permanently.
+
+Harness: `isDesktopTier()` in `scripts/verify-ui.mjs` restates the rule so a check can fail when CSS and
+intent disagree, `the desktop dock is the only painted one at …` locks the pair at 834x1112 and 956x440,
+and the `CONTACT_INSET` / sticky-bar assertions are keyed to that predicate.
+
 | Must stay separate | Why merging would be wrong |
 |---|---|
 | Desktop vs mobile drag engines | mouse Y-axis + `grabOffsetY` vs touch X-axis with axis-lock detection, `scrollLeft` compensation, `preventDefault` only when `cancelable` |
