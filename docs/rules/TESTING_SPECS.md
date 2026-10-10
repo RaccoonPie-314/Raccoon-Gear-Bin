@@ -248,6 +248,22 @@ All ten have already been paid for once:
    reached the page), while a clean rebuild and rerun was 430/430 twice. The failure reads like a
    dozen unrelated app regressions. Stop the dev server (or at least the build) first; `verify`
    itself is safe beside a running dev server as long as no build overlaps it.
+12. **A click helper's `true` is not the click's effect.** `clickSelector(sel)` with no post-condition
+    answers true as soon as it *sent* the pair — it never asks whether the app acted. Trap 9 covers the
+    navigation departures; the guest-cart walk paid for the same rule on a *state* step: add → home →
+    sign in asserted every departure and never asserted the add, so an absorbed click arrived three
+    steps later as `a client-side sign-in consumes the guest cart into the account` with
+    `user: {"version":1,"items":[]}`. That payload looks exactly like a broken merge and is not one: the
+    account key is the empty cart the order placed earlier in the same run left behind (`clear()`), and
+    `guest: null` means there was never anything to merge. Two states that differ completely read
+    identically through one key, which is why the walk now dumps **every** `raccoon-cart:v1:*` key into
+    the payload of both merge checks, beside `the walk put the line in the guest cart before signing in`
+    — an effect assertion with a retry on the same evidence. Proving a step landed is `poll the state it
+    is supposed to produce`, not `the helper returned true`. (2026-10-10: intermittent on
+    `ubuntu-latest` — one failing run, one green rerun of the same commit — while six sampled
+    aim-and-clicks on the freshly mounted detail page all landed locally at 1× and at 8× CPU throttle,
+    so the runner-side trigger is still unnamed; suppressing the first click by hand reproduced the
+    failure signature byte for byte and the retry turned that run green, 451/451.)
 
 ## Measure, don't eyeball
 

@@ -3495,6 +3495,17 @@ const run = async () => {
     await ev('(() => { const a = [...document.querySelectorAll("main article a")].find(el => (el.getAttribute("href") || "").includes(' + JSON.stringify(cartProductId) + ')); if (a) a.click(); return !!a })()')
     await waitFor('!!document.querySelector("[data-add-to-cart]")')
     await clickSelector('[data-add-to-cart]')
+    // The add is asserted where it happens, not at the far end of the walk. `clickSelector` without a
+    // post-condition answers true even when the click did nothing (a disabled control, a page still
+    // settling, a tap absorbed by the surface on top), and every step below then reads the *account*
+    // key — which the order placed earlier in this very run left as `{"version":1,"items":[]}`. An
+    // upstream miss therefore arrives as "the merge lost the guest cart" with `guest: null`, three
+    // lines and one sign-in away from what actually broke. Retried once on the same evidence, like the
+    // departures above; the failure below names the step rather than its downstream neighbour.
+    const GUEST_HAS_LINE = '(() => { const p = JSON.parse(localStorage.getItem("raccoon-cart:v1:guest") || "null"); return !!p && p.items.some(l => l.productId === ' + JSON.stringify(cartProductId) + ' && l.quantity >= 1) })()'
+    const CART_KEYS = '(() => { const keys = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.indexOf("raccoon-cart") === 0) keys[k.replace("raccoon-cart:v1:", "")] = localStorage.getItem(k); } return { keys, signedIn: (window.__HARNESS_CLERK || {}).signedIn === true } })()'
+    const addLanded = await waitFor(GUEST_HAS_LINE, 4000) || (await clickSelector('[data-add-to-cart]') && await waitFor(GUEST_HAS_LINE, 4000))
+    check('the walk put the line in the guest cart before signing in', addLanded, { addLanded, keys: await ev(CART_KEYS) })
     await ev('(() => { const a = [...document.querySelectorAll("main a")].find(el => (el.getAttribute("href") || "") === "/"); if (a) a.click(); return !!a })()')
     await waitFor('location.pathname === "/" && !!document.querySelector("main article h2 a")', 10000)
     // The departure is asserted and retried once: with `scroll-behavior: smooth` in force, a click
@@ -3532,9 +3543,12 @@ const run = async () => {
     // the profile-page branch is pinned further down, behind the one-shot flag.
     check('a client-side sign-in with a nickname set lands on the storefront', await clickByText('main form button[type="submit"]', 'Sign in', 'location.pathname === "/"'), { toLogin, preSubmit })
     const liveCart = await ev('(() => ({ guest: localStorage.getItem("raccoon-cart:v1:guest"), user: JSON.parse(localStorage.getItem("raccoon-cart:v1:00000000-0000-4000-8000-0000000000ad") || "null"), url: location.pathname }))()')
-    check('a client-side sign-in consumes the guest cart into the account, no reload anywhere', liveCart.url === '/' && !liveCart.guest && !!liveCart.user && liveCart.user.items.length === 1 && liveCart.user.items[0].productId === cartProductId && liveCart.user.items[0].quantity === 1, liveCart)
+    // Both payloads carry every cart key the browser holds, because the two states that used to be
+    // indistinguishable from here ("the merge emptied the account cart" and "there was never a guest
+    // cart to merge") read identically through one key, and only differ in what the other scope holds.
+    check('a client-side sign-in consumes the guest cart into the account, no reload anywhere', liveCart.url === '/' && !liveCart.guest && !!liveCart.user && liveCart.user.items.length === 1 && liveCart.user.items[0].productId === cartProductId && liveCart.user.items[0].quantity === 1, { ...liveCart, keys: await ev(CART_KEYS) })
     await ev('(() => { const a = [...document.querySelectorAll("main a")].find(el => (el.getAttribute("href") || "") === "/"); if (a) a.click(); return !!a })()')
-    check('the merged cart badges the masthead without a reload', await waitFor('location.pathname === "/" && (document.querySelector("[data-cart-badge]") || {}).textContent?.trim() === "1"', 10000))
+    check('the merged cart badges the masthead without a reload', await waitFor('location.pathname === "/" && (document.querySelector("[data-cart-badge]") || {}).textContent?.trim() === "1"', 10000), { badge: await ev('(document.querySelector("[data-cart-badge]") || {}).textContent'), keys: await ev(CART_KEYS) })
 
     // The masthead's Orders entry (signed-in only — signed out it would only be a login detour,
     // asserted above). The href is read first, then the click proves the entry is reachable.
