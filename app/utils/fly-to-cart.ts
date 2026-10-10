@@ -4,9 +4,12 @@
  * on the ghost; a stalled animation can only mean "no flight", never a strand.
  *
  * This is the SearchDock launcher's own flight replayed, not a lookalike: the engine's ease-out
- * cubic lerp bent by a `sin(t·π)` bow of 80px (lateral 0.6× against the travel, lift 0.5×), its
- * aerodynamic scale `1 + apex·0.16 − t·0.10`, its apex bank opposite the bow, and its
- * FIELD_FLY_MS 500ms — the bow is zero at both endpoints, so launch and landing stay pixel-exact.
+ * cubic lerp bent by a `sin(t·π)` bow whose lateral and lift are drawn INDEPENDENTLY each flight —
+ * in sign and in magnitude — so the arc leans either way off the straight line and can loop wide or
+ * cut close to it (lateral 0.6× against the travel, lift 0.5×), its aerodynamic scale
+ * `1 + apex·0.16 − t·0.10`, its apex bank riding the lateral draw, and its FIELD_FLY_MS 500ms. The
+ * bow is zero at both endpoints whatever it drew, so launch and landing stay pixel-exact and only
+ * the middle of the arc moves.
  * The engine re-aims a fixed launcher box on a rAF loop; the ghost is disposable, so the whole
  * curve is SAMPLED into one WAAPI path and rides the compositor instead of the main thread (the
  * engine's per-frame floating box-shadow is dropped for the same reason — transform/opacity
@@ -25,6 +28,17 @@ const GHOST_ATTR = 'data-fly-ghost'
 const FLIGHT_MS = 500
 /** The engine's ARC_BOW_PX — the peak of the sin(t·π) bow, in px (zero at t=0 and t=1). */
 const ARC_BOW_PX = 80
+/**
+ * One axis of this flight's arc: a magnitude in [0.5, 1.6] with a random sign, so the same gesture
+ * can loop wide left, wide right, or cut close to the straight line. Drawn per flight, never per
+ * frame — a per-frame draw is a walk, not a trajectory.
+ *
+ * The magnitude FLOOR is the load-bearing half: at 0.5 the apex bank is 4° (matrix.b 0.070, where
+ * the harness asserts > 0.02), and a draw that could reach zero would fly straight — which reads as
+ * broken, not as random. The sign is free to be random because the bank rides the same draw, so the
+ * projectile still banks INTO whichever turn it drew.
+ */
+const drawBow = () => (0.5 + Math.random() * 1.1) * (Math.random() < 0.5 ? -1 : 1)
 /** The engine's bow coefficients: sideways against the travel, and the mid-flight lift. */
 const BOW_LATERAL = 0.6
 const BOW_LIFT = 0.5
@@ -65,17 +79,23 @@ export function flyToCart(from: Element | null | undefined, to: Element | null |
   // The engine, sampled: eased lerp (k) for the spine, the bow swinging against the travel and
   // lifting, the bank and the scale riding the same apex. Every term is zero-magnitude at the
   // endpoints, so the first frame sits on the button and the last on the badge.
+  // Two independent draws — one per axis — because the RATIO of lateral to lift is what reads as
+  // the angle. One shared factor would only make the same arc bigger or smaller, which is the thing
+  // nobody can see. The bank rides the lateral draw so the lean still matches the turn. All of it
+  // computed before the 16 samples, on the click frame, so nothing here costs a frame.
+  const bowX = drawBow()
+  const bowY = drawBow()
   const frames = Array.from({ length: SAMPLES }, (_, i) => {
     const t = i / (SAMPLES - 1)
     const k = 1 - (1 - t) ** 3
     const apex = Math.sin(t * Math.PI)
-    const x = dx * k - apex * ARC_BOW_PX * BOW_LATERAL
-    const y = dy * k - apex * ARC_BOW_PX * BOW_LIFT
+    const x = dx * k - apex * ARC_BOW_PX * bowX * BOW_LATERAL
+    const y = dy * k - apex * ARC_BOW_PX * bowY * BOW_LIFT
     const scale = 1 + apex * 0.16 - t * 0.10
     // Opaque through the arc, then swallowed over the last stretch so the removal is never a cut.
     const opacity = t < 0.5 ? 0.95 : 0.95 - ((t - 0.5) / 0.5) * 0.9
     return {
-      transform: `translate(${x}px, ${y}px) rotate(${apex * BANK_DEG}deg) scale(${scale})`,
+      transform: `translate(${x}px, ${y}px) rotate(${apex * BANK_DEG * bowX}deg) scale(${scale})`,
       opacity,
       offset: t,
     }

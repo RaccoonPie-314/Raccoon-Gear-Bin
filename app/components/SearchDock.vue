@@ -27,6 +27,13 @@ const FIELD_ICON_MIN = 52
 const FIELD_FLY_MS = 500
 // Peak sideways bow of the collapse/restore flight, in px (0 at launch and at landing). See flyStep.
 const ARC_BOW_PX = 80
+// One axis of this flight's arc: a magnitude in [0.5, 1.6] with a random sign, so the SAME gesture
+// can loop wide left, wide right, over the line or under it. Drawn per flight in `startFly`, never
+// per frame — a per-frame draw is a walk, not a trajectory. The magnitude FLOOR is load-bearing: at
+// 0.5 the apex bank is 5° (matrix.b 0.087, where the harness asserts > 0.02), and a draw reaching
+// zero would fly straight, which reads as broken rather than random. The sign is free because the
+// bank rides the lateral draw, so the box still banks INTO whichever turn it drew.
+const drawBow = () => (0.5 + Math.random() * 1.1) * (Math.random() < 0.5 ? -1 : 1)
 // Ease-out-expo spent 49% of the size change in the first 46ms, so the morph read as a snap.
 // Ease-out-cubic spreads the same motion across the whole duration.
 const MORPH_EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'
@@ -138,6 +145,11 @@ let flyT0 = 0
 let flyTarget: 'field' | 'sidebar' = 'sidebar'
 let flyFrom: FlyRect | null = null
 let flySidebar: FlyRect | null = null
+// This flight's arc, one signed draw per axis. The ratio between the two is what reads as the
+// ANGLE, so they are drawn separately — one shared factor would only scale the same arc, which is
+// the change nobody can see. Drawn in `startFly`, read in `flyStep`.
+let flyBowX = 1
+let flyBowY = 1
 // The field's last on-screen rect — a fresh collapse flight's origin.
 let lastVisibleFieldRect: FlyRect | null = null
 // Restore-specific: whether the launcher is mid up-flight, the real field hidden while it flies in,
@@ -409,6 +421,12 @@ const startFly = (target: 'field' | 'sidebar') => {
   flyRadius.value = `${Math.round(Math.min(origin.width, origin.height) / 2)}px`
   flying.value = true
   flyTransition.value = 'none'
+  // The draws sit beside the clock reset rather than inside the loop, and that placement is what
+  // makes them safe: `arc` is `sin(t·π)·…`, so on the first frame of every flight it is zero, and a
+  // mid-flight reversal starts on exactly that frame — a new arc cannot displace the box the re-aim
+  // just read. It only decides where the middle of the next arc goes.
+  flyBowX = drawBow()
+  flyBowY = drawBow()
   flyT0 = performance.now()
   flyFrame = requestAnimationFrame(flyStep)
 }
@@ -431,10 +449,18 @@ const flyStep = () => {
   // so launch and arrival stay mathematically exact (the mid-flight reversal re-aim and the 44px
   // landing assertions read those endpoints) and only the middle of the path arcs. Collapse (field →
   // sidebar, down-left) bows up-and-out; restore (sidebar → field) bows the other way off the line.
+  // The arc is this flight's own draw, so the path is never the one you saw on the last scroll.
   const arc = Math.sin(t * Math.PI) * ARC_BOW_PX
   const isCollapse = flyTarget === 'sidebar'
-  flyLeft.value = lerp(from.left, to.left, k) + (isCollapse ? arc * 0.8 : -arc * 0.6)
-  flyTop.value = lerp(from.top, to.top, k) - (isCollapse ? arc * 0.5 : 0)
+  // ponytail: no horizontal clamp — at 1.6 the widest bow is ~103px off the line and the desktop
+  // field/slot margins leave room for it; add one if the launcher ever ships narrower margins.
+  flyLeft.value = lerp(from.left, to.left, k) + arc * flyBowX * (isCollapse ? 0.8 : -0.6)
+  // The lift is drawn on its own axis, so a flight can arc over the line or dip under it. Bounded by
+  // the box's own headroom: a collapse starts with the field's top at 0, and lifting from there puts
+  // the flying icon ABOVE the viewport — it would disappear mid-flight and reappear. A negative draw
+  // dips below the line and needs no bound, hence min() rather than abs().
+  const headroom = Math.max(0, Math.min(from.top, to.top) - 4)
+  flyTop.value = lerp(from.top, to.top, k) - Math.min(arc * flyBowY * (isCollapse ? 0.5 : 0.35), headroom)
   flyW.value = lerp(from.width, to.width, k)
   flyH.value = lerp(from.height, to.height, k)
   flyRadius.value = `${Math.round(Math.min(flyW.value, flyH.value) / 2)}px`
@@ -443,7 +469,7 @@ const flyStep = () => {
   // the apex and funnels toward 0.90 on entry; the box banks into the turn (collapse leans left).
   const apex = Math.sin(t * Math.PI)
   const scale = 1 + (apex * 0.16) - (t * 0.10)
-  const tilt = isCollapse ? -apex * 10 : apex * 8
+  const tilt = (isCollapse ? -10 : 8) * apex * flyBowX
   flyTransform.value = `scale(${scale.toFixed(3)}) rotate(${tilt.toFixed(1)}deg)`
   flyShadow.value = `0 ${Math.round(apex * 25)}px ${Math.round(apex * 35)}px -6px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.12)`
   if (elapsed < FIELD_FLY_MS) { flyFrame = requestAnimationFrame(flyStep); return }
