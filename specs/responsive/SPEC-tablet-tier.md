@@ -41,16 +41,28 @@ target device) and a user-agent gate (this app answers media features, per the f
 
 Because every desktop/mobile swap in the app is a breakpoint class (`hidden lg:flex` / `lg:hidden`,
 `hidden lg:block`, `lg:h-screen`) with both mounts present in the DOM, the variant moves the whole
-tier — category dock, Contact CTA mount, share surface shape, cart and checkout frames — and no page,
-component or composable was edited.
+tier — category dock, Contact CTA mount, share surface shape, cart and checkout frames — and no page
+chooses a tier in JS.
+
+## Companion fix: the catalog control row has to be able to give room
+
+744 is the tier's floor, and it is the tightest desktop layout the site has: rail (176px) + row gap
+(40px) + container padding leave the listing column narrow, and the control row's min-content — the
+320px search launcher, a 24px gap, and a 241px count-and-sort group — exceeded it. The launcher was
+`shrink-0`, so it pushed the *page* sideways: **14px of horizontal overflow at 819 usable px**, which
+is the CI runner's 834 minus its classic scrollbar and invisible on a Mac, where overlay scrollbars
+cost nothing. The launcher shrinks now, which changes nothing at a width where the row already fits —
+the desktop keeps its 320px field. Sweeping 744 is what makes the floor a tested bound, not a claim.
 
 ## Acceptance
 
 - `the desktop dock is the only painted one at 834x1112` and `the phone dock is the only painted one
   at 956x440` (`scripts/verify-ui.mjs`), read as painted rects because the hidden mount has none.
 - `isDesktopTier()` in the harness restates the predicate so CSS is not its own oracle.
-- `CONTACT_INSET[834]` moved `0 → 32` and the sticky-bar assertion is keyed to the predicate: both
-  are the tier's own previous fingerprint, re-baselined in the same change.
+- `CONTACT_INSET` and `LOGO_STEP` gained a measured `744` row, `834` moved `0 → 32`, and the sticky-bar
+  assertion keys on the predicate: all three were the old tier's own fingerprint, re-baselined here.
+- `no horizontal overflow @744` is in the sweep, and the check prints the pixel amount — a red run
+  names its number instead of costing a rebuild to go and find one.
 
 ## Known gap (not fixed here)
 

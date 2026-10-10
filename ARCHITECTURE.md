@@ -740,6 +740,15 @@ Harness: `isDesktopTier()` in `scripts/verify-ui.mjs` restates the rule so a che
 intent disagree, `the desktop dock is the only painted one at …` locks the pair at 834x1112 and 956x440,
 and the `CONTACT_INSET` / sticky-bar assertions are keyed to that predicate.
 
+The tier's own floor is what made the catalog's control row a constraint: at 744px the desktop column is
+only so wide, and the search launcher (`data-search-anchor`, `lg:w-80`) sits in a flex row beside a
+241px count+sort group that is `shrink-0`. A rigid launcher therefore pushed the *page* sideways —
+measured as 14px of horizontal overflow at 819 usable px, which is the CI runner's 834 minus its classic
+scrollbar and invisible on a Mac, whose overlay scrollbars cost nothing. The launcher gives room instead
+(no `shrink-0`), which changes nothing at a width where the row already fits: the desktop keeps its 320px
+field. `verify` sweeps 744 and prints the overflow amount, so the next fixed-and-rigid control in this
+row is a number in a red run rather than a rebuild to go find one.
+
 | Must stay separate | Why merging would be wrong |
 |---|---|
 | Desktop vs mobile drag engines | mouse Y-axis + `grabOffsetY` vs touch X-axis with axis-lock detection, `scrollLeft` compensation, `preventDefault` only when `cancelable` |

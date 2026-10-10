@@ -266,9 +266,16 @@ useHead({ title: 'Raccoon Gear Bin | Gaming accessories' })
 
         <!-- Right Side: Search, Sort & Products -->
         <div class="min-w-0 flex-1">
-          <!-- Control group: one row from sm up, search and sort share the same 44px rhythm -->
+          <!-- Control group: one row from sm up, search and sort share the same 44px rhythm.
+             The launcher takes no `shrink-0`: at the tablet tier's lower bound the row's own
+             min-content (this box at `lg:w-80`, the 24 gap, and the 241px count+sort group) is wider
+             than the column leaves, and a rigid launcher pushes the *page* sideways — measured as 14px
+             of horizontal overflow at 819 CSS px of usable width (the runner's 834 minus its classic
+             scrollbar), which a Mac with overlay scrollbars cannot see. Letting it give room instead
+             fixed 819 and 744 both, and changes nothing at any width where the row already fits, so the
+             desktop design keeps its 320px field. `verify` sweeps 744 and prints the overflow amount. -->
           <div class="flex flex-col gap-3 border-b border-zinc-200/80 pb-5 dark:border-zinc-800/80 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-            <div data-search-anchor class="flex h-11 w-full shrink-0 items-center gap-2.5 rounded-full border border-zinc-200/80 bg-white pr-1.5 pl-4 shadow-xs sm:w-72 dark:border-zinc-800/80 dark:bg-zinc-900 lg:w-80">
+            <div data-search-anchor class="flex h-11 w-full items-center gap-2.5 rounded-full border border-zinc-200/80 bg-white pr-1.5 pl-4 shadow-xs sm:w-72 dark:border-zinc-800/80 dark:bg-zinc-900 lg:w-80">
               <span class="flex h-5 w-5 shrink-0 items-center justify-center text-zinc-400 dark:text-zinc-500">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4.5 w-4.5" aria-hidden="true">
                   <circle cx="11" cy="11" r="8" />

@@ -683,12 +683,13 @@ const run = async () => {
     };
   })()`
   // The emblem's Tailwind step per viewport: base / sm / md / lg / xl.
-  const LOGO_STEP = { 390: 96, 640: 112, 834: 112, 1024: 112, 1280: 128, 1440: 128 }
+  const LOGO_STEP = { 390: 96, 640: 112, 744: 112, 834: 112, 1024: 112, 1280: 128, 1440: 128 }
   // How far the contact pair lifts off each container margin: none until the desktop tier, where the
   // line is wide enough that pinning the two labels to the extremes stops reading as one pair.
-  // Keyed by width because every sweep row below pairs a width with a tall-enough height; `834` reads
-  // 32 for the same reason `1024` does — the tablet tier in main.css puts it on the desktop side.
-  const CONTACT_INSET = { 390: 0, 640: 0, 834: 32, 1024: 32, 1280: 48, 1440: 48 }
+  // Keyed by width because every sweep row below pairs a width with a tall-enough height; `744` and
+  // `834` read 32 for the same reason `1024` does — the tablet tier in main.css puts them on the
+  // desktop side. Both are measured on the pinned face below, not copied down from `1024`.
+  const CONTACT_INSET = { 390: 0, 640: 0, 744: 32, 834: 32, 1024: 32, 1280: 48, 1440: 48 }
   // `lg` is width *and* height now (main.css `@custom-variant lg`): 744px is an iPad mini portrait,
   // the 640px floor is what holds a sideways phone (956x440) out, and 1024px keeps its old meaning.
   // Restated here rather than read off the page so the two can disagree — a check that asks CSS what
@@ -1187,10 +1188,15 @@ const run = async () => {
     // override measures nothing.
     const MEASURE_STACK = "Arial, 'Liberation Sans', 'Helvetica Neue', 'Noto Sans Khmer', 'Khmer OS System', sans-serif"
     await ev(`document.body.style.fontFamily = ${JSON.stringify(MEASURE_STACK)}; true`)
-    for (const [w, h] of [[1440, 900], [1024, 900], [834, 1112], [640, 960], [390, 844]]) {
+    for (const [w, h] of [[1440, 900], [1024, 900], [834, 1112], [744, 1133], [640, 960], [390, 844]]) {
       await metrics(w, h, w < 500)
       await sleep(600)
-      check(`no horizontal overflow @${w}`, (await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')) <= 1)
+      // The number belongs in the failure: "it overflows" at a tablet width costs a full rebuild to
+      // even learn how many pixels, and a macOS Chrome with overlay scrollbars cannot reproduce a
+      // runner that spends 15px of width on a classic scrollbar. Same reason every other line here
+      // prints what it measured.
+      const over = await ev('document.documentElement.scrollWidth - document.documentElement.clientWidth')
+      check(`no horizontal overflow @${w}`, over <= 1, { w, h, over })
       const m = await ev(MASTHEAD_EXPR)
       const faults = mastheadFaults(m, w)
       // A red run has to say what it measured, not only which rule it broke: this line's geometry is
